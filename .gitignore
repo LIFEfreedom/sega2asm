@@ -11,3 +11,6 @@ sega2asm.exe
 game_symbols.txt
 game_symbols.gen.txt
 tools/clownassembler_asm68k.exe
+
+# промежуточная карта покрытия анализатора
+tools/.coverage.pkl

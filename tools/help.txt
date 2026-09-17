@@ -2,6 +2,7 @@ Dyna Brothers 2 — проект дизассемблирования
 
 Цели:
   tools     — собрать sega2asm.exe (нужен Go 1.21+)
+  analyze   — пересобрать game.yaml и символы из ROM (при смене game.gen)
   split     — разрезать game.gen по game.yaml в out/
   check     — проверить покрытие ROM и побайтовое совпадение .bin
   build     — собрать build/dynabrothers2.bin (нужен ассемблер, см. ниже)

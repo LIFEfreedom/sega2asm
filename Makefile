@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all symbols split check build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -70,6 +70,17 @@ tools: $(SEGA2ASM)
 
 $(SEGA2ASM): main.go go.mod $(wildcard */*.go) $(wildcard */*/*.go)
 	$(GO) build -o $(SEGA2ASM) .
+
+# ── Анализ ROM ───────────────────────────────────────────────────────────
+# Пересобирает game.yaml и game_symbols.gen.txt из самой ROM. Запускать при
+# смене game.gen; оба файла — производные, в них не правят.
+analyze:
+	$(PYTHON) $(TOOLS_DIR)/analyze.py
+
+# game_symbols.gen.txt в .gitignore, поэтому в свежем клоне его нет —
+# восстанавливаем анализатором, иначе сборка не стартует.
+$(GEN_SYMBOLS): $(ROM) $(TOOLS_DIR)/analyze.py
+	$(PYTHON) $(TOOLS_DIR)/analyze.py
 
 # ── Символы ──────────────────────────────────────────────────────────────
 symbols: $(SYMBOLS)
