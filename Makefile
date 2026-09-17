@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -106,6 +106,12 @@ check: $(MAIN_ASM)
 # Удобно прогонять после добавления имён: видно, где разбор продвинулся.
 codemap: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/codemap.py
+
+# Ищет bin-сегменты, которые на самом деле код: анализатор не находит то,
+# до чего добираются только через указатель на функцию. Находки правятся
+# в game.yaml вручную и обязательно сверяются побайтовой пересборкой.
+findcode:
+	@$(PYTHON) $(TOOLS_DIR)/findcode.py
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые

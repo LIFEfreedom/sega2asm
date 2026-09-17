@@ -520,10 +520,9 @@ segments:
     end:   0x006DAA
 
   - name: data_45
-    type: bin
+    type: m68k
     start: 0x006DAA
     end:   0x006DCA
-    subdir: code_data
 
   - name: code_46
     type: m68k
@@ -531,10 +530,9 @@ segments:
     end:   0x006E2E
 
   - name: data_46
-    type: bin
+    type: m68k
     start: 0x006E2E
     end:   0x006E92
-    subdir: code_data
 
   - name: code_47
     type: m68k
@@ -1532,10 +1530,9 @@ segments:
     end:   0x017E3E
 
   - name: data_137
-    type: bin
+    type: m68k
     start: 0x017E3E
     end:   0x017E62
-    subdir: code_data
 
   - name: code_138
     type: m68k
@@ -1543,10 +1540,9 @@ segments:
     end:   0x017EB2
 
   - name: data_138
-    type: bin
+    type: m68k
     start: 0x017EB2
     end:   0x017ED6
-    subdir: code_data
 
   - name: code_139
     type: m68k
@@ -2269,10 +2265,9 @@ segments:
     end:   0x0285B0
 
   - name: data_204
-    type: bin
+    type: m68k
     start: 0x0285B0
     end:   0x02866A
-    subdir: code_data
 
   - name: code_205
     type: m68k
@@ -2995,10 +2990,9 @@ segments:
     end:   0x0464A8
 
   - name: data_270
-    type: bin
+    type: m68k
     start: 0x0464A8
     end:   0x0465C2
-    subdir: code_data
 
   - name: code_271
     type: m68k
@@ -3017,8 +3011,13 @@ segments:
     end:   0x047D1A
 
   - name: data_272
-    type: bin
+    type: m68k
     start: 0x047D1A
+    end:   0x047F94
+
+  - name: data_272_tail
+    type: bin
+    start: 0x047F94
     end:   0x047FE2
     subdir: code_data
 
