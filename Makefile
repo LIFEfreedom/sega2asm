@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -112,6 +112,13 @@ codemap: $(MAIN_ASM)
 # в game.yaml вручную и обязательно сверяются побайтовой пересборкой.
 findcode:
 	@$(PYTHON) $(TOOLS_DIR)/findcode.py
+
+# Предлагает имена безымянным процедурам по механическим признакам тела.
+# Диапазон задаётся аргументами:  make nameprocs FROM=050000 TO=060000
+FROM ?= 000000
+TO   ?= 200000
+nameprocs:
+	@$(PYTHON) $(TOOLS_DIR)/nameprocs.py $(FROM) $(TO)
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые
