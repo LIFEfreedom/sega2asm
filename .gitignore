@@ -6,3 +6,8 @@ Altered Beast (USA, Europe).md
 build
 sega2asm.exe
 *.gen
+
+# склейка символов — артефакт, правится game_symbols.user.txt
+game_symbols.txt
+game_symbols.gen.txt
+tools/clownassembler_asm68k.exe

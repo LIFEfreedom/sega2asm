@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Сверка собранного ROM с оригиналом.
 
-    python tools/sha1check.py <built.bin> <expected-sha1> [original.gen]
+    python tools/sha1check.py <built.bin> <expected-sha1|config.yaml> [original.gen]
 
 При расхождении показывает первое различие и то, в каком сегменте game.yaml
 оно лежит — это сразу указывает, какой сегмент собрался не так.
 """
 import hashlib
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,7 +42,13 @@ def main():
     if len(sys.argv) < 3:
         print(__doc__)
         return 2
-    built_path, want = sys.argv[1], sys.argv[2].upper()
+    built_path, want = sys.argv[1], sys.argv[2]
+    # Ожидаемый хеш берём из конфига, а не из копии в Makefile: две копии
+    # разъезжаются, стоит подменить ROM.
+    if not re.fullmatch(r"[0-9A-Fa-f]{40}", want):
+        import yaml
+        want = yaml.safe_load(open(want, encoding="utf-8")).get("sha1", "")
+    want = want.upper()
     orig_path = sys.argv[3] if len(sys.argv) > 3 else None
 
     if not os.path.exists(built_path):
@@ -73,7 +80,12 @@ def main():
     n = min(len(built), len(orig))
     first = next((i for i in range(n) if built[i] != orig[i]), None)
     if first is None:
-        print("Общая часть совпадает; отличается только длина.")
+        if len(built) == len(orig):
+            print("Байты совпадают с %s — расходится только ОЖИДАЕМЫЙ хеш."
+                  % os.path.basename(orig_path))
+            print("Похоже, sha1 в конфиге устарел относительно самой ROM.")
+        else:
+            print("Общая часть совпадает; отличается только длина.")
         return 1
 
     diff = sum(1 for i in range(n) if built[i] != orig[i])

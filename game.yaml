@@ -1,8 +1,11 @@
-# Dyna Brothers 2 - Sega Channel Special (Japan)
-# CRI, 1995.APR — GM T-68063-00 — регион J — 2 621 440 байт (0x280000)
-# SRAM: $200001-$203FFF (odd bytes); контрольная сумма заголовка сходится
+# Dyna Brothers 2 (Japan) — CRI
+# Конфиг целиком выведен из ROM скриптом scratchpad/analyze.py: границы кода —
+# обход по потоку управления (векторы + таблица line-F $000690 + прологи
+# функций), а не разметка на глаз. В m68k попадает только подтверждённый код,
+# всё непокрытое вынесено в bin: только новый сегмент возвращает декодеру
+# выравнивание, подсказки этого не делают.
 name: dynabrothers2
-sha1: "8E10298DFFF521397F0E82D1787E701D6928750B"
+sha1: "0D6C3D9EB0CB9A56AB91B7507B09473B078E773C"
 
 options:
   platform: megadrive
@@ -14,304 +17,3907 @@ options:
   asset_path: assets
   build_path: build
   symbols_path: ./game_symbols.txt
-  charmap_path: ./game_charmap.tbl   # пока не создан, это допустимо
+  charmap_path: ./game_charmap.tbl
   header_output: true
   incbin: true
 
-# ── Границы получены обходом по потоку управления, а не на глаз ───────────
-# Засев: 53 точки (таблица векторов + 62 записи таблицы line-F $6BC),
-# затем прологи функций (48E7 movem.l / 4E56 link a6) для подпрограмм,
-# достижимых только косвенными вызовами.
-# Итог: 59 163 инструкции, 223 528 байт кода. Код кончается на $061B4E —
-# дальше 93 362 байта 0xFF. Последние инструкции перед границей:
-#   4C DF 0F 0F  movem.l (sp)+,d0-d3/a0-a3
-#   4E 75        rts
-# За границей во всей остальной ROM (2.2 МБ) обход находит 72 байта в
-# 4 обрывках по 10-30 байт — ложные срабатывания внутри графики. Кода там нет.
-#
-# ВАЖНО: hints НЕ ресинхронизируют дизассемблер — линейный проход считается
-# заранее, подсказка лишь подавляет вывод (segments/code.go:120-131). Поэтому
-# блоки данных вынесены в отдельные сегменты `bin`: только начало нового
-# сегмента возвращает декодеру выравнивание.
 segments:
-  # Заголовок ROM + таблица векторов 68000
+  # Тип `header` непригоден для пересборки: NUL-байты полей заголовка рвут
+  # лексер, а InitialSSP выводится как метка в RAM, которую никто не определяет.
   - name: header
-    type: header
+    type: bin
     start: 0x000000
     end:   0x000200
 
-  # Обработчики исключений и прерываний
-  - name: vector_handlers
-    type: m68k
-    start: 0x000200
-    end:   0x0006BC
-
-  # Таблица переходов диспетчера line-F ($000694):
-  #   move.w ($12,pc,d0.w),d0 / lea ($E,pc,d0.w),a0  ->  база $0006BC.
-  # Через эти трапы игра зовёт свой BIOS; в выводе они остаются как dc.w $FFxx.
-  - name: linef_jumptable
-    type: m68k
-    start: 0x0006BC
-    end:   0x000738
-    hints:
-      - offset: 0x0000
-        type: ptr_table_rel
-        length: 0x7C
-        base:  0x0006BC
-        label: LineFJumpTable
-
-  # ── Код и данные $000738-$061B4E ────────────────────────────────────────
-  # Блоки данных >= 0x800 байт вырезаны в `bin`; между ними — код.
-  # плотность кода по обходу: 89.4%
   - name: code_01
     type: m68k
-    start: 0x000738
-    end:   0x00220E
+    start: 0x000200
+    end:   0x000228
 
-  # плотность кода по обходу: 0.0%
   - name: data_01
     type: bin
-    start: 0x00220E
-    end:   0x003A0C
+    start: 0x000228
+    end:   0x000244
     subdir: code_data
 
-  # плотность кода по обходу: 68.2%
   - name: code_02
     type: m68k
-    start: 0x003A0C
-    end:   0x00E916
+    start: 0x000244
+    end:   0x00026C
 
-  # плотность кода по обходу: 0.0%
   - name: data_02
     type: bin
-    start: 0x00E916
-    end:   0x00F6C6
+    start: 0x00026C
+    end:   0x000288
     subdir: code_data
 
-  # плотность кода по обходу: 97.9%
   - name: code_03
     type: m68k
-    start: 0x00F6C6
-    end:   0x00FB92
+    start: 0x000288
+    end:   0x0002B0
 
-  # плотность кода по обходу: 0.0%
   - name: data_03
     type: bin
-    start: 0x00FB92
-    end:   0x013AF2
+    start: 0x0002B0
+    end:   0x0002CC
     subdir: code_data
 
-  # плотность кода по обходу: 84.7%
   - name: code_04
     type: m68k
-    start: 0x013AF2
-    end:   0x021260
+    start: 0x0002CC
+    end:   0x0002F4
 
-  # плотность кода по обходу: 0.0%
   - name: data_04
     type: bin
-    start: 0x021260
-    end:   0x021B70
+    start: 0x0002F4
+    end:   0x000310
     subdir: code_data
 
-  # плотность кода по обходу: 94.2%
   - name: code_05
     type: m68k
-    start: 0x021B70
-    end:   0x023AB2
+    start: 0x000310
+    end:   0x000372
 
-  # плотность кода по обходу: 0.0%
   - name: data_05
     type: bin
-    start: 0x023AB2
-    end:   0x024D68
+    start: 0x000372
+    end:   0x00038C
     subdir: code_data
 
-  # плотность кода по обходу: 67.2%
   - name: code_06
     type: m68k
-    start: 0x024D68
-    end:   0x028596
+    start: 0x00038C
+    end:   0x0004F8
 
-  # плотность кода по обходу: 0.0%
   - name: data_06
     type: bin
-    start: 0x028596
-    end:   0x02937E
+    start: 0x0004F8
+    end:   0x000508
     subdir: code_data
 
-  # плотность кода по обходу: 72.1%
   - name: code_07
     type: m68k
-    start: 0x02937E
-    end:   0x02E6D0
+    start: 0x000508
+    end:   0x000690
 
-  # плотность кода по обходу: 0.0%
   - name: data_07
     type: bin
-    start: 0x02E6D0
-    end:   0x02FC08
+    start: 0x000690
+    end:   0x000702
     subdir: code_data
 
-  # плотность кода по обходу: 80.2%
   - name: code_08
     type: m68k
-    start: 0x02FC08
-    end:   0x034984
+    start: 0x000702
+    end:   0x000790
 
-  # плотность кода по обходу: 0.0%
   - name: data_08
     type: bin
-    start: 0x034984
-    end:   0x03630A
+    start: 0x000790
+    end:   0x0007FC
     subdir: code_data
 
-  # плотность кода по обходу: 88.1%
   - name: code_09
     type: m68k
-    start: 0x03630A
-    end:   0x036D32
+    start: 0x0007FC
+    end:   0x000A50
 
-  # плотность кода по обходу: 0.0%
   - name: data_09
     type: bin
-    start: 0x036D32
-    end:   0x0384CC
+    start: 0x000A50
+    end:   0x000A64
     subdir: code_data
 
-  # плотность кода по обходу: 90.9%
   - name: code_10
     type: m68k
-    start: 0x0384CC
-    end:   0x03A21E
+    start: 0x000A64
+    end:   0x000A94
 
-  # плотность кода по обходу: 0.0%
   - name: data_10
     type: bin
-    start: 0x03A21E
-    end:   0x03CE72
+    start: 0x000A94
+    end:   0x000AB6
     subdir: code_data
 
-  # плотность кода по обходу: 92.7%
   - name: code_11
     type: m68k
-    start: 0x03CE72
-    end:   0x03DC2C
+    start: 0x000AB6
+    end:   0x000B68
 
-  # плотность кода по обходу: 0.0%
   - name: data_11
     type: bin
-    start: 0x03DC2C
-    end:   0x0412C0
+    start: 0x000B68
+    end:   0x000C18
     subdir: code_data
 
-  # плотность кода по обходу: 92.9%
   - name: code_12
     type: m68k
-    start: 0x0412C0
-    end:   0x043278
+    start: 0x000C18
+    end:   0x000D5A
 
-  # плотность кода по обходу: 0.0%
   - name: data_12
     type: bin
-    start: 0x043278
-    end:   0x043D54
+    start: 0x000D5A
+    end:   0x000D68
     subdir: code_data
 
-  # плотность кода по обходу: 92.9%
   - name: code_13
     type: m68k
-    start: 0x043D54
-    end:   0x0448F2
+    start: 0x000D68
+    end:   0x000E7C
 
-  # плотность кода по обходу: 0.0%
   - name: data_13
     type: bin
-    start: 0x0448F2
-    end:   0x04913E
+    start: 0x000E7C
+    end:   0x000E98
     subdir: code_data
 
-  # плотность кода по обходу: 81.4%
   - name: code_14
     type: m68k
-    start: 0x04913E
-    end:   0x04C332
+    start: 0x000E98
+    end:   0x001786
 
-  # плотность кода по обходу: 0.0%
   - name: data_14
     type: bin
-    start: 0x04C332
-    end:   0x04CB3C
+    start: 0x001786
+    end:   0x00178A
     subdir: code_data
 
-  # плотность кода по обходу: 91.2%
   - name: code_15
     type: m68k
-    start: 0x04CB3C
-    end:   0x04CD5C
+    start: 0x00178A
+    end:   0x0018F6
 
-  # плотность кода по обходу: 0.0%
   - name: data_15
     type: bin
-    start: 0x04CD5C
-    end:   0x04E26C
+    start: 0x0018F6
+    end:   0x001906
     subdir: code_data
 
-  # плотность кода по обходу: 91.1%
   - name: code_16
     type: m68k
-    start: 0x04E26C
-    end:   0x04F1A8
+    start: 0x001906
+    end:   0x001936
 
-  # плотность кода по обходу: 0.0%
   - name: data_16
     type: bin
-    start: 0x04F1A8
-    end:   0x0507E2
+    start: 0x001936
+    end:   0x001A08
     subdir: code_data
 
-  # плотность кода по обходу: 99.0%
   - name: code_17
     type: m68k
-    start: 0x0507E2
-    end:   0x051EEE
+    start: 0x001A08
+    end:   0x001C16
 
-  # плотность кода по обходу: 0.0%
   - name: data_17
     type: bin
-    start: 0x051EEE
-    end:   0x052742
+    start: 0x001C16
+    end:   0x001C54
     subdir: code_data
 
-  # плотность кода по обходу: 80.1%
   - name: code_18
     type: m68k
-    start: 0x052742
-    end:   0x05F9CA
+    start: 0x001C54
+    end:   0x001F36
 
-  # плотность кода по обходу: 0.0%
   - name: data_18
     type: bin
-    start: 0x05F9CA
-    end:   0x060CFA
+    start: 0x001F36
+    end:   0x003734
     subdir: code_data
 
-  # плотность кода по обходу: 86.5%
   - name: code_19
     type: m68k
-    start: 0x060CFA
-    end:   0x061B4E
+    start: 0x003734
+    end:   0x0037A8
 
-  # ── За кодом ────────────────────────────────────────────────────────────
-  # 93 362 байта 0xFF — выравнивание до границы банка $078800
-  - name: padding_after_code
+  - name: data_19
     type: bin
-    start: 0x061B4E
-    end:   0x078800
+    start: 0x0037A8
+    end:   0x0037AE
+    subdir: code_data
 
-  # Ресурсы: графика, карты, звук. Сжатие не опознано
-  # (`sega2asm detect` не нашёл ни одной из 31 сигнатуры).
-  - name: assets
+  - name: code_20
+    type: m68k
+    start: 0x0037AE
+    end:   0x003810
+
+  - name: data_20
     type: bin
-    start: 0x078800
-    end:   0x280000
+    start: 0x003810
+    end:   0x003826
+    subdir: code_data
+
+  - name: code_21
+    type: m68k
+    start: 0x003826
+    end:   0x00383A
+
+  - name: data_21
+    type: bin
+    start: 0x00383A
+    end:   0x003846
+    subdir: code_data
+
+  - name: code_22
+    type: m68k
+    start: 0x003846
+    end:   0x0039D8
+
+  - name: data_22
+    type: bin
+    start: 0x0039D8
+    end:   0x003A24
+    subdir: code_data
+
+  - name: code_23
+    type: m68k
+    start: 0x003A24
+    end:   0x003D2C
+
+  - name: data_23
+    type: bin
+    start: 0x003D2C
+    end:   0x003E60
+    subdir: code_data
+
+  - name: code_24
+    type: m68k
+    start: 0x003E60
+    end:   0x003E86
+
+  - name: data_24
+    type: bin
+    start: 0x003E86
+    end:   0x003EF4
+    subdir: code_data
+
+  - name: code_25
+    type: m68k
+    start: 0x003EF4
+    end:   0x003F78
+
+  - name: data_25
+    type: bin
+    start: 0x003F78
+    end:   0x003F88
+    subdir: code_data
+
+  - name: code_26
+    type: m68k
+    start: 0x003F88
+    end:   0x0041AA
+
+  - name: data_26
+    type: bin
+    start: 0x0041AA
+    end:   0x0041B2
+    subdir: code_data
+
+  - name: code_27
+    type: m68k
+    start: 0x0041B2
+    end:   0x00442E
+
+  - name: data_27
+    type: bin
+    start: 0x00442E
+    end:   0x00459C
+    subdir: code_data
+
+  - name: code_28
+    type: m68k
+    start: 0x00459C
+    end:   0x0045B8
+
+  - name: data_28
+    type: bin
+    start: 0x0045B8
+    end:   0x00478A
+    subdir: code_data
+
+  - name: code_29
+    type: m68k
+    start: 0x00478A
+    end:   0x0047D8
+
+  - name: data_29
+    type: bin
+    start: 0x0047D8
+    end:   0x0047E6
+    subdir: code_data
+
+  - name: code_30
+    type: m68k
+    start: 0x0047E6
+    end:   0x004800
+
+  - name: data_30
+    type: bin
+    start: 0x004800
+    end:   0x004AB2
+    subdir: code_data
+
+  - name: code_31
+    type: m68k
+    start: 0x004AB2
+    end:   0x004BFC
+
+  - name: data_31
+    type: bin
+    start: 0x004BFC
+    end:   0x004BFE
+    subdir: code_data
+
+  - name: code_32
+    type: m68k
+    start: 0x004BFE
+    end:   0x004CF0
+
+  - name: data_32
+    type: bin
+    start: 0x004CF0
+    end:   0x004D00
+    subdir: code_data
+
+  - name: code_33
+    type: m68k
+    start: 0x004D00
+    end:   0x004F18
+
+  - name: data_33
+    type: bin
+    start: 0x004F18
+    end:   0x004F96
+    subdir: code_data
+
+  - name: code_34
+    type: m68k
+    start: 0x004F96
+    end:   0x00529E
+
+  - name: data_34
+    type: bin
+    start: 0x00529E
+    end:   0x0052F2
+    subdir: code_data
+
+  - name: code_35
+    type: m68k
+    start: 0x0052F2
+    end:   0x00541C
+
+  - name: data_35
+    type: bin
+    start: 0x00541C
+    end:   0x005430
+    subdir: code_data
+
+  - name: code_36
+    type: m68k
+    start: 0x005430
+    end:   0x00558A
+
+  - name: data_36
+    type: bin
+    start: 0x00558A
+    end:   0x00568A
+    subdir: code_data
+
+  - name: code_37
+    type: m68k
+    start: 0x00568A
+    end:   0x0058AE
+
+  - name: data_37
+    type: bin
+    start: 0x0058AE
+    end:   0x0058BA
+    subdir: code_data
+
+  - name: code_38
+    type: m68k
+    start: 0x0058BA
+    end:   0x0058C8
+
+  - name: data_38
+    type: bin
+    start: 0x0058C8
+    end:   0x0058D8
+    subdir: code_data
+
+  - name: code_39
+    type: m68k
+    start: 0x0058D8
+    end:   0x005BAA
+
+  - name: data_39
+    type: bin
+    start: 0x005BAA
+    end:   0x005BBC
+    subdir: code_data
+
+  - name: code_40
+    type: m68k
+    start: 0x005BBC
+    end:   0x005DD6
+
+  - name: data_40
+    type: bin
+    start: 0x005DD6
+    end:   0x00620E
+    subdir: code_data
+
+  - name: code_41
+    type: m68k
+    start: 0x00620E
+    end:   0x006492
+
+  - name: data_41
+    type: bin
+    start: 0x006492
+    end:   0x006546
+    subdir: code_data
+
+  - name: code_42
+    type: m68k
+    start: 0x006546
+    end:   0x006722
+
+  - name: data_42
+    type: bin
+    start: 0x006722
+    end:   0x006732
+    subdir: code_data
+
+  - name: code_43
+    type: m68k
+    start: 0x006732
+    end:   0x00676C
+
+  - name: data_43
+    type: bin
+    start: 0x00676C
+    end:   0x00677C
+    subdir: code_data
+
+  - name: code_44
+    type: m68k
+    start: 0x00677C
+    end:   0x00687E
+
+  - name: data_44
+    type: bin
+    start: 0x00687E
+    end:   0x0068A6
+    subdir: code_data
+
+  - name: code_45
+    type: m68k
+    start: 0x0068A6
+    end:   0x006DAA
+
+  - name: data_45
+    type: bin
+    start: 0x006DAA
+    end:   0x006DCA
+    subdir: code_data
+
+  - name: code_46
+    type: m68k
+    start: 0x006DCA
+    end:   0x006E2E
+
+  - name: data_46
+    type: bin
+    start: 0x006E2E
+    end:   0x006E92
+    subdir: code_data
+
+  - name: code_47
+    type: m68k
+    start: 0x006E92
+    end:   0x006EC4
+
+  - name: data_47
+    type: bin
+    start: 0x006EC4
+    end:   0x006EE2
+    subdir: code_data
+
+  - name: code_48
+    type: m68k
+    start: 0x006EE2
+    end:   0x0071C0
+
+  - name: data_48
+    type: bin
+    start: 0x0071C0
+    end:   0x0071D0
+    subdir: code_data
+
+  - name: code_49
+    type: m68k
+    start: 0x0071D0
+    end:   0x00727E
+
+  - name: data_49
+    type: bin
+    start: 0x00727E
+    end:   0x007304
+    subdir: code_data
+
+  - name: code_50
+    type: m68k
+    start: 0x007304
+    end:   0x007586
+
+  - name: data_50
+    type: bin
+    start: 0x007586
+    end:   0x007604
+    subdir: code_data
+
+  - name: code_51
+    type: m68k
+    start: 0x007604
+    end:   0x007634
+
+  - name: data_51
+    type: bin
+    start: 0x007634
+    end:   0x007672
+    subdir: code_data
+
+  - name: code_52
+    type: m68k
+    start: 0x007672
+    end:   0x0077F2
+
+  - name: data_52
+    type: bin
+    start: 0x0077F2
+    end:   0x0077F4
+    subdir: code_data
+
+  - name: code_53
+    type: m68k
+    start: 0x0077F4
+    end:   0x007BE6
+
+  - name: data_53
+    type: bin
+    start: 0x007BE6
+    end:   0x007C4C
+    subdir: code_data
+
+  - name: code_54
+    type: m68k
+    start: 0x007C4C
+    end:   0x007C6A
+
+  - name: data_54
+    type: bin
+    start: 0x007C6A
+    end:   0x007D18
+    subdir: code_data
+
+  - name: code_55
+    type: m68k
+    start: 0x007D18
+    end:   0x007D62
+
+  - name: data_55
+    type: bin
+    start: 0x007D62
+    end:   0x007DEE
+    subdir: code_data
+
+  - name: code_56
+    type: m68k
+    start: 0x007DEE
+    end:   0x007E24
+
+  - name: data_56
+    type: bin
+    start: 0x007E24
+    end:   0x0080F8
+    subdir: code_data
+
+  - name: code_57
+    type: m68k
+    start: 0x0080F8
+    end:   0x00813A
+
+  - name: data_57
+    type: bin
+    start: 0x00813A
+    end:   0x0081DC
+    subdir: code_data
+
+  - name: code_58
+    type: m68k
+    start: 0x0081DC
+    end:   0x008246
+
+  - name: data_58
+    type: bin
+    start: 0x008246
+    end:   0x008284
+    subdir: code_data
+
+  - name: code_59
+    type: m68k
+    start: 0x008284
+    end:   0x0082A2
+
+  - name: data_59
+    type: bin
+    start: 0x0082A2
+    end:   0x008392
+    subdir: code_data
+
+  - name: code_60
+    type: m68k
+    start: 0x008392
+    end:   0x008428
+
+  - name: data_60
+    type: bin
+    start: 0x008428
+    end:   0x0084F8
+    subdir: code_data
+
+  - name: code_61
+    type: m68k
+    start: 0x0084F8
+    end:   0x00868A
+
+  - name: data_61
+    type: bin
+    start: 0x00868A
+    end:   0x0086AA
+    subdir: code_data
+
+  - name: code_62
+    type: m68k
+    start: 0x0086AA
+    end:   0x008706
+
+  - name: data_62
+    type: bin
+    start: 0x008706
+    end:   0x008A7A
+    subdir: code_data
+
+  - name: code_63
+    type: m68k
+    start: 0x008A7A
+    end:   0x008A98
+
+  - name: data_63
+    type: bin
+    start: 0x008A98
+    end:   0x008B6C
+    subdir: code_data
+
+  - name: code_64
+    type: m68k
+    start: 0x008B6C
+    end:   0x008BDC
+
+  - name: data_64
+    type: bin
+    start: 0x008BDC
+    end:   0x008C16
+    subdir: code_data
+
+  - name: code_65
+    type: m68k
+    start: 0x008C16
+    end:   0x008C74
+
+  - name: data_65
+    type: bin
+    start: 0x008C74
+    end:   0x0091FC
+    subdir: code_data
+
+  - name: code_66
+    type: m68k
+    start: 0x0091FC
+    end:   0x00921C
+
+  - name: data_66
+    type: bin
+    start: 0x00921C
+    end:   0x009362
+    subdir: code_data
+
+  - name: code_67
+    type: m68k
+    start: 0x009362
+    end:   0x009398
+
+  - name: data_67
+    type: bin
+    start: 0x009398
+    end:   0x0093D4
+    subdir: code_data
+
+  - name: code_68
+    type: m68k
+    start: 0x0093D4
+    end:   0x00942C
+
+  - name: data_68
+    type: bin
+    start: 0x00942C
+    end:   0x009514
+    subdir: code_data
+
+  - name: code_69
+    type: m68k
+    start: 0x009514
+    end:   0x009614
+
+  - name: data_69
+    type: bin
+    start: 0x009614
+    end:   0x0097BC
+    subdir: code_data
+
+  - name: code_70
+    type: m68k
+    start: 0x0097BC
+    end:   0x0098CA
+
+  - name: data_70
+    type: bin
+    start: 0x0098CA
+    end:   0x009AAC
+    subdir: code_data
+
+  - name: code_71
+    type: m68k
+    start: 0x009AAC
+    end:   0x009B86
+
+  - name: data_71
+    type: bin
+    start: 0x009B86
+    end:   0x009B8C
+    subdir: code_data
+
+  - name: code_72
+    type: m68k
+    start: 0x009B8C
+    end:   0x009E00
+
+  - name: data_72
+    type: bin
+    start: 0x009E00
+    end:   0x009E08
+    subdir: code_data
+
+  - name: code_73
+    type: m68k
+    start: 0x009E08
+    end:   0x009F70
+
+  - name: data_73
+    type: bin
+    start: 0x009F70
+    end:   0x009F90
+    subdir: code_data
+
+  - name: code_74
+    type: m68k
+    start: 0x009F90
+    end:   0x00A05A
+
+  - name: data_74
+    type: bin
+    start: 0x00A05A
+    end:   0x00A062
+    subdir: code_data
+
+  - name: code_75
+    type: m68k
+    start: 0x00A062
+    end:   0x00A1F8
+
+  - name: data_75
+    type: bin
+    start: 0x00A1F8
+    end:   0x00A336
+    subdir: code_data
+
+  - name: code_76
+    type: m68k
+    start: 0x00A336
+    end:   0x00A5F8
+
+  - name: data_76
+    type: bin
+    start: 0x00A5F8
+    end:   0x00A608
+    subdir: code_data
+
+  - name: code_77
+    type: m68k
+    start: 0x00A608
+    end:   0x00A762
+
+  - name: data_77
+    type: bin
+    start: 0x00A762
+    end:   0x00A76A
+    subdir: code_data
+
+  - name: code_78
+    type: m68k
+    start: 0x00A76A
+    end:   0x00A7F8
+
+  - name: data_78
+    type: bin
+    start: 0x00A7F8
+    end:   0x00A7FC
+    subdir: code_data
+
+  - name: code_79
+    type: m68k
+    start: 0x00A7FC
+    end:   0x00A92A
+
+  - name: data_79
+    type: bin
+    start: 0x00A92A
+    end:   0x00A9A0
+    subdir: code_data
+
+  - name: code_80
+    type: m68k
+    start: 0x00A9A0
+    end:   0x00A9AC
+
+  - name: data_80
+    type: bin
+    start: 0x00A9AC
+    end:   0x00A9AE
+    subdir: code_data
+
+  - name: code_81
+    type: m68k
+    start: 0x00A9AE
+    end:   0x00B008
+
+  - name: data_81
+    type: bin
+    start: 0x00B008
+    end:   0x00B048
+    subdir: code_data
+
+  - name: code_82
+    type: m68k
+    start: 0x00B048
+    end:   0x00B526
+
+  - name: data_82
+    type: bin
+    start: 0x00B526
+    end:   0x00B742
+    subdir: code_data
+
+  - name: code_83
+    type: m68k
+    start: 0x00B742
+    end:   0x00B934
+
+  - name: data_83
+    type: bin
+    start: 0x00B934
+    end:   0x00B944
+    subdir: code_data
+
+  - name: code_84
+    type: m68k
+    start: 0x00B944
+    end:   0x00B9FE
+
+  - name: data_84
+    type: bin
+    start: 0x00B9FE
+    end:   0x00BD64
+    subdir: code_data
+
+  - name: code_85
+    type: m68k
+    start: 0x00BD64
+    end:   0x00BE32
+
+  - name: data_85
+    type: bin
+    start: 0x00BE32
+    end:   0x00BE36
+    subdir: code_data
+
+  - name: code_86
+    type: m68k
+    start: 0x00BE36
+    end:   0x00C304
+
+  - name: data_86
+    type: bin
+    start: 0x00C304
+    end:   0x00C36C
+    subdir: code_data
+
+  - name: code_87
+    type: m68k
+    start: 0x00C36C
+    end:   0x00C3FC
+
+  - name: data_87
+    type: bin
+    start: 0x00C3FC
+    end:   0x00C468
+    subdir: code_data
+
+  - name: code_88
+    type: m68k
+    start: 0x00C468
+    end:   0x00C814
+
+  - name: data_88
+    type: bin
+    start: 0x00C814
+    end:   0x00C856
+    subdir: code_data
+
+  - name: code_89
+    type: m68k
+    start: 0x00C856
+    end:   0x00C968
+
+  - name: data_89
+    type: bin
+    start: 0x00C968
+    end:   0x00CA16
+    subdir: code_data
+
+  - name: code_90
+    type: m68k
+    start: 0x00CA16
+    end:   0x00CF86
+
+  - name: data_90
+    type: bin
+    start: 0x00CF86
+    end:   0x00D178
+    subdir: code_data
+
+  - name: code_91
+    type: m68k
+    start: 0x00D178
+    end:   0x00DCB2
+
+  - name: data_91
+    type: bin
+    start: 0x00DCB2
+    end:   0x00DE46
+    subdir: code_data
+
+  - name: code_92
+    type: m68k
+    start: 0x00DE46
+    end:   0x00E316
+
+  - name: data_92
+    type: bin
+    start: 0x00E316
+    end:   0x00E328
+    subdir: code_data
+
+  - name: code_93
+    type: m68k
+    start: 0x00E328
+    end:   0x00E38E
+
+  - name: data_93
+    type: bin
+    start: 0x00E38E
+    end:   0x00E4A2
+    subdir: code_data
+
+  - name: code_94
+    type: m68k
+    start: 0x00E4A2
+    end:   0x00E4D4
+
+  - name: data_94
+    type: bin
+    start: 0x00E4D4
+    end:   0x00E4F6
+    subdir: code_data
+
+  - name: code_95
+    type: m68k
+    start: 0x00E4F6
+    end:   0x00E52E
+
+  - name: data_95
+    type: bin
+    start: 0x00E52E
+    end:   0x00F2B8
+    subdir: code_data
+
+  - name: code_96
+    type: m68k
+    start: 0x00F2B8
+    end:   0x00F562
+
+  - name: data_96
+    type: bin
+    start: 0x00F562
+    end:   0x00F564
+    subdir: code_data
+
+  - name: code_97
+    type: m68k
+    start: 0x00F564
+    end:   0x00F58E
+
+  - name: data_97
+    type: bin
+    start: 0x00F58E
+    end:   0x00F594
+    subdir: code_data
+
+  - name: code_98
+    type: m68k
+    start: 0x00F594
+    end:   0x00F726
+
+  - name: data_98
+    type: bin
+    start: 0x00F726
+    end:   0x00F738
+    subdir: code_data
+
+  - name: code_99
+    type: m68k
+    start: 0x00F738
+    end:   0x00F784
+
+  - name: data_99
+    type: bin
+    start: 0x00F784
+    end:   0x0136D6
+    subdir: code_data
+
+  - name: code_100
+    type: m68k
+    start: 0x0136D6
+    end:   0x0136F2
+
+  - name: data_100
+    type: bin
+    start: 0x0136F2
+    end:   0x013806
+    subdir: code_data
+
+  - name: code_101
+    type: m68k
+    start: 0x013806
+    end:   0x013834
+
+  - name: data_101
+    type: bin
+    start: 0x013834
+    end:   0x013846
+    subdir: code_data
+
+  - name: code_102
+    type: m68k
+    start: 0x013846
+    end:   0x0138E2
+
+  - name: data_102
+    type: bin
+    start: 0x0138E2
+    end:   0x0138E8
+    subdir: code_data
+
+  - name: code_103
+    type: m68k
+    start: 0x0138E8
+    end:   0x0139B4
+
+  - name: data_103
+    type: bin
+    start: 0x0139B4
+    end:   0x013A20
+    subdir: code_data
+
+  - name: code_104
+    type: m68k
+    start: 0x013A20
+    end:   0x013A4E
+
+  - name: data_104
+    type: bin
+    start: 0x013A4E
+    end:   0x013A58
+    subdir: code_data
+
+  - name: code_105
+    type: m68k
+    start: 0x013A58
+    end:   0x013AAE
+
+  - name: data_105
+    type: bin
+    start: 0x013AAE
+    end:   0x013B56
+    subdir: code_data
+
+  - name: code_106
+    type: m68k
+    start: 0x013B56
+    end:   0x013B84
+
+  - name: data_106
+    type: bin
+    start: 0x013B84
+    end:   0x013B92
+    subdir: code_data
+
+  - name: code_107
+    type: m68k
+    start: 0x013B92
+    end:   0x013BE8
+
+  - name: data_107
+    type: bin
+    start: 0x013BE8
+    end:   0x013C66
+    subdir: code_data
+
+  - name: code_108
+    type: m68k
+    start: 0x013C66
+    end:   0x013CD4
+
+  - name: data_108
+    type: bin
+    start: 0x013CD4
+    end:   0x013CDA
+    subdir: code_data
+
+  - name: code_109
+    type: m68k
+    start: 0x013CDA
+    end:   0x013DFA
+
+  - name: data_109
+    type: bin
+    start: 0x013DFA
+    end:   0x013E00
+    subdir: code_data
+
+  - name: code_110
+    type: m68k
+    start: 0x013E00
+    end:   0x013F16
+
+  - name: data_110
+    type: bin
+    start: 0x013F16
+    end:   0x014014
+    subdir: code_data
+
+  - name: code_111
+    type: m68k
+    start: 0x014014
+    end:   0x014042
+
+  - name: data_111
+    type: bin
+    start: 0x014042
+    end:   0x014052
+    subdir: code_data
+
+  - name: code_112
+    type: m68k
+    start: 0x014052
+    end:   0x0140A8
+
+  - name: data_112
+    type: bin
+    start: 0x0140A8
+    end:   0x014174
+    subdir: code_data
+
+  - name: code_113
+    type: m68k
+    start: 0x014174
+    end:   0x01420A
+
+  - name: data_113
+    type: bin
+    start: 0x01420A
+    end:   0x014210
+    subdir: code_data
+
+  - name: code_114
+    type: m68k
+    start: 0x014210
+    end:   0x0144C2
+
+  - name: data_114
+    type: bin
+    start: 0x0144C2
+    end:   0x0144D2
+    subdir: code_data
+
+  - name: code_115
+    type: m68k
+    start: 0x0144D2
+    end:   0x0144F4
+
+  - name: data_115
+    type: bin
+    start: 0x0144F4
+    end:   0x0145A2
+    subdir: code_data
+
+  - name: code_116
+    type: m68k
+    start: 0x0145A2
+    end:   0x014B06
+
+  - name: data_116
+    type: bin
+    start: 0x014B06
+    end:   0x014B36
+    subdir: code_data
+
+  - name: code_117
+    type: m68k
+    start: 0x014B36
+    end:   0x014C42
+
+  - name: data_117
+    type: bin
+    start: 0x014C42
+    end:   0x014C52
+    subdir: code_data
+
+  - name: code_118
+    type: m68k
+    start: 0x014C52
+    end:   0x014FB8
+
+  - name: data_118
+    type: bin
+    start: 0x014FB8
+    end:   0x014FC8
+    subdir: code_data
+
+  - name: code_119
+    type: m68k
+    start: 0x014FC8
+    end:   0x014FFE
+
+  - name: data_119
+    type: bin
+    start: 0x014FFE
+    end:   0x015096
+    subdir: code_data
+
+  - name: code_120
+    type: m68k
+    start: 0x015096
+    end:   0x01509E
+
+  - name: data_120
+    type: bin
+    start: 0x01509E
+    end:   0x0151B2
+    subdir: code_data
+
+  - name: code_121
+    type: m68k
+    start: 0x0151B2
+    end:   0x0155CC
+
+  - name: data_121
+    type: bin
+    start: 0x0155CC
+    end:   0x015644
+    subdir: code_data
+
+  - name: code_122
+    type: m68k
+    start: 0x015644
+    end:   0x015650
+
+  - name: data_122
+    type: bin
+    start: 0x015650
+    end:   0x015676
+    subdir: code_data
+
+  - name: code_123
+    type: m68k
+    start: 0x015676
+    end:   0x015682
+
+  - name: data_123
+    type: bin
+    start: 0x015682
+    end:   0x0156C2
+    subdir: code_data
+
+  - name: code_124
+    type: m68k
+    start: 0x0156C2
+    end:   0x015870
+
+  - name: data_124
+    type: bin
+    start: 0x015870
+    end:   0x015890
+    subdir: code_data
+
+  - name: code_125
+    type: m68k
+    start: 0x015890
+    end:   0x015A68
+
+  - name: data_125
+    type: bin
+    start: 0x015A68
+    end:   0x015A80
+    subdir: code_data
+
+  - name: code_126
+    type: m68k
+    start: 0x015A80
+    end:   0x015C56
+
+  - name: data_126
+    type: bin
+    start: 0x015C56
+    end:   0x015C86
+    subdir: code_data
+
+  - name: code_127
+    type: m68k
+    start: 0x015C86
+    end:   0x015D10
+
+  - name: data_127
+    type: bin
+    start: 0x015D10
+    end:   0x015D18
+    subdir: code_data
+
+  - name: code_128
+    type: m68k
+    start: 0x015D18
+    end:   0x015E7A
+
+  - name: data_128
+    type: bin
+    start: 0x015E7A
+    end:   0x01602E
+    subdir: code_data
+
+  - name: code_129
+    type: m68k
+    start: 0x01602E
+    end:   0x016150
+
+  - name: data_129
+    type: bin
+    start: 0x016150
+    end:   0x016192
+    subdir: code_data
+
+  - name: code_130
+    type: m68k
+    start: 0x016192
+    end:   0x0165A0
+
+  - name: data_130
+    type: bin
+    start: 0x0165A0
+    end:   0x0166B2
+    subdir: code_data
+
+  - name: code_131
+    type: m68k
+    start: 0x0166B2
+    end:   0x0167AA
+
+  - name: data_131
+    type: bin
+    start: 0x0167AA
+    end:   0x0167B0
+    subdir: code_data
+
+  - name: code_132
+    type: m68k
+    start: 0x0167B0
+    end:   0x0167C2
+
+  - name: data_132
+    type: bin
+    start: 0x0167C2
+    end:   0x0167C6
+    subdir: code_data
+
+  - name: code_133
+    type: m68k
+    start: 0x0167C6
+    end:   0x0167CC
+
+  - name: data_133
+    type: bin
+    start: 0x0167CC
+    end:   0x0168B4
+    subdir: code_data
+
+  - name: code_134
+    type: m68k
+    start: 0x0168B4
+    end:   0x01694E
+
+  - name: data_134
+    type: bin
+    start: 0x01694E
+    end:   0x016976
+    subdir: code_data
+
+  - name: code_135
+    type: m68k
+    start: 0x016976
+    end:   0x016AF4
+
+  - name: data_135
+    type: bin
+    start: 0x016AF4
+    end:   0x016BEC
+    subdir: code_data
+
+  - name: code_136
+    type: m68k
+    start: 0x016BEC
+    end:   0x016BF2
+
+  - name: data_136
+    type: bin
+    start: 0x016BF2
+    end:   0x016C2E
+    subdir: code_data
+
+  - name: code_137
+    type: m68k
+    start: 0x016C2E
+    end:   0x017E3E
+
+  - name: data_137
+    type: bin
+    start: 0x017E3E
+    end:   0x017E62
+    subdir: code_data
+
+  - name: code_138
+    type: m68k
+    start: 0x017E62
+    end:   0x017EB2
+
+  - name: data_138
+    type: bin
+    start: 0x017EB2
+    end:   0x017ED6
+    subdir: code_data
+
+  - name: code_139
+    type: m68k
+    start: 0x017ED6
+    end:   0x018872
+
+  - name: data_139
+    type: bin
+    start: 0x018872
+    end:   0x01887C
+    subdir: code_data
+
+  - name: code_140
+    type: m68k
+    start: 0x01887C
+    end:   0x018C32
+
+  - name: data_140
+    type: bin
+    start: 0x018C32
+    end:   0x018C3A
+    subdir: code_data
+
+  - name: code_141
+    type: m68k
+    start: 0x018C3A
+    end:   0x019436
+
+  - name: data_141
+    type: bin
+    start: 0x019436
+    end:   0x019442
+    subdir: code_data
+
+  - name: code_142
+    type: m68k
+    start: 0x019442
+    end:   0x019AC4
+
+  - name: data_142
+    type: bin
+    start: 0x019AC4
+    end:   0x019B08
+    subdir: code_data
+
+  - name: code_143
+    type: m68k
+    start: 0x019B08
+    end:   0x019B4A
+
+  - name: data_143
+    type: bin
+    start: 0x019B4A
+    end:   0x019BE0
+    subdir: code_data
+
+  - name: code_144
+    type: m68k
+    start: 0x019BE0
+    end:   0x019BF4
+
+  - name: data_144
+    type: bin
+    start: 0x019BF4
+    end:   0x019C72
+    subdir: code_data
+
+  - name: code_145
+    type: m68k
+    start: 0x019C72
+    end:   0x019EE6
+
+  - name: data_145
+    type: bin
+    start: 0x019EE6
+    end:   0x019F06
+    subdir: code_data
+
+  - name: code_146
+    type: m68k
+    start: 0x019F06
+    end:   0x01AB3C
+
+  - name: data_146
+    type: bin
+    start: 0x01AB3C
+    end:   0x01ABA0
+    subdir: code_data
+
+  - name: code_147
+    type: m68k
+    start: 0x01ABA0
+    end:   0x01AC34
+
+  - name: data_147
+    type: bin
+    start: 0x01AC34
+    end:   0x01AC90
+    subdir: code_data
+
+  - name: code_148
+    type: m68k
+    start: 0x01AC90
+    end:   0x01ACBE
+
+  - name: data_148
+    type: bin
+    start: 0x01ACBE
+    end:   0x01ACCA
+    subdir: code_data
+
+  - name: code_149
+    type: m68k
+    start: 0x01ACCA
+    end:   0x01B2EC
+
+  - name: data_149
+    type: bin
+    start: 0x01B2EC
+    end:   0x01B2F4
+    subdir: code_data
+
+  - name: code_150
+    type: m68k
+    start: 0x01B2F4
+    end:   0x01BA58
+
+  - name: data_150
+    type: bin
+    start: 0x01BA58
+    end:   0x01BAA4
+    subdir: code_data
+
+  - name: code_151
+    type: m68k
+    start: 0x01BAA4
+    end:   0x01BCC6
+
+  - name: data_151
+    type: bin
+    start: 0x01BCC6
+    end:   0x01BD9A
+    subdir: code_data
+
+  - name: code_152
+    type: m68k
+    start: 0x01BD9A
+    end:   0x01C3FE
+
+  - name: data_152
+    type: bin
+    start: 0x01C3FE
+    end:   0x01C406
+    subdir: code_data
+
+  - name: code_153
+    type: m68k
+    start: 0x01C406
+    end:   0x01C600
+
+  - name: data_153
+    type: bin
+    start: 0x01C600
+    end:   0x01C610
+    subdir: code_data
+
+  - name: code_154
+    type: m68k
+    start: 0x01C610
+    end:   0x01C844
+
+  - name: data_154
+    type: bin
+    start: 0x01C844
+    end:   0x01C848
+    subdir: code_data
+
+  - name: code_155
+    type: m68k
+    start: 0x01C848
+    end:   0x01CE60
+
+  - name: data_155
+    type: bin
+    start: 0x01CE60
+    end:   0x01CE68
+    subdir: code_data
+
+  - name: code_156
+    type: m68k
+    start: 0x01CE68
+    end:   0x01CEA4
+
+  - name: data_156
+    type: bin
+    start: 0x01CEA4
+    end:   0x01CEAC
+    subdir: code_data
+
+  - name: code_157
+    type: m68k
+    start: 0x01CEAC
+    end:   0x01D1CE
+
+  - name: data_157
+    type: bin
+    start: 0x01D1CE
+    end:   0x01D1FE
+    subdir: code_data
+
+  - name: code_158
+    type: m68k
+    start: 0x01D1FE
+    end:   0x01D53E
+
+  - name: data_158
+    type: bin
+    start: 0x01D53E
+    end:   0x01D542
+    subdir: code_data
+
+  - name: code_159
+    type: m68k
+    start: 0x01D542
+    end:   0x01D5B4
+
+  - name: data_159
+    type: bin
+    start: 0x01D5B4
+    end:   0x01D5B8
+    subdir: code_data
+
+  - name: code_160
+    type: m68k
+    start: 0x01D5B8
+    end:   0x01DE3A
+
+  - name: data_160
+    type: bin
+    start: 0x01DE3A
+    end:   0x01DEDA
+    subdir: code_data
+
+  - name: code_161
+    type: m68k
+    start: 0x01DEDA
+    end:   0x01E626
+
+  - name: data_161
+    type: bin
+    start: 0x01E626
+    end:   0x01E62E
+    subdir: code_data
+
+  - name: code_162
+    type: m68k
+    start: 0x01E62E
+    end:   0x01E646
+
+  - name: data_162
+    type: bin
+    start: 0x01E646
+    end:   0x01E648
+    subdir: code_data
+
+  - name: code_163
+    type: m68k
+    start: 0x01E648
+    end:   0x01EBB0
+
+  - name: data_163
+    type: bin
+    start: 0x01EBB0
+    end:   0x01F0B0
+    subdir: code_data
+
+  - name: code_164
+    type: m68k
+    start: 0x01F0B0
+    end:   0x01FAEE
+
+  - name: data_164
+    type: bin
+    start: 0x01FAEE
+    end:   0x0203FE
+    subdir: code_data
+
+  - name: code_165
+    type: m68k
+    start: 0x0203FE
+    end:   0x020454
+
+  - name: data_165
+    type: bin
+    start: 0x020454
+    end:   0x020474
+    subdir: code_data
+
+  - name: code_166
+    type: m68k
+    start: 0x020474
+    end:   0x0204D8
+
+  - name: data_166
+    type: bin
+    start: 0x0204D8
+    end:   0x020514
+    subdir: code_data
+
+  - name: code_167
+    type: m68k
+    start: 0x020514
+    end:   0x02053E
+
+  - name: data_167
+    type: bin
+    start: 0x02053E
+    end:   0x02057E
+    subdir: code_data
+
+  - name: code_168
+    type: m68k
+    start: 0x02057E
+    end:   0x020590
+
+  - name: data_168
+    type: bin
+    start: 0x020590
+    end:   0x020620
+    subdir: code_data
+
+  - name: code_169
+    type: m68k
+    start: 0x020620
+    end:   0x020950
+
+  - name: data_169
+    type: bin
+    start: 0x020950
+    end:   0x0209CE
+    subdir: code_data
+
+  - name: code_170
+    type: m68k
+    start: 0x0209CE
+    end:   0x020DC2
+
+  - name: data_170
+    type: bin
+    start: 0x020DC2
+    end:   0x020DC8
+    subdir: code_data
+
+  - name: code_171
+    type: m68k
+    start: 0x020DC8
+    end:   0x0214CE
+
+  - name: data_171
+    type: bin
+    start: 0x0214CE
+    end:   0x0214D2
+    subdir: code_data
+
+  - name: code_172
+    type: m68k
+    start: 0x0214D2
+    end:   0x021ABA
+
+  - name: data_172
+    type: bin
+    start: 0x021ABA
+    end:   0x021AD4
+    subdir: code_data
+
+  - name: code_173
+    type: m68k
+    start: 0x021AD4
+    end:   0x022340
+
+  - name: data_173
+    type: bin
+    start: 0x022340
+    end:   0x0235F6
+    subdir: code_data
+
+  - name: code_174
+    type: m68k
+    start: 0x0235F6
+    end:   0x023680
+
+  - name: data_174
+    type: bin
+    start: 0x023680
+    end:   0x023684
+    subdir: code_data
+
+  - name: code_175
+    type: m68k
+    start: 0x023684
+    end:   0x023BB2
+
+  - name: data_175
+    type: bin
+    start: 0x023BB2
+    end:   0x023BB4
+    subdir: code_data
+
+  - name: code_176
+    type: m68k
+    start: 0x023BB4
+    end:   0x024482
+
+  - name: data_176
+    type: bin
+    start: 0x024482
+    end:   0x024512
+    subdir: code_data
+
+  - name: code_177
+    type: m68k
+    start: 0x024512
+    end:   0x024B52
+
+  - name: data_177
+    type: bin
+    start: 0x024B52
+    end:   0x024B64
+    subdir: code_data
+
+  - name: code_178
+    type: m68k
+    start: 0x024B64
+    end:   0x024B9C
+
+  - name: data_178
+    type: bin
+    start: 0x024B9C
+    end:   0x024BAE
+    subdir: code_data
+
+  - name: code_179
+    type: m68k
+    start: 0x024BAE
+    end:   0x025154
+
+  - name: data_179
+    type: bin
+    start: 0x025154
+    end:   0x02525C
+    subdir: code_data
+
+  - name: code_180
+    type: m68k
+    start: 0x02525C
+    end:   0x0252EE
+
+  - name: data_180
+    type: bin
+    start: 0x0252EE
+    end:   0x025668
+    subdir: code_data
+
+  - name: code_181
+    type: m68k
+    start: 0x025668
+    end:   0x025736
+
+  - name: data_181
+    type: bin
+    start: 0x025736
+    end:   0x02573A
+    subdir: code_data
+
+  - name: code_182
+    type: m68k
+    start: 0x02573A
+    end:   0x02573C
+
+  - name: data_182
+    type: bin
+    start: 0x02573C
+    end:   0x025A1E
+    subdir: code_data
+
+  - name: code_183
+    type: m68k
+    start: 0x025A1E
+    end:   0x025AB2
+
+  - name: data_183
+    type: bin
+    start: 0x025AB2
+    end:   0x025AB6
+    subdir: code_data
+
+  - name: code_184
+    type: m68k
+    start: 0x025AB6
+    end:   0x025AB8
+
+  - name: data_184
+    type: bin
+    start: 0x025AB8
+    end:   0x025CE6
+    subdir: code_data
+
+  - name: code_185
+    type: m68k
+    start: 0x025CE6
+    end:   0x025E16
+
+  - name: data_185
+    type: bin
+    start: 0x025E16
+    end:   0x025E1C
+    subdir: code_data
+
+  - name: code_186
+    type: m68k
+    start: 0x025E1C
+    end:   0x025E1E
+
+  - name: data_186
+    type: bin
+    start: 0x025E1E
+    end:   0x025FFE
+    subdir: code_data
+
+  - name: code_187
+    type: m68k
+    start: 0x025FFE
+    end:   0x0260AC
+
+  - name: data_187
+    type: bin
+    start: 0x0260AC
+    end:   0x02639A
+    subdir: code_data
+
+  - name: code_188
+    type: m68k
+    start: 0x02639A
+    end:   0x02650C
+
+  - name: data_188
+    type: bin
+    start: 0x02650C
+    end:   0x026512
+    subdir: code_data
+
+  - name: code_189
+    type: m68k
+    start: 0x026512
+    end:   0x026514
+
+  - name: data_189
+    type: bin
+    start: 0x026514
+    end:   0x0265A8
+    subdir: code_data
+
+  - name: code_190
+    type: m68k
+    start: 0x0265A8
+    end:   0x0266D6
+
+  - name: data_190
+    type: bin
+    start: 0x0266D6
+    end:   0x0266DC
+    subdir: code_data
+
+  - name: code_191
+    type: m68k
+    start: 0x0266DC
+    end:   0x0266DE
+
+  - name: data_191
+    type: bin
+    start: 0x0266DE
+    end:   0x026778
+    subdir: code_data
+
+  - name: code_192
+    type: m68k
+    start: 0x026778
+    end:   0x0268CE
+
+  - name: data_192
+    type: bin
+    start: 0x0268CE
+    end:   0x0268D4
+    subdir: code_data
+
+  - name: code_193
+    type: m68k
+    start: 0x0268D4
+    end:   0x0268D6
+
+  - name: data_193
+    type: bin
+    start: 0x0268D6
+    end:   0x026982
+    subdir: code_data
+
+  - name: code_194
+    type: m68k
+    start: 0x026982
+    end:   0x026ABE
+
+  - name: data_194
+    type: bin
+    start: 0x026ABE
+    end:   0x026AC4
+    subdir: code_data
+
+  - name: code_195
+    type: m68k
+    start: 0x026AC4
+    end:   0x026AC6
+
+  - name: data_195
+    type: bin
+    start: 0x026AC6
+    end:   0x026B70
+    subdir: code_data
+
+  - name: code_196
+    type: m68k
+    start: 0x026B70
+    end:   0x026CF8
+
+  - name: data_196
+    type: bin
+    start: 0x026CF8
+    end:   0x026CFE
+    subdir: code_data
+
+  - name: code_197
+    type: m68k
+    start: 0x026CFE
+    end:   0x026D00
+
+  - name: data_197
+    type: bin
+    start: 0x026D00
+    end:   0x026D48
+    subdir: code_data
+
+  - name: code_198
+    type: m68k
+    start: 0x026D48
+    end:   0x026D72
+
+  - name: data_198
+    type: bin
+    start: 0x026D72
+    end:   0x026DD0
+    subdir: code_data
+
+  - name: code_199
+    type: m68k
+    start: 0x026DD0
+    end:   0x026E24
+
+  - name: data_199
+    type: bin
+    start: 0x026E24
+    end:   0x027C0C
+    subdir: code_data
+
+  - name: code_200
+    type: m68k
+    start: 0x027C0C
+    end:   0x027D2A
+
+  - name: data_200
+    type: bin
+    start: 0x027D2A
+    end:   0x027D30
+    subdir: code_data
+
+  - name: code_201
+    type: m68k
+    start: 0x027D30
+    end:   0x027D32
+
+  - name: data_201
+    type: bin
+    start: 0x027D32
+    end:   0x0283C8
+    subdir: code_data
+
+  - name: code_202
+    type: m68k
+    start: 0x0283C8
+    end:   0x0284F6
+
+  - name: data_202
+    type: bin
+    start: 0x0284F6
+    end:   0x0284FC
+    subdir: code_data
+
+  - name: code_203
+    type: m68k
+    start: 0x0284FC
+    end:   0x0284FE
+
+  - name: data_203
+    type: bin
+    start: 0x0284FE
+    end:   0x028516
+    subdir: code_data
+
+  - name: code_204
+    type: m68k
+    start: 0x028516
+    end:   0x0285B0
+
+  - name: data_204
+    type: bin
+    start: 0x0285B0
+    end:   0x02866A
+    subdir: code_data
+
+  - name: code_205
+    type: m68k
+    start: 0x02866A
+    end:   0x02878C
+
+  - name: data_205
+    type: bin
+    start: 0x02878C
+    end:   0x0287B8
+    subdir: code_data
+
+  - name: code_206
+    type: m68k
+    start: 0x0287B8
+    end:   0x028812
+
+  - name: data_206
+    type: bin
+    start: 0x028812
+    end:   0x0288B6
+    subdir: code_data
+
+  - name: code_207
+    type: m68k
+    start: 0x0288B6
+    end:   0x02894C
+
+  - name: data_207
+    type: bin
+    start: 0x02894C
+    end:   0x028B3C
+    subdir: code_data
+
+  - name: code_208
+    type: m68k
+    start: 0x028B3C
+    end:   0x02946A
+
+  - name: data_208
+    type: bin
+    start: 0x02946A
+    end:   0x029536
+    subdir: code_data
+
+  - name: code_209
+    type: m68k
+    start: 0x029536
+    end:   0x029568
+
+  - name: data_209
+    type: bin
+    start: 0x029568
+    end:   0x029574
+    subdir: code_data
+
+  - name: code_210
+    type: m68k
+    start: 0x029574
+    end:   0x029652
+
+  - name: data_210
+    type: bin
+    start: 0x029652
+    end:   0x029716
+    subdir: code_data
+
+  - name: code_211
+    type: m68k
+    start: 0x029716
+    end:   0x029748
+
+  - name: data_211
+    type: bin
+    start: 0x029748
+    end:   0x029754
+    subdir: code_data
+
+  - name: code_212
+    type: m68k
+    start: 0x029754
+    end:   0x029796
+
+  - name: data_212
+    type: bin
+    start: 0x029796
+    end:   0x0297D2
+    subdir: code_data
+
+  - name: code_213
+    type: m68k
+    start: 0x0297D2
+    end:   0x0299FC
+
+  - name: data_213
+    type: bin
+    start: 0x0299FC
+    end:   0x029A54
+    subdir: code_data
+
+  - name: code_214
+    type: m68k
+    start: 0x029A54
+    end:   0x02AF46
+
+  - name: data_214
+    type: bin
+    start: 0x02AF46
+    end:   0x02AF70
+    subdir: code_data
+
+  - name: code_215
+    type: m68k
+    start: 0x02AF70
+    end:   0x02BC3C
+
+  - name: data_215
+    type: bin
+    start: 0x02BC3C
+    end:   0x02CE68
+    subdir: code_data
+
+  - name: code_216
+    type: m68k
+    start: 0x02CE68
+    end:   0x02CE90
+
+  - name: data_216
+    type: bin
+    start: 0x02CE90
+    end:   0x02D090
+    subdir: code_data
+
+  - name: code_217
+    type: m68k
+    start: 0x02D090
+    end:   0x02D0B8
+
+  - name: data_217
+    type: bin
+    start: 0x02D0B8
+    end:   0x02D2D8
+    subdir: code_data
+
+  - name: code_218
+    type: m68k
+    start: 0x02D2D8
+    end:   0x02D322
+
+  - name: data_218
+    type: bin
+    start: 0x02D322
+    end:   0x02D358
+    subdir: code_data
+
+  - name: code_219
+    type: m68k
+    start: 0x02D358
+    end:   0x02D406
+
+  - name: data_219
+    type: bin
+    start: 0x02D406
+    end:   0x02D4FE
+    subdir: code_data
+
+  - name: code_220
+    type: m68k
+    start: 0x02D4FE
+    end:   0x02D514
+
+  - name: data_220
+    type: bin
+    start: 0x02D514
+    end:   0x02D51C
+    subdir: code_data
+
+  - name: code_221
+    type: m68k
+    start: 0x02D51C
+    end:   0x02D560
+
+  - name: data_221
+    type: bin
+    start: 0x02D560
+    end:   0x02D588
+    subdir: code_data
+
+  - name: code_222
+    type: m68k
+    start: 0x02D588
+    end:   0x02D5B8
+
+  - name: data_222
+    type: bin
+    start: 0x02D5B8
+    end:   0x02D5E8
+    subdir: code_data
+
+  - name: code_223
+    type: m68k
+    start: 0x02D5E8
+    end:   0x02D650
+
+  - name: data_223
+    type: bin
+    start: 0x02D650
+    end:   0x02D652
+    subdir: code_data
+
+  - name: code_224
+    type: m68k
+    start: 0x02D652
+    end:   0x02D67E
+
+  - name: data_224
+    type: bin
+    start: 0x02D67E
+    end:   0x02D696
+    subdir: code_data
+
+  - name: code_225
+    type: m68k
+    start: 0x02D696
+    end:   0x02D786
+
+  - name: data_225
+    type: bin
+    start: 0x02D786
+    end:   0x02D7B8
+    subdir: code_data
+
+  - name: code_226
+    type: m68k
+    start: 0x02D7B8
+    end:   0x02D806
+
+  - name: data_226
+    type: bin
+    start: 0x02D806
+    end:   0x02D814
+    subdir: code_data
+
+  - name: code_227
+    type: m68k
+    start: 0x02D814
+    end:   0x02D844
+
+  - name: data_227
+    type: bin
+    start: 0x02D844
+    end:   0x02D84E
+    subdir: code_data
+
+  - name: code_228
+    type: m68k
+    start: 0x02D84E
+    end:   0x02D8C8
+
+  - name: data_228
+    type: bin
+    start: 0x02D8C8
+    end:   0x02D8F6
+    subdir: code_data
+
+  - name: code_229
+    type: m68k
+    start: 0x02D8F6
+    end:   0x02D93C
+
+  - name: data_229
+    type: bin
+    start: 0x02D93C
+    end:   0x02D946
+    subdir: code_data
+
+  - name: code_230
+    type: m68k
+    start: 0x02D946
+    end:   0x02D9CA
+
+  - name: data_230
+    type: bin
+    start: 0x02D9CA
+    end:   0x02DADC
+    subdir: code_data
+
+  - name: code_231
+    type: m68k
+    start: 0x02DADC
+    end:   0x02DB9A
+
+  - name: data_231
+    type: bin
+    start: 0x02DB9A
+    end:   0x02DC2E
+    subdir: code_data
+
+  - name: code_232
+    type: m68k
+    start: 0x02DC2E
+    end:   0x02DD46
+
+  - name: data_232
+    type: bin
+    start: 0x02DD46
+    end:   0x02DD5E
+    subdir: code_data
+
+  - name: code_233
+    type: m68k
+    start: 0x02DD5E
+    end:   0x02DDA4
+
+  - name: data_233
+    type: bin
+    start: 0x02DDA4
+    end:   0x02DDA6
+    subdir: code_data
+
+  - name: code_234
+    type: m68k
+    start: 0x02DDA6
+    end:   0x02E2D0
+
+  - name: data_234
+    type: bin
+    start: 0x02E2D0
+    end:   0x02E2D2
+    subdir: code_data
+
+  - name: code_235
+    type: m68k
+    start: 0x02E2D2
+    end:   0x02E332
+
+  - name: data_235
+    type: bin
+    start: 0x02E332
+    end:   0x02E36C
+    subdir: code_data
+
+  - name: code_236
+    type: m68k
+    start: 0x02E36C
+    end:   0x02E39C
+
+  - name: data_236
+    type: bin
+    start: 0x02E39C
+    end:   0x02E3D4
+    subdir: code_data
+
+  - name: code_237
+    type: m68k
+    start: 0x02E3D4
+    end:   0x02E434
+
+  - name: data_237
+    type: bin
+    start: 0x02E434
+    end:   0x02E442
+    subdir: code_data
+
+  - name: code_238
+    type: m68k
+    start: 0x02E442
+    end:   0x02E488
+
+  - name: data_238
+    type: bin
+    start: 0x02E488
+    end:   0x02E570
+    subdir: code_data
+
+  - name: code_239
+    type: m68k
+    start: 0x02E570
+    end:   0x02E62C
+
+  - name: data_239
+    type: bin
+    start: 0x02E62C
+    end:   0x02E648
+    subdir: code_data
+
+  - name: code_240
+    type: m68k
+    start: 0x02E648
+    end:   0x02E68E
+
+  - name: data_240
+    type: bin
+    start: 0x02E68E
+    end:   0x02E6AA
+    subdir: code_data
+
+  - name: code_241
+    type: m68k
+    start: 0x02E6AA
+    end:   0x02E6D6
+
+  - name: data_241
+    type: bin
+    start: 0x02E6D6
+    end:   0x02E6E4
+    subdir: code_data
+
+  - name: code_242
+    type: m68k
+    start: 0x02E6E4
+    end:   0x02E722
+
+  - name: data_242
+    type: bin
+    start: 0x02E722
+    end:   0x02E728
+    subdir: code_data
+
+  - name: code_243
+    type: m68k
+    start: 0x02E728
+    end:   0x02E7E6
+
+  - name: data_243
+    type: bin
+    start: 0x02E7E6
+    end:   0x02E842
+    subdir: code_data
+
+  - name: code_244
+    type: m68k
+    start: 0x02E842
+    end:   0x02E872
+
+  - name: data_244
+    type: bin
+    start: 0x02E872
+    end:   0x02E880
+    subdir: code_data
+
+  - name: code_245
+    type: m68k
+    start: 0x02E880
+    end:   0x02E8C6
+
+  - name: data_245
+    type: bin
+    start: 0x02E8C6
+    end:   0x02EAF6
+    subdir: code_data
+
+  - name: code_246
+    type: m68k
+    start: 0x02EAF6
+    end:   0x02EC7C
+
+  - name: data_246
+    type: bin
+    start: 0x02EC7C
+    end:   0x02EE36
+    subdir: code_data
+
+  - name: code_247
+    type: m68k
+    start: 0x02EE36
+    end:   0x02F0DE
+
+  - name: data_247
+    type: bin
+    start: 0x02F0DE
+    end:   0x02F0EE
+    subdir: code_data
+
+  - name: code_248
+    type: m68k
+    start: 0x02F0EE
+    end:   0x02F1C6
+
+  - name: data_248
+    type: bin
+    start: 0x02F1C6
+    end:   0x02F1D2
+    subdir: code_data
+
+  - name: code_249
+    type: m68k
+    start: 0x02F1D2
+    end:   0x030060
+
+  - name: data_249
+    type: bin
+    start: 0x030060
+    end:   0x0300CA
+    subdir: code_data
+
+  - name: code_250
+    type: m68k
+    start: 0x0300CA
+    end:   0x031AB2
+
+  - name: data_250
+    type: bin
+    start: 0x031AB2
+    end:   0x033438
+    subdir: code_data
+
+  - name: code_251
+    type: m68k
+    start: 0x033438
+    end:   0x033C30
+
+  - name: data_251
+    type: bin
+    start: 0x033C30
+    end:   0x033C86
+    subdir: code_data
+
+  - name: code_252
+    type: m68k
+    start: 0x033C86
+    end:   0x033CD2
+
+  - name: data_252
+    type: bin
+    start: 0x033CD2
+    end:   0x033D5C
+    subdir: code_data
+
+  - name: code_253
+    type: m68k
+    start: 0x033D5C
+    end:   0x033D5E
+
+  - name: data_253
+    type: bin
+    start: 0x033D5E
+    end:   0x033DB4
+    subdir: code_data
+
+  - name: code_254
+    type: m68k
+    start: 0x033DB4
+    end:   0x033E60
+
+  - name: data_254
+    type: bin
+    start: 0x033E60
+    end:   0x0355FA
+    subdir: code_data
+
+  - name: code_255
+    type: m68k
+    start: 0x0355FA
+    end:   0x035CA8
+
+  - name: data_255
+    type: bin
+    start: 0x035CA8
+    end:   0x035CB8
+    subdir: code_data
+
+  - name: code_256
+    type: m68k
+    start: 0x035CB8
+    end:   0x0369A4
+
+  - name: data_256
+    type: bin
+    start: 0x0369A4
+    end:   0x036C38
+    subdir: code_data
+
+  - name: code_257
+    type: m68k
+    start: 0x036C38
+    end:   0x036C4A
+
+  - name: data_257
+    type: bin
+    start: 0x036C4A
+    end:   0x036C52
+    subdir: code_data
+
+  - name: code_258
+    type: m68k
+    start: 0x036C52
+    end:   0x03735A
+
+  - name: data_258
+    type: bin
+    start: 0x03735A
+    end:   0x039FAE
+    subdir: code_data
+
+  - name: code_259
+    type: m68k
+    start: 0x039FAE
+    end:   0x03A6C2
+
+  - name: data_259
+    type: bin
+    start: 0x03A6C2
+    end:   0x03A77A
+    subdir: code_data
+
+  - name: code_260
+    type: m68k
+    start: 0x03A77A
+    end:   0x03A948
+
+  - name: data_260
+    type: bin
+    start: 0x03A948
+    end:   0x03A992
+    subdir: code_data
+
+  - name: code_261
+    type: m68k
+    start: 0x03A992
+    end:   0x03AD68
+
+  - name: data_261
+    type: bin
+    start: 0x03AD68
+    end:   0x03E3FC
+    subdir: code_data
+
+  - name: code_262
+    type: m68k
+    start: 0x03E3FC
+    end:   0x03EC9A
+
+  - name: data_262
+    type: bin
+    start: 0x03EC9A
+    end:   0x03ED8C
+    subdir: code_data
+
+  - name: code_263
+    type: m68k
+    start: 0x03ED8C
+    end:   0x0401CA
+
+  - name: data_263
+    type: bin
+    start: 0x0401CA
+    end:   0x040300
+    subdir: code_data
+
+  - name: code_264
+    type: m68k
+    start: 0x040300
+    end:   0x040368
+
+  - name: data_264
+    type: bin
+    start: 0x040368
+    end:   0x040380
+    subdir: code_data
+
+  - name: code_265
+    type: m68k
+    start: 0x040380
+    end:   0x0403B4
+
+  - name: data_265
+    type: bin
+    start: 0x0403B4
+    end:   0x040E90
+    subdir: code_data
+
+  - name: code_266
+    type: m68k
+    start: 0x040E90
+    end:   0x040F80
+
+  - name: data_266
+    type: bin
+    start: 0x040F80
+    end:   0x040FF0
+    subdir: code_data
+
+  - name: code_267
+    type: m68k
+    start: 0x040FF0
+    end:   0x0418B4
+
+  - name: data_267
+    type: bin
+    start: 0x0418B4
+    end:   0x0418EE
+    subdir: code_data
+
+  - name: code_268
+    type: m68k
+    start: 0x0418EE
+    end:   0x041994
+
+  - name: data_268
+    type: bin
+    start: 0x041994
+    end:   0x045E14
+    subdir: code_data
+
+  - name: code_269
+    type: m68k
+    start: 0x045E14
+    end:   0x0460B4
+
+  - name: data_269
+    type: bin
+    start: 0x0460B4
+    end:   0x046156
+    subdir: code_data
+
+  - name: code_270
+    type: m68k
+    start: 0x046156
+    end:   0x0464A8
+
+  - name: data_270
+    type: bin
+    start: 0x0464A8
+    end:   0x0465C2
+    subdir: code_data
+
+  - name: code_271
+    type: m68k
+    start: 0x0465C2
+    end:   0x046C12
+
+  - name: data_271
+    type: bin
+    start: 0x046C12
+    end:   0x047150
+    subdir: code_data
+
+  - name: code_272
+    type: m68k
+    start: 0x047150
+    end:   0x047D1A
+
+  - name: data_272
+    type: bin
+    start: 0x047D1A
+    end:   0x047FE2
+    subdir: code_data
+
+  - name: code_273
+    type: m68k
+    start: 0x047FE2
+    end:   0x04908C
+
+  - name: data_273
+    type: bin
+    start: 0x04908C
+    end:   0x049896
+    subdir: code_data
+
+  - name: code_274
+    type: m68k
+    start: 0x049896
+    end:   0x049A5A
+
+  - name: data_274
+    type: bin
+    start: 0x049A5A
+    end:   0x04AF6A
+    subdir: code_data
+
+  - name: code_275
+    type: m68k
+    start: 0x04AF6A
+    end:   0x04B226
+
+  - name: data_275
+    type: bin
+    start: 0x04B226
+    end:   0x04B256
+    subdir: code_data
+
+  - name: code_276
+    type: m68k
+    start: 0x04B256
+    end:   0x04B2CE
+
+  - name: data_276
+    type: bin
+    start: 0x04B2CE
+    end:   0x04B3F8
+    subdir: code_data
+
+  - name: code_277
+    type: m68k
+    start: 0x04B3F8
+    end:   0x04BEA6
+
+  - name: data_277
+    type: bin
+    start: 0x04BEA6
+    end:   0x04D50C
+    subdir: code_data
+
+  - name: code_278
+    type: m68k
+    start: 0x04D50C
+    end:   0x04D9EA
+
+  - name: data_278
+    type: bin
+    start: 0x04D9EA
+    end:   0x04D9F0
+    subdir: code_data
+
+  - name: code_279
+    type: m68k
+    start: 0x04D9F0
+    end:   0x04DD9A
+
+  - name: data_279
+    type: bin
+    start: 0x04DD9A
+    end:   0x04DDA6
+    subdir: code_data
+
+  - name: code_280
+    type: m68k
+    start: 0x04DDA6
+    end:   0x04E9C0
+
+  - name: data_280
+    type: bin
+    start: 0x04E9C0
+    end:   0x04E9C6
+    subdir: code_data
+
+  - name: code_281
+    type: m68k
+    start: 0x04E9C6
+    end:   0x04EB38
+
+  - name: data_281
+    type: bin
+    start: 0x04EB38
+    end:   0x04F362
+    subdir: code_data
+
+  - name: code_282
+    type: m68k
+    start: 0x04F362
+    end:   0x04F974
+
+  - name: data_282
+    type: bin
+    start: 0x04F974
+    end:   0x04FC6E
+    subdir: code_data
+
+  - name: code_283
+    type: m68k
+    start: 0x04FC6E
+    end:   0x04FEFA
+
+  - name: data_283
+    type: bin
+    start: 0x04FEFA
+    end:   0x04FF12
+    subdir: code_data
+
+  - name: code_284
+    type: m68k
+    start: 0x04FF12
+    end:   0x05082C
+
+  - name: data_284
+    type: bin
+    start: 0x05082C
+    end:   0x050844
+    subdir: code_data
+
+  - name: code_285
+    type: m68k
+    start: 0x050844
+    end:   0x050AF2
+
+  - name: data_285
+    type: bin
+    start: 0x050AF2
+    end:   0x050DF6
+    subdir: code_data
+
+  - name: code_286
+    type: m68k
+    start: 0x050DF6
+    end:   0x051B9C
+
+  - name: data_286
+    type: bin
+    start: 0x051B9C
+    end:   0x051BC4
+    subdir: code_data
+
+  - name: code_287
+    type: m68k
+    start: 0x051BC4
+    end:   0x051BD4
+
+  - name: data_287
+    type: bin
+    start: 0x051BD4
+    end:   0x051BFC
+    subdir: code_data
+
+  - name: code_288
+    type: m68k
+    start: 0x051BFC
+    end:   0x051C12
+
+  - name: data_288
+    type: bin
+    start: 0x051C12
+    end:   0x051C22
+    subdir: code_data
+
+  - name: code_289
+    type: m68k
+    start: 0x051C22
+    end:   0x052064
+
+  - name: data_289
+    type: bin
+    start: 0x052064
+    end:   0x0520F8
+    subdir: code_data
+
+  - name: code_290
+    type: m68k
+    start: 0x0520F8
+    end:   0x05246C
+
+  - name: data_290
+    type: bin
+    start: 0x05246C
+    end:   0x05247C
+    subdir: code_data
+
+  - name: code_291
+    type: m68k
+    start: 0x05247C
+    end:   0x0524CC
+
+  - name: data_291
+    type: bin
+    start: 0x0524CC
+    end:   0x052566
+    subdir: code_data
+
+  - name: code_292
+    type: m68k
+    start: 0x052566
+    end:   0x052B5E
+
+  - name: data_292
+    type: bin
+    start: 0x052B5E
+    end:   0x052BCE
+    subdir: code_data
+
+  - name: code_293
+    type: m68k
+    start: 0x052BCE
+    end:   0x052F34
+
+  - name: data_293
+    type: bin
+    start: 0x052F34
+    end:   0x052F46
+    subdir: code_data
+
+  - name: code_294
+    type: m68k
+    start: 0x052F46
+    end:   0x0531FA
+
+  - name: data_294
+    type: bin
+    start: 0x0531FA
+    end:   0x05324A
+    subdir: code_data
+
+  - name: code_295
+    type: m68k
+    start: 0x05324A
+    end:   0x053448
+
+  - name: data_295
+    type: bin
+    start: 0x053448
+    end:   0x053530
+    subdir: code_data
+
+  - name: code_296
+    type: m68k
+    start: 0x053530
+    end:   0x053684
+
+  - name: data_296
+    type: bin
+    start: 0x053684
+    end:   0x0539E0
+    subdir: code_data
+
+  - name: code_297
+    type: m68k
+    start: 0x0539E0
+    end:   0x053BA4
+
+  - name: data_297
+    type: bin
+    start: 0x053BA4
+    end:   0x053EC4
+    subdir: code_data
+
+  - name: code_298
+    type: m68k
+    start: 0x053EC4
+    end:   0x053F78
+
+  - name: data_298
+    type: bin
+    start: 0x053F78
+    end:   0x054482
+    subdir: code_data
+
+  - name: code_299
+    type: m68k
+    start: 0x054482
+    end:   0x0548A8
+
+  - name: data_299
+    type: bin
+    start: 0x0548A8
+    end:   0x054940
+    subdir: code_data
+
+  - name: code_300
+    type: m68k
+    start: 0x054940
+    end:   0x054E60
+
+  - name: data_300
+    type: bin
+    start: 0x054E60
+    end:   0x054E70
+    subdir: code_data
+
+  - name: code_301
+    type: m68k
+    start: 0x054E70
+    end:   0x054EF4
+
+  - name: data_301
+    type: bin
+    start: 0x054EF4
+    end:   0x054F00
+    subdir: code_data
+
+  - name: code_302
+    type: m68k
+    start: 0x054F00
+    end:   0x054F84
+
+  - name: data_302
+    type: bin
+    start: 0x054F84
+    end:   0x055224
+    subdir: code_data
+
+  - name: code_303
+    type: m68k
+    start: 0x055224
+    end:   0x055528
+
+  - name: data_303
+    type: bin
+    start: 0x055528
+    end:   0x05555E
+    subdir: code_data
+
+  - name: code_304
+    type: m68k
+    start: 0x05555E
+    end:   0x0556AE
+
+  - name: data_304
+    type: bin
+    start: 0x0556AE
+    end:   0x055706
+    subdir: code_data
+
+  - name: code_305
+    type: m68k
+    start: 0x055706
+    end:   0x055780
+
+  - name: data_305
+    type: bin
+    start: 0x055780
+    end:   0x055798
+    subdir: code_data
+
+  - name: code_306
+    type: m68k
+    start: 0x055798
+    end:   0x055866
+
+  - name: data_306
+    type: bin
+    start: 0x055866
+    end:   0x055886
+    subdir: code_data
+
+  - name: code_307
+    type: m68k
+    start: 0x055886
+    end:   0x0558C8
+
+  - name: data_307
+    type: bin
+    start: 0x0558C8
+    end:   0x0558D2
+    subdir: code_data
+
+  - name: code_308
+    type: m68k
+    start: 0x0558D2
+    end:   0x0559DE
+
+  - name: data_308
+    type: bin
+    start: 0x0559DE
+    end:   0x055D08
+    subdir: code_data
+
+  - name: code_309
+    type: m68k
+    start: 0x055D08
+    end:   0x055D7C
+
+  - name: data_309
+    type: bin
+    start: 0x055D7C
+    end:   0x055D86
+    subdir: code_data
+
+  - name: code_310
+    type: m68k
+    start: 0x055D86
+    end:   0x055E20
+
+  - name: data_310
+    type: bin
+    start: 0x055E20
+    end:   0x055E28
+    subdir: code_data
+
+  - name: code_311
+    type: m68k
+    start: 0x055E28
+    end:   0x055FF8
+
+  - name: data_311
+    type: bin
+    start: 0x055FF8
+    end:   0x056008
+    subdir: code_data
+
+  - name: code_312
+    type: m68k
+    start: 0x056008
+    end:   0x05610C
+
+  - name: data_312
+    type: bin
+    start: 0x05610C
+    end:   0x056116
+    subdir: code_data
+
+  - name: code_313
+    type: m68k
+    start: 0x056116
+    end:   0x0561E2
+
+  - name: data_313
+    type: bin
+    start: 0x0561E2
+    end:   0x056202
+    subdir: code_data
+
+  - name: code_314
+    type: m68k
+    start: 0x056202
+    end:   0x0564B6
+
+  - name: data_314
+    type: bin
+    start: 0x0564B6
+    end:   0x0564CE
+    subdir: code_data
+
+  - name: code_315
+    type: m68k
+    start: 0x0564CE
+    end:   0x056688
+
+  - name: data_315
+    type: bin
+    start: 0x056688
+    end:   0x056742
+    subdir: code_data
+
+  - name: code_316
+    type: m68k
+    start: 0x056742
+    end:   0x0567A2
+
+  - name: data_316
+    type: bin
+    start: 0x0567A2
+    end:   0x0569A8
+    subdir: code_data
+
+  - name: code_317
+    type: m68k
+    start: 0x0569A8
+    end:   0x0569C4
+
+  - name: data_317
+    type: bin
+    start: 0x0569C4
+    end:   0x0569D8
+    subdir: code_data
+
+  - name: code_318
+    type: m68k
+    start: 0x0569D8
+    end:   0x056C6E
+
+  - name: data_318
+    type: bin
+    start: 0x056C6E
+    end:   0x056C9A
+    subdir: code_data
+
+  - name: code_319
+    type: m68k
+    start: 0x056C9A
+    end:   0x057356
+
+  - name: data_319
+    type: bin
+    start: 0x057356
+    end:   0x057366
+    subdir: code_data
+
+  - name: code_320
+    type: m68k
+    start: 0x057366
+    end:   0x057698
+
+  - name: data_320
+    type: bin
+    start: 0x057698
+    end:   0x0576B4
+    subdir: code_data
+
+  - name: code_321
+    type: m68k
+    start: 0x0576B4
+    end:   0x057A66
+
+  - name: data_321
+    type: bin
+    start: 0x057A66
+    end:   0x057A86
+    subdir: code_data
+
+  - name: code_322
+    type: m68k
+    start: 0x057A86
+    end:   0x057DD0
+
+  - name: data_322
+    type: bin
+    start: 0x057DD0
+    end:   0x057E7C
+    subdir: code_data
+
+  - name: code_323
+    type: m68k
+    start: 0x057E7C
+    end:   0x058C88
+
+  - name: data_323
+    type: bin
+    start: 0x058C88
+    end:   0x058CFC
+    subdir: code_data
+
+  - name: code_324
+    type: m68k
+    start: 0x058CFC
+    end:   0x058D74
+
+  - name: data_324
+    type: bin
+    start: 0x058D74
+    end:   0x058D86
+    subdir: code_data
+
+  - name: code_325
+    type: m68k
+    start: 0x058D86
+    end:   0x0591F4
+
+  - name: data_325
+    type: bin
+    start: 0x0591F4
+    end:   0x059242
+    subdir: code_data
+
+  - name: code_326
+    type: m68k
+    start: 0x059242
+    end:   0x0595FC
+
+  - name: data_326
+    type: bin
+    start: 0x0595FC
+    end:   0x0595FE
+    subdir: code_data
+
+  - name: code_327
+    type: m68k
+    start: 0x0595FE
+    end:   0x059AB2
+
+  - name: data_327
+    type: bin
+    start: 0x059AB2
+    end:   0x059ACA
+    subdir: code_data
+
+  - name: code_328
+    type: m68k
+    start: 0x059ACA
+    end:   0x059E76
+
+  - name: data_328
+    type: bin
+    start: 0x059E76
+    end:   0x059EB2
+    subdir: code_data
+
+  - name: code_329
+    type: m68k
+    start: 0x059EB2
+    end:   0x05A166
+
+  - name: data_329
+    type: bin
+    start: 0x05A166
+    end:   0x05A176
+    subdir: code_data
+
+  - name: code_330
+    type: m68k
+    start: 0x05A176
+    end:   0x05A3A6
+
+  - name: data_330
+    type: bin
+    start: 0x05A3A6
+    end:   0x05A3E4
+    subdir: code_data
+
+  - name: code_331
+    type: m68k
+    start: 0x05A3E4
+    end:   0x05A550
+
+  - name: data_331
+    type: bin
+    start: 0x05A550
+    end:   0x05A5BA
+    subdir: code_data
+
+  - name: code_332
+    type: m68k
+    start: 0x05A5BA
+    end:   0x05A8A4
+
+  - name: data_332
+    type: bin
+    start: 0x05A8A4
+    end:   0x05A914
+    subdir: code_data
+
+  - name: code_333
+    type: m68k
+    start: 0x05A914
+    end:   0x05AA52
+
+  - name: data_333
+    type: bin
+    start: 0x05AA52
+    end:   0x05AAB2
+    subdir: code_data
+
+  - name: code_334
+    type: m68k
+    start: 0x05AAB2
+    end:   0x05ADE0
+
+  - name: data_334
+    type: bin
+    start: 0x05ADE0
+    end:   0x05AE62
+    subdir: code_data
+
+  - name: code_335
+    type: m68k
+    start: 0x05AE62
+    end:   0x05B0D6
+
+  - name: data_335
+    type: bin
+    start: 0x05B0D6
+    end:   0x05B24E
+    subdir: code_data
+
+  - name: code_336
+    type: m68k
+    start: 0x05B24E
+    end:   0x05B310
+
+  - name: data_336
+    type: bin
+    start: 0x05B310
+    end:   0x05B418
+    subdir: code_data
+
+  - name: code_337
+    type: m68k
+    start: 0x05B418
+    end:   0x05B48E
+
+  - name: data_337
+    type: bin
+    start: 0x05B48E
+    end:   0x05B492
+    subdir: code_data
+
+  - name: code_338
+    type: m68k
+    start: 0x05B492
+    end:   0x05B4A0
+
+  - name: data_338
+    type: bin
+    start: 0x05B4A0
+    end:   0x05B4B0
+    subdir: code_data
+
+  - name: code_339
+    type: m68k
+    start: 0x05B4B0
+    end:   0x05B6F6
+
+  - name: data_339
+    type: bin
+    start: 0x05B6F6
+    end:   0x05B72A
+    subdir: code_data
+
+  - name: code_340
+    type: m68k
+    start: 0x05B72A
+    end:   0x05B858
+
+  - name: data_340
+    type: bin
+    start: 0x05B858
+    end:   0x05B8BE
+    subdir: code_data
+
+  - name: code_341
+    type: m68k
+    start: 0x05B8BE
+    end:   0x05B8C6
+
+  - name: data_341
+    type: bin
+    start: 0x05B8C6
+    end:   0x05B8DE
+    subdir: code_data
+
+  - name: code_342
+    type: m68k
+    start: 0x05B8DE
+    end:   0x05B922
+
+  - name: data_342
+    type: bin
+    start: 0x05B922
+    end:   0x05B92A
+    subdir: code_data
+
+  - name: code_343
+    type: m68k
+    start: 0x05B92A
+    end:   0x05BC54
+
+  - name: data_343
+    type: bin
+    start: 0x05BC54
+    end:   0x05BC68
+    subdir: code_data
+
+  - name: code_344
+    type: m68k
+    start: 0x05BC68
+    end:   0x05BD36
+
+  - name: data_344
+    type: bin
+    start: 0x05BD36
+    end:   0x05BDA6
+    subdir: code_data
+
+  - name: code_345
+    type: m68k
+    start: 0x05BDA6
+    end:   0x05BEB2
+
+  - name: data_345
+    type: bin
+    start: 0x05BEB2
+    end:   0x05BF1A
+    subdir: code_data
+
+  - name: code_346
+    type: m68k
+    start: 0x05BF1A
+    end:   0x05C0C0
+
+  - name: data_346
+    type: bin
+    start: 0x05C0C0
+    end:   0x05D3F0
+    subdir: code_data
+
+  - name: code_347
+    type: m68k
+    start: 0x05D3F0
+    end:   0x05D568
+
+  - name: data_347
+    type: bin
+    start: 0x05D568
+    end:   0x05D570
+    subdir: code_data
+
+  - name: code_348
+    type: m68k
+    start: 0x05D570
+    end:   0x05D5D6
+
+  - name: data_348
+    type: bin
+    start: 0x05D5D6
+    end:   0x05D5F6
+    subdir: code_data
+
+  - name: code_349
+    type: m68k
+    start: 0x05D5F6
+    end:   0x05D8B6
+
+  - name: data_349
+    type: bin
+    start: 0x05D8B6
+    end:   0x05D904
+    subdir: code_data
+
+  - name: code_350
+    type: m68k
+    start: 0x05D904
+    end:   0x05D916
+
+  - name: data_350
+    type: bin
+    start: 0x05D916
+    end:   0x05D9CE
+    subdir: code_data
+
+  - name: code_351
+    type: m68k
+    start: 0x05D9CE
+    end:   0x05DB08
+
+  - name: data_351
+    type: bin
+    start: 0x05DB08
+    end:   0x05DB60
+    subdir: code_data
+
+  - name: code_352
+    type: m68k
+    start: 0x05DB60
+    end:   0x05DE22
+
+  - name: data_352
+    type: bin
+    start: 0x05DE22
+    end:   0x05DE42
+    subdir: code_data
+
+  - name: code_353
+    type: m68k
+    start: 0x05DE42
+    end:   0x05E1EA
+
+  - name: data_353
+    type: bin
+    start: 0x05E1EA
+    end:   0x05E232
+    subdir: code_data
+
+  - name: code_354
+    type: m68k
+    start: 0x05E232
+    end:   0x05E244
+
+  - name: rest
+    type: bin
+    start: 0x05E244
+    end:   0x200000

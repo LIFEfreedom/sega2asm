@@ -12,9 +12,15 @@
 
 NAME        := dynabrothers2
 ROM         := game.gen
-SHA1        := 8E10298DFFF521397F0E82D1787E701D6928750B
 CONFIG      := game.yaml
-SYMBOLS     := game_symbols.txt
+
+# Символы разведены: свои имена переживают смену ROM и пересборку.
+#   .user.txt — ваш, под git
+#   .gen.txt  — генерируется анализатором, перезаписывается
+#   .txt      — склейка для сборки (артефакт, в .gitignore)
+USER_SYMBOLS := game_symbols.user.txt
+GEN_SYMBOLS  := game_symbols.gen.txt
+SYMBOLS      := game_symbols.txt
 
 # Каталоги (должны совпадать с options.* в $(CONFIG))
 OUT_DIR     := out
@@ -36,14 +42,20 @@ SEGA2ASM    := ./sega2asm.exe
 # clownassembler даёт совместимый по командной строке clownassembler_asm68k
 # (портируемый ANSI C). Переопределить:  make build ASM68K=/path/to/asm68k
 ASM68K      ?= asm68k
-# /m — разрешить мнемоники как метки, /p — строгий разбор, /k — не падать
-# на первой ошибке. Взято из smd_alteredbeast.
-ASM68K_FLAGS ?= /m /p /k
+# /m — разворачивать все макросы, /p — выводить плоский бинарник (без него
+# ассемблер ругается Executable output format is not supported).
+# /k из smd_alteredbeast убран: clownassembler его не реализует и warning'ит.
+ASM68K_FLAGS ?= /m /p
 
 # Вывод питона в UTF-8, иначе кириллица бьётся о кодовую страницу консоли
 export PYTHONIOENCODING := utf-8
 
-.PHONY: all split check build verify rebuild tools clean distclean help
+# Обязательно для Git Bash: MSYS конвертирует аргументы вида /p и /m в
+# Windows-пути, ассемблер перестаёт видеть в них ключи и принимает за имена
+# файлов. Без этого сборка падает на «Source file could not be opened».
+export MSYS_NO_PATHCONV := 1
+
+.PHONY: all symbols split check build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -59,11 +71,20 @@ tools: $(SEGA2ASM)
 $(SEGA2ASM): main.go go.mod $(wildcard */*.go) $(wildcard */*/*.go)
 	$(GO) build -o $(SEGA2ASM) .
 
+# ── Символы ──────────────────────────────────────────────────────────────
+symbols: $(SYMBOLS)
+
+$(SYMBOLS): $(USER_SYMBOLS) $(GEN_SYMBOLS)
+	@$(PYTHON) $(TOOLS_DIR)/symbols.py --merge
+
 # ── Разрезание ROM ───────────────────────────────────────────────────────
 split: $(MAIN_ASM)
 
+# После split дописываем equ для имён, которым sega2asm не печатает метку
+# (ОЗУ, данные, регистры) — иначе ссылка на них не соберётся.
 $(MAIN_ASM): $(SEGA2ASM) $(CONFIG) $(SYMBOLS) $(ROM)
 	$(SEGA2ASM) -c $(CONFIG) -v
+	@$(PYTHON) $(TOOLS_DIR)/symbols.py --equates
 
 # ── Проверка сплита (работает без ассемблера) ────────────────────────────
 check: $(MAIN_ASM)
@@ -75,16 +96,16 @@ check: $(MAIN_ASM)
 # Собирать из корня репозитория: в $(MAIN_ASM) пути include относительные.
 build: $(TARGET)
 
-$(TARGET): $(MAIN_ASM) | $(BUILD_DIR)
-	$(ASM68K) $(ASM68K_FLAGS) "$(MAIN_ASM)","$(TARGET)",,"$(LISTING)"
-
-# mkdir -p / rm -rf через python: GNU make под Windows зовёт cmd.exe, где их нет
-$(BUILD_DIR):
+# Каталог создаётся прямо в рецепте: отдельная цель $(BUILD_DIR) конфликтовала
+# бы с phony-целью `build` — это одно и то же имя.
+# mkdir -p через python: GNU make под Windows зовёт cmd.exe, где его нет.
+$(TARGET): $(MAIN_ASM)
 	@$(PYTHON) -c "import os,sys; os.makedirs(sys.argv[1], exist_ok=True)" $(BUILD_DIR)
+	$(ASM68K) $(ASM68K_FLAGS) "$(MAIN_ASM)","$(TARGET)",,"$(LISTING)"
 
 # ── Сверка ───────────────────────────────────────────────────────────────
 verify: $(TARGET)
-	@$(PYTHON) $(TOOLS_DIR)/sha1check.py $(TARGET) $(SHA1) $(ROM)
+	@$(PYTHON) $(TOOLS_DIR)/sha1check.py $(TARGET) $(CONFIG) $(ROM)
 
 rebuild: split build verify
 
