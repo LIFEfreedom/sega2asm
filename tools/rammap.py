@@ -35,6 +35,33 @@ ADDR_ORG = re.compile(r"^\torg\t\$([0-9A-F]{6})$")
 RAM = re.compile(r"\$(FF[0-9A-F]{4})")
 # lea ($FFxxxx).l,aN   /   lea (Имя).l,aN
 LEA = re.compile(r"^lea\s+\((?:\$(FF[0-9A-F]{4})|(\w+))\)\.l,a(\d)$")
+SYMLINE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*\$?([0-9A-Fa-f]+)\s*(?:;.*)?$")
+
+
+def load_ram_symbols():
+    """имя -> адрес для символов в ОЗУ.
+
+    Без этого карта деградирует по мере работы: как только адресу дают имя,
+    дизассемблер печатает `InputState` вместо `$FF003E`, и адрес исчезает из
+    карты. То есть чем больше вы разобрали, тем меньше видно — ровно наоборот
+    от нужного. Поэтому известные имена распознаём наравне с литералами.
+    """
+    out = {}
+    for name in ("game_symbols.txt", "game_symbols.user.txt"):
+        path = os.path.join(HERE, name)
+        if not os.path.exists(path):
+            continue
+        for raw in open(path, encoding="utf-8", errors="replace"):
+            line = raw.strip()
+            if not line or line[0] in ";#":
+                continue
+            m = SYMLINE.match(line)
+            if not m:
+                continue
+            a = int(m.group(2), 16)
+            if 0xFF0000 <= a <= 0xFFFFFF:
+                out.setdefault(m.group(1), a)
+    return out
 # Поле структуры. sega2asm печатает смещение как `$1870(a4)` / `-$2A(a1)`,
 # а НЕ как `($1870,a4)`. Отдельно ловим голое `(aN)` — это смещение 0, но
 # только не `-(aN)` и не `(aN)+`: там регистр меняется, это не поле.
@@ -131,12 +158,28 @@ def main():
     refs = collections.defaultdict(lambda: {"read": 0, "write": 0, "test": 0,
                                             "lea": 0, "sizes": collections.Counter(),
                                             "sites": []})
+    names = load_ram_symbols()
+    addr2name = {}
+    for nm, a in names.items():
+        addr2name.setdefault(a, nm)
+    sym_re = (re.compile(r"\b(%s)\b" % "|".join(sorted(map(re.escape, names),
+                                                       key=len, reverse=True)))
+              if names else None)
+    if names:
+        print("известных имён в ОЗУ: %d (учитываются наравне с $FFxxxx)"
+              % len(names))
+
     # ── прямые обращения ────────────────────────────────────────────────
     for fn, addr, text in code:
+        seen_here = []
         for m in RAM.finditer(text):
-            a = int(m.group(1), 16) | 0xFF0000
+            seen_here.append((int(m.group(1), 16) | 0xFF0000, m.group(0)))
+        if sym_re:
+            for m in sym_re.finditer(text):
+                seen_here.append((names[m.group(1)], m.group(1)))
+        for a, token in seen_here:
             r = refs[a]
-            r[access_kind(text, m.group(0))] += 1
+            r[access_kind(text, token)] += 1
             r["sizes"][opsize(text)] += 1
             if len(r["sites"]) < 4:
                 r["sites"].append((addr, text))
@@ -145,9 +188,14 @@ def main():
     structs = collections.defaultdict(lambda: collections.Counter())
     for i, (fn, addr, text) in enumerate(code):
         m = LEA.match(text)
-        if not m or not m.group(1):
+        if not m:
             continue
-        base = int(m.group(1), 16) | 0xFF0000
+        if m.group(1):
+            base = int(m.group(1), 16) | 0xFF0000
+        elif m.group(2) in names:          # база уже названа вами
+            base = names[m.group(2)]
+        else:
+            continue
         reg = m.group(3)
         # смотрим вперёд, пока регистр не переопределят
         for fn2, a2, t2 in code[i + 1:i + 45]:
@@ -186,6 +234,10 @@ def main():
         clusters.append(cur)
     clusters.sort(key=lambda c: -sum(refs[a]["read"] + refs[a]["write"] for a in c))
 
+    def lbl(a):
+        """Подпись адреса: с вашим именем, если оно уже есть."""
+        return ("`%s` (`$%06X`)" % (addr2name[a], a)) if a in addr2name else "`$%06X`" % a
+
     out_path = os.path.join(HERE, "docs", "ram-map.md")
     if "--out" in sys.argv:
         out_path = os.path.join(HERE, sys.argv[sys.argv.index("--out") + 1])
@@ -207,8 +259,8 @@ def main():
             st = detect_stride(fields)
             if st:
                 stride, hits, inner = st
-                f.write("### `$%06X` — похоже на МАССИВ, шаг записи $%02X (%d байт)\n\n"
-                        % (base, stride, stride))
+                f.write("### %s — похоже на МАССИВ, шаг записи $%02X (%d байт)\n\n"
+                        % (lbl(base), stride, stride))
                 f.write("Смещения замощаются периодом `$%02X`: видно %d записей, "
                         "до `$%06X`. Это гипотеза — сверьтесь с таблицей ниже "
                         "и с кодом, прежде чем закладываться на неё.\n\n"
@@ -216,8 +268,8 @@ def main():
                 f.write("Поля внутри записи: %s\n\n"
                         % ", ".join("`+$%02X`" % o for o in inner[:14]))
             else:
-                f.write("### `$%06X` — структура, не менее %d байт, %d полей\n\n"
-                        % (base, span + 1, len(fields)))
+                f.write("### %s — структура, не менее %d байт, %d полей\n\n"
+                        % (lbl(base), span + 1, len(fields)))
             f.write("| смещение | обращений |\n|---|---|\n")
             for off in sorted(fields)[:16]:
                 f.write("| `+$%02X` | %d |\n" % (off, fields[off]))
@@ -234,19 +286,20 @@ def main():
                 a = c[0]
                 r = refs[a]
                 sz = r["sizes"].most_common(1)[0][0]
-                f.write("### `$%06X` (.%s) — чтений %d, записей %d\n\n"
-                        % (a, sz, r["read"] + r["test"], r["write"]))
+                f.write("### %s (.%s) — чтений %d, записей %d\n\n"
+                        % (lbl(a), sz, r["read"] + r["test"], r["write"]))
             else:
-                f.write("### `$%06X-$%06X` — %d адресов, %d обращений\n\n"
-                        % (c[0], c[-1], len(c), rw))
-                f.write("| адрес | разм. | чт. | зап. |\n|---|---|---|---|\n")
+                f.write("### %s-`$%06X` — %d адресов, %d обращений\n\n"
+                        % (lbl(c[0]), c[-1], len(c), rw))
+                f.write("| адрес | имя | разм. | чт. | зап. |\n|---|---|---|---|---|\n")
                 for a in c[:12]:
                     r = refs[a]
-                    f.write("| `$%06X` | .%s | %d | %d |\n"
-                            % (a, r["sizes"].most_common(1)[0][0],
+                    f.write("| `$%06X` | %s | .%s | %d | %d |\n"
+                            % (a, ("`%s`" % addr2name[a]) if a in addr2name else "",
+                               r["sizes"].most_common(1)[0][0],
                                r["read"] + r["test"], r["write"]))
                 if len(c) > 12:
-                    f.write("| … | | | ещё %d |\n" % (len(c) - 12))
+                    f.write("| … | | | | ещё %d |\n" % (len(c) - 12))
                 f.write("\n")
             for site, text in refs[c[0]]["sites"][:2]:
                 f.write("    $%06X  %s\n" % (site, text))
@@ -256,6 +309,8 @@ def main():
         f.write("Скопируйте нужные строки, замените имена на осмысленные.\n\n```\n")
         for c in clusters[:40]:
             a = c[0]
+            if a in addr2name:        # уже названо вами — предлагать нечего
+                continue
             r = refs[a]
             tag = "Base" if a in structs else ("Ptr" if r["lea"] else "Var")
             f.write("%s_%04X = $%06X\t; чт %d зап %d%s\n"
