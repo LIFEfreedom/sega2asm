@@ -32,16 +32,20 @@ func LoadCharmap(path string) (*CharMap, error) {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		raw := strings.TrimRight(scanner.Text(), "\r\n")
+		line := strings.TrimSpace(raw)
 		if line == "" || line[0] == '/' || line[0] == ';' {
 			continue
 		}
-		eqIdx := strings.IndexByte(line, '=')
+		eqIdx := strings.IndexByte(raw, '=')
 		if eqIdx < 0 {
 			continue
 		}
-		hexPart := strings.ToUpper(strings.TrimSpace(line[:eqIdx]))
-		charPart := line[eqIdx+1:]
+		// Значение берём из НЕобрезанной строки: иначе `20= ` (пробел,
+		// как в example/alteredbeast_sjis.tbl) превращается в пустую
+		// строку, и пробелы пропадают из всего извлечённого текста.
+		hexPart := strings.ToUpper(strings.TrimSpace(raw[:eqIdx]))
+		charPart := raw[eqIdx+1:]
 		m.entries[hexPart] = charPart
 		if len(hexPart)/2 > m.maxLen {
 			m.maxLen = len(hexPart) / 2
