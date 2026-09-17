@@ -2525,3 +2525,9 @@ RuleUpdateCell   = $019DE0   ; обновить занятость клетки 
 RuleJitterWander = $017DBC   ; блуждание с таймером: счётчик +$26 до нуля,
                              ; затем поворот, таймер действия $16, кадр 1
 RuleSearchThenMelee = $01847A ; найти цель, затем EngageNeighbour
+
+; Маски из таблиц по приказам — это НАБОРЫ ТИПОВ МЕСТНОСТИ. $01E050
+; проверяет `btst d7,d1`, где d7 — тип местности из GetTerrainType, и
+; только потом смотрит, свободна ли клетка на UnitMap и PlacementMap.
+CanStepToCell    = $01E050   ; можно ли шагнуть в соседнюю клетку
+SetupStepContext = $01E02C   ; готовит a0..a5 для CanStepToCell
