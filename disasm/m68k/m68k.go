@@ -19,12 +19,12 @@ import (
 type FlowKind uint8
 
 const (
-	FlowNone     FlowKind = iota
-	FlowCall               // jsr, bsr — calls a subroutine
-	FlowReturn             // rts, rte, rtr — returns from subroutine
-	FlowJump               // jmp, bra — unconditional jump (no return)
-	FlowBranch             // bcc etc. — conditional branch
-	FlowHalt               // illegal, stop — execution stops
+	FlowNone   FlowKind = iota
+	FlowCall            // jsr, bsr — calls a subroutine
+	FlowReturn          // rts, rte, rtr — returns from subroutine
+	FlowJump            // jmp, bra — unconditional jump (no return)
+	FlowBranch          // bcc etc. — conditional branch
+	FlowHalt            // illegal, stop — execution stops
 )
 
 // Result holds a single disassembled M68K instruction.
@@ -146,35 +146,57 @@ func (d *Disassembler) decodeGroup0(op uint16) (string, bool) {
 	if subop == 0x8 {
 		return d.decodeBit(op)
 	}
+	// size==3 в этой группе на 68000 не кодирует ORI/ANDI/SUBI/ADDI/EORI/CMPI
+	// (такие опкоды появились только в 68020 как CMP2/CHK2). Раньше отсюда
+	// выходило несобираемое `ori.? #?,d0`; оставляем данными.
+	if (op>>6)&3 == 3 {
+		return fmt.Sprintf("	dc.w	$%04X", op), false
+	}
+	// ORI/ANDI/EORI в CCR или SR: приёмник зашит в опкод, а непосредственный
+	// операнд — единственное расширяющее слово. EA пре-вычислять нельзя: при
+	// op&0x3F == 0x3C (режим 7/4, immediate) decodeEA съедал это же слово, и
+	// следующий readImm брал данные за инструкцией. Из-за этого
+	// `ori.w #$0700,sr` выходил как `ori.w #$4EB9,sr`, а два байта пропадали
+	// из потока — при пересборке ROM разъезжался начиная с $00030A.
+	if op&0xFF == 0x3C || op&0xFF == 0x7C {
+		var name string
+		switch subop {
+		case 0x0:
+			name = "ori"
+		case 0x2:
+			name = "andi"
+		case 0xA:
+			name = "eori"
+		default:
+			// SUBI/ADDI/CMPI с непосредственным приёмником на 68000 не бывает.
+			return fmt.Sprintf("	dc.w	$%04X", op), false
+		}
+		if op&0xFF == 0x7C {
+			return fmt.Sprintf("	%s.w	#$%04X,sr", name, d.readImm(2)), true
+		}
+		return fmt.Sprintf("	%s	#$%02X,ccr", name, d.readImm(1)), true
+	}
 	sz := sizeName((op >> 6) & 3)
+	// Порядок чтения критичен: в непосредственной группе за словом опкода
+	// идёт СНАЧАЛА непосредственный операнд и только потом расширяющие слова
+	// EA. Раньше EA читался первым, и операнды менялись местами:
+	// `cmpi.l #$44796E61,($00FF0010).l` выходил как
+	// `cmpi.l #$00FF0010,($44796E61).l`.
+	imm := d.fmtImm(sz)
 	ea := d.decodeEA(op&0x3F, sizeBytes((op>>6)&3))
 
 	switch subop {
-	case 0x0: // ORI / ORI to CCR / ORI to SR
-		if op&0xFF == 0x3C {
-			imm := d.readImm(1)
-			return fmt.Sprintf("\tori\t#$%02X,ccr", imm), true
-		}
-		if op&0xFF == 0x7C {
-			imm := d.readImm(2)
-			return fmt.Sprintf("\tori.w\t#$%04X,sr", imm), true
-		}
-		imm := d.fmtImm(sz)
-		return fmt.Sprintf("\tori.%s\t%s,%s", sz, imm, ea), true
+	case 0x0: // ORI
+		return fmt.Sprintf("	ori.%s	%s,%s", sz, imm, ea), true
 	case 0x2: // ANDI
-		imm := d.fmtImm(sz)
 		return fmt.Sprintf("\tandi.%s\t%s,%s", sz, imm, ea), true
 	case 0x4: // SUBI
-		imm := d.fmtImm(sz)
 		return fmt.Sprintf("\tsubi.%s\t%s,%s", sz, imm, ea), true
 	case 0x6: // ADDI
-		imm := d.fmtImm(sz)
 		return fmt.Sprintf("\taddi.%s\t%s,%s", sz, imm, ea), true
 	case 0xA: // EORI
-		imm := d.fmtImm(sz)
 		return fmt.Sprintf("\teori.%s\t%s,%s", sz, imm, ea), true
 	case 0xC: // CMPI
-		imm := d.fmtImm(sz)
 		return fmt.Sprintf("\tcmpi.%s\t%s,%s", sz, imm, ea), true
 	case 0xE: // MOVES (68010+) – treat as DC
 		return fmt.Sprintf("\tdc.w\t$%04X", op), false
@@ -185,7 +207,10 @@ func (d *Disassembler) decodeGroup0(op uint16) (string, bool) {
 func (d *Disassembler) decodeBit(op uint16) (string, bool) {
 	eaReg := op & 0x3F
 	bitOp := (op >> 6) & 3
-	names := []string{"btst", "bclr", "bset", "bchg"}
+	// Порядок по битам 7-6: 00=btst, 01=bchg, 10=bclr, 11=bset.
+	// Раньше три последних были переставлены, и, например, $08C0 (bset)
+	// выходил как bchg — при пересборке получался другой опкод.
+	names := []string{"btst", "bchg", "bclr", "bset"}
 	name := names[bitOp]
 
 	var bit string
@@ -295,11 +320,14 @@ func (d *Disassembler) decodeGroup4(op uint16) (string, bool) {
 		d.lastTarget = eaAbsTarget(op&0x3F, d.Data, posBeforeEA, d.Base)
 		return fmt.Sprintf("\tjmp\t%s", ea), true
 	}
-	if op&0xFB80 == 0x4880 {
+	// MOVEM работает только с памятью. Режим 0 (Dn) под той же маской — это
+	// EXT; без этой проверки decodeMOVEM съедает лишнее слово под маску
+	// регистров и сбивает весь дальнейший разбор.
+	if op&0xFB80 == 0x4880 && (op&0x38) != 0x00 {
 		// MOVEM
 		return d.decodeMOVEM(op)
 	}
-	if op&0xFF00 == 0x4A00 {
+	if op&0xFF00 == 0x4A00 && (op>>6)&3 != 3 {
 		sz := sizeName((op >> 6) & 3)
 		ea := d.decodeEA(op&0x3F, sizeBytes((op>>6)&3))
 		return fmt.Sprintf("\ttst.%s\t%s", sz, ea), true
@@ -308,32 +336,49 @@ func (d *Disassembler) decodeGroup4(op uint16) (string, bool) {
 		ea := d.decodeEA(op&0x3F, 1)
 		return fmt.Sprintf("\tnbcd\t%s", ea), true
 	}
-	if op&0xFF00 == 0x4200 {
+	// size==3 в группе 4 кодирует MOVE в/из SR и CCR. Без этих веток
+	// `move #$2700,sr` и `move sr,-(a7)` выходили как not.?/negx.? —
+	// несобираемый мусор. $42C0 (MOVE CCR,<ea>) есть только с 68010,
+	// на 68000 это данные, поэтому намеренно не декодируем.
+	if op&0xFFC0 == 0x40C0 {
+		ea := d.decodeEA(op&0x3F, 2)
+		return fmt.Sprintf("	move	sr,%s", ea), true
+	}
+	if op&0xFFC0 == 0x44C0 {
+		ea := d.decodeEA(op&0x3F, 2)
+		return fmt.Sprintf("	move	%s,ccr", ea), true
+	}
+	if op&0xFFC0 == 0x46C0 {
+		ea := d.decodeEA(op&0x3F, 2)
+		return fmt.Sprintf("	move	%s,sr", ea), true
+	}
+	if op&0xFF00 == 0x4200 && (op>>6)&3 != 3 {
 		sz := sizeName((op >> 6) & 3)
 		ea := d.decodeEA(op&0x3F, sizeBytes((op>>6)&3))
 		return fmt.Sprintf("\tclr.%s\t%s", sz, ea), true
 	}
-	if op&0xFF00 == 0x4400 {
+	if op&0xFF00 == 0x4400 && (op>>6)&3 != 3 {
 		sz := sizeName((op >> 6) & 3)
 		ea := d.decodeEA(op&0x3F, sizeBytes((op>>6)&3))
 		return fmt.Sprintf("\tneg.%s\t%s", sz, ea), true
 	}
-	if op&0xFF00 == 0x4000 {
+	if op&0xFF00 == 0x4000 && (op>>6)&3 != 3 {
 		sz := sizeName((op >> 6) & 3)
 		ea := d.decodeEA(op&0x3F, sizeBytes((op>>6)&3))
 		return fmt.Sprintf("\tnegx.%s\t%s", sz, ea), true
 	}
-	if op&0xFF00 == 0x4600 {
+	if op&0xFF00 == 0x4600 && (op>>6)&3 != 3 {
 		sz := sizeName((op >> 6) & 3)
 		ea := d.decodeEA(op&0x3F, sizeBytes((op>>6)&3))
 		return fmt.Sprintf("\tnot.%s\t%s", sz, ea), true
 	}
+	// SWAP ($4840-$4847) целиком внутри маски PEA, поэтому проверяется первым.
+	if op&0xFFF8 == 0x4840 {
+		return fmt.Sprintf("\tswap\td%d", op&7), true
+	}
 	if op&0xFFC0 == 0x4840 {
 		ea := d.decodeEA(op&0x3F, 4)
 		return fmt.Sprintf("\tpea\t%s", ea), true
-	}
-	if op&0xFFF8 == 0x4840 {
-		return fmt.Sprintf("\tswap\td%d", op&7), true
 	}
 	if op&0xFFC0 == 0x4AC0 {
 		ea := d.decodeEA(op&0x3F, 1)
@@ -501,6 +546,17 @@ func (d *Disassembler) decodeSUB(op uint16) (string, bool) {
 	}
 	sz := sizeName(uint16(opmode & 3))
 	ea := d.decodeEA(op&0x3F, sizeBytes(uint16(opmode&3)))
+	// SUBX занимает режимы 0 и 1 при bit8=1; прочие режимы там — обычный
+	// `sub.<sz> Dn,<ea>`. Без этого $D300 (`addx.b d0,d1`) выходил как
+	// `add.b d1,d0`, и пересборка давала другой опкод.
+	if opmode&4 != 0 {
+		switch (op >> 3) & 7 {
+		case 0:
+			return fmt.Sprintf("	subx.%s	d%d,d%d", sz, op&7, dn), true
+		case 1:
+			return fmt.Sprintf("	subx.%s	-(a%d),-(a%d)", sz, op&7, dn), true
+		}
+	}
 	if opmode&4 != 0 {
 		return fmt.Sprintf("\tsub.%s\td%d,%s", sz, dn, ea), true
 	}
@@ -525,12 +581,13 @@ func (d *Disassembler) decodeCMP(op uint16) (string, bool) {
 	sz := sizeName(uint16(opmode & 3))
 	ea := d.decodeEA(op&0x3F, sizeBytes(uint16(opmode&3)))
 	if opmode&4 != 0 {
-		// EOR (only dn→ea)
-		return fmt.Sprintf("\teor.%s\td%d,%s", sz, dn, ea), true
-	}
-	// CMPM check
-	if (op>>3)&7 == 1 && opmode < 3 {
-		return fmt.Sprintf("\tcmpm.%s\t(a%d)+,(a%d)+", sz, op&7, dn), true
+		// CMPM — это режим 1 при bit8=1; любой другой режим там означает EOR.
+		// Раньше CMPM проверялся как `opmode < 3`, то есть ровно наоборот, и
+		// $B089 (`cmp.l a1,d0`) выходил как `cmpm.l (a1)+,(a0)+`.
+		if (op>>3)&7 == 1 {
+			return fmt.Sprintf("	cmpm.%s	(a%d)+,(a%d)+", sz, op&7, dn), true
+		}
+		return fmt.Sprintf("	eor.%s	d%d,%s", sz, dn, ea), true
 	}
 	return fmt.Sprintf("\tcmp.%s\t%s,d%d", sz, ea, dn), true
 }
@@ -551,21 +608,25 @@ func (d *Disassembler) decodeGroupC(op uint16) (string, bool) {
 		ea := d.decodeEA(op&0x3F, 2)
 		return fmt.Sprintf("\tmuls.w\t%s,d%d", ea, dn), true
 	}
-	if opmode == 4 {
-		if (op>>3)&7 == 0 {
-			return fmt.Sprintf("\tabcd\td%d,d%d", op&7, dn), true
-		}
-		if (op>>3)&7 == 1 {
-			return fmt.Sprintf("\tabcd\t-(a%d),-(a%d)", op&7, dn), true
-		}
-		// EXG Dn,Dn
-		return fmt.Sprintf("\texg\td%d,d%d", dn, op&7), true
+	// ABCD и EXG занимают только режимы 0 и 1; при любом другом режиме те же
+	// opmode означают обычный `and.<sz> Dn,<ea>`. Раньше opmode 5 и 6 всегда
+	// давали exg, и, например, $C390 (`and.l d1,(a0)`) выходил как
+	// `exg d1,a0` — при пересборке получался опкод $C388.
+	mode := (op >> 3) & 7
+	if opmode == 4 && mode == 0 {
+		return fmt.Sprintf("	abcd	d%d,d%d", op&7, dn), true
 	}
-	if opmode == 5 {
-		return fmt.Sprintf("\texg\ta%d,a%d", dn, op&7), true
+	if opmode == 4 && mode == 1 {
+		return fmt.Sprintf("	abcd	-(a%d),-(a%d)", op&7, dn), true
 	}
-	if opmode == 6 {
-		return fmt.Sprintf("\texg\td%d,a%d", dn, op&7), true
+	if opmode == 5 && mode == 0 {
+		return fmt.Sprintf("	exg	d%d,d%d", dn, op&7), true
+	}
+	if opmode == 5 && mode == 1 {
+		return fmt.Sprintf("	exg	a%d,a%d", dn, op&7), true
+	}
+	if opmode == 6 && mode == 1 {
+		return fmt.Sprintf("	exg	d%d,a%d", dn, op&7), true
 	}
 	sz := sizeName(uint16(opmode & 3))
 	ea := d.decodeEA(op&0x3F, sizeBytes(uint16(opmode&3)))
@@ -592,6 +653,17 @@ func (d *Disassembler) decodeADD(op uint16) (string, bool) {
 	}
 	sz := sizeName(uint16(opmode & 3))
 	ea := d.decodeEA(op&0x3F, sizeBytes(uint16(opmode&3)))
+	// ADDX занимает режимы 0 и 1 при bit8=1; прочие режимы там — обычный
+	// `add.<sz> Dn,<ea>`. Без этого $D300 (`addx.b d0,d1`) выходил как
+	// `add.b d1,d0`, и пересборка давала другой опкод.
+	if opmode&4 != 0 {
+		switch (op >> 3) & 7 {
+		case 0:
+			return fmt.Sprintf("	addx.%s	d%d,d%d", sz, op&7, dn), true
+		case 1:
+			return fmt.Sprintf("	addx.%s	-(a%d),-(a%d)", sz, op&7, dn), true
+		}
+	}
 	if opmode&4 != 0 {
 		return fmt.Sprintf("\tadd.%s\td%d,%s", sz, dn, ea), true
 	}
@@ -605,7 +677,16 @@ func (d *Disassembler) decodeADD(op uint16) (string, bool) {
 func (d *Disassembler) decodeShift(op uint16) (string, bool) {
 	dir := (op >> 8) & 1 // 0=right, 1=left
 	mode := (op >> 3) & 7
-	kind := (op >> 9) & 3
+	// Тип сдвига у регистровой формы лежит в битах 4-3: биты 11-9 там заняты
+	// счётчиком или номером регистра. Только у формы «сдвиг памяти»
+	// (size == 3) тип в битах 10-9. Раньше он всегда брался из 11-9, и,
+	// например, $E998 (`rol.l #4,d0`) выходил как `asl.l #4,d0`.
+	var kind uint16
+	if (op>>6)&3 == 3 {
+		kind = (op >> 9) & 3
+	} else {
+		kind = (op >> 3) & 3
+	}
 	names := [4]string{"as", "ls", "rox", "ro"}
 	name := names[kind]
 	dirStr := "r"
@@ -703,10 +784,12 @@ func (d *Disassembler) decodeEAReg(mode, reg uint16, bytes int) string {
 			if ext&0x0800 != 0 {
 				idxSz = "l"
 			}
-			if disp < 0 {
-				return fmt.Sprintf("(-$%X,pc,%s%d.%s)", -disp, idxKind, idxReg, idxSz)
-			}
-			return fmt.Sprintf("($%X,pc,%s%d.%s)", disp, idxKind, idxReg, idxSz)
+			// Первым операндом asm68k ждёт АДРЕС и сам считает смещение от PC
+			// (как в режиме (d16,pc) выше). Сырое смещение он принимал за
+			// абсолютный адрес и ругался Displacement values cannot be larger
+			// than $7F. База — адрес самого расширяющего слова, т.е. PC()-2.
+			target := d.PC() + uint32(int32(disp)) - 2
+			return fmt.Sprintf("(%s,pc,%s%d.%s)", d.labelOrHex(target), idxKind, idxReg, idxSz)
 		case 4:
 			switch bytes {
 			case 1:
@@ -871,7 +954,7 @@ func condName(cond uint16) string {
 
 func regListStr(mask uint16, predecrement bool) string {
 	var parts []string
-	regs := [16]string{"d0","d1","d2","d3","d4","d5","d6","d7","a0","a1","a2","a3","a4","a5","a6","a7"}
+	regs := [16]string{"d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"}
 	if predecrement {
 		// Reversed for predecrement addressing
 		var rev [16]string
@@ -881,8 +964,13 @@ func regListStr(mask uint16, predecrement bool) string {
 		}
 		regs = rev
 	}
+	// Бит i соответствует regs[i], а НЕ regs[15-i]: в маске MOVEM бит 0 — это
+	// d0 (для -(An) — a7, что уже учтено переворотом regs выше). Из-за
+	// инвертированного индекса неверно читались все movem: классический
+	// `movem.w (a5)+,d5-d7` из boot-кода Sega выходил как `a0/a1/a2`, а
+	// `movem.l d0-d7/a0,-(a7)` — как `a7-a0/d7`.
 	for i, r := range regs {
-		if mask&(1<<uint(15-i)) != 0 {
+		if mask&(1<<uint(i)) != 0 {
 			parts = append(parts, r)
 		}
 	}
