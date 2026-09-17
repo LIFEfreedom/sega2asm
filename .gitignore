@@ -1,3 +1,8 @@
 out
 sega2asm
 Altered Beast (USA, Europe).md
+
+# проект Dyna Brothers 2
+build
+sega2asm.exe
+*.gen
