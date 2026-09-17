@@ -269,8 +269,13 @@ segments:
   - name: data_22
     type: bin
     start: 0x0039D8
-    end:   0x003A24
+    end:   0x0039EA
     subdir: code_data
+
+  - name: code_22b
+    type: m68k
+    start: 0x0039EA
+    end:   0x003A24
 
   - name: code_23
     type: m68k
@@ -1880,10 +1885,9 @@ segments:
     end:   0x020950
 
   - name: data_169
-    type: bin
+    type: m68k
     start: 0x020950
     end:   0x0209CE
-    subdir: code_data
 
   - name: code_170
     type: m68k
@@ -2275,10 +2279,9 @@ segments:
     end:   0x02878C
 
   - name: data_205
-    type: bin
+    type: m68k
     start: 0x02878C
     end:   0x0287B8
-    subdir: code_data
 
   - name: code_206
     type: m68k
