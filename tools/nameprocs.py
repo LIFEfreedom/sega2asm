@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """Предложить имена безымянным процедурам по механическим признакам.
 
-    python tools/nameprocs.py 050000 060000 >> game_symbols.user.txt
+    python tools/nameprocs.py 010000 020000 >> game_symbols.user.txt
+    make nameprocs FROM=010000 TO=020000
 
-Зачем. В банках вывода процедур сотни, и разбирать каждую глазами
+Зачем. Процедур в ROM полторы тысячи, разобрать каждую глазами
 непозволительно дорого. Но у каждой видно, ЧЕМ она занимается: какие
-трапы BIOS зовёт, в какую область VDP пишет, какие известные базы
-задевает. Этого хватает, чтобы место вызова читалось: `GfxPalette_053140`
-говорит больше, чем `loc_053140`.
+трапы BIOS зовёт, в какую область VDP пишет, какие известные базы и
+смещения записей задевает. Этого хватает, чтобы место вызова читалось:
+`AiPickAction_0178F4` говорит больше, чем `loc_0178F4`.
 
 Чего инструмент НЕ делает. Он не утверждает, ЗАЧЕМ процедура нужна.
-Имя вида `GfxLoadGfx_050290` значит ровно «распаковывает и копирует в
-VDP», и ничего сверх этого. Если роль установлена чтением кода, имя надо
-заменить руками на осмысленное — так сделано для полутора десятков
-процедур банка $05.
+Имя `MapPaint_020768` значит ровно «трогает карту местности и пишет в
+неё», и ничего сверх. Где роль установлена чтением кода, имя заменяется
+руками на осмысленное.
 
-Адрес в имени оставлен намеренно: имена гарантированно уникальны, и
-сразу видно, что имя машинное, а не выстраданное.
+Как устроено. Сначала по телу считаются очки предметных областей
+(поведение, юниты, бой, карта, игроки, вывод, звук, ввод, ядро). Область
+с наибольшим счётом даёт ПРЕФИКС. Внутри области первое подошедшее
+правило даёт УТОЧНЕНИЕ. Адрес в имени оставлен намеренно: имена
+уникальны, и сразу видно, что имя машинное.
 """
 import collections
 import os
@@ -34,29 +37,47 @@ ADDR = (re.compile(r"^; \$([0-9A-F]{6})$"),
         re.compile(r"^\S.*;\s*\$([0-9A-F]{6})$"),
         re.compile(r"^\torg\t\$([0-9A-F]{6})$"))
 
-# Порядок важен: от узкого признака к широкому, побеждает первый.
-RULES = [
-    ("ObjRecords", lambda j, tr, vd: "$86(a5)" in j or "#$005A" in j),
-    ("SpriteList", lambda j, tr, vd: "FF2748" in j or "SpriteList" in j),
-    ("Palette",    lambda j, tr, vd: "CRAM" in vd or tr.get("20", 0) >= 2
-                                     or tr.get("32", 0)),
-    ("ClearPlanes", lambda j, tr, vd: tr.get("21", 0) and tr.get("22", 0)),
-    ("Scroll",     lambda j, tr, vd: "VSRAM" in vd or tr.get("29", 0)),
-    ("LoadGfx",    lambda j, tr, vd: tr.get("10", 0) and tr.get("04", 0)),
-    ("Decompress", lambda j, tr, vd: tr.get("10", 0)),
-    ("VdpWrite",   lambda j, tr, vd: tr.get("04", 0) or tr.get("01", 0)
-                                     or bool(vd) or "VDP_" in j),
-    ("Sound",      lambda j, tr, vd: tr.get("2F", 0) or tr.get("30", 0)),
-    ("Text",       lambda j, tr, vd: tr.get("25", 0) or tr.get("24", 0)),
-    ("Input",      lambda j, tr, vd: "ReadDPad" in j or "ReadButton" in j),
-    ("FrameWait",  lambda j, tr, vd: "WaitVBlank" in j or "FrameWait" in j),
-    ("Units",      lambda j, tr, vd: "UnitRecords" in j or "UnitSlots" in j),
-    ("Buffer",     lambda j, tr, vd: "GfxWorkBuffer" in j),
-    ("Random",     lambda j, tr, vd: "Random" in j),
-    ("Timer",      lambda j, tr, vd: "DelayTimer" in j or "GameTick" in j),
-    ("State",      lambda j, tr, vd: "GameState" in j or "MainState" in j),
-    ("Table",      lambda j, tr, vd: bool(re.search(r"lea\tdata_\d+", j))),
-    ("Args",       lambda j, tr, vd: j.startswith("link")),
+# Область -> признаки, каждый даёт очко за каждое вхождение.
+DOMAINS = {
+    "Ai": ["TestActionInSet", "SetAnimDuration", "PickRandomBranch",
+           "BehaviourDispatch", "$15(a", "$24(a", "$14(a"],
+    "Unit": ["UnitRecords", "UnitSlots", "UnitStatTable", "UnitTypeTable",
+             "CreateUnit", "$0C(a", "$18(a"],
+    "Combat": ["HpDamage", "HpHeal", "ResolveCombat", "ApplyCombatDamage",
+               "IsDeadOrCarcass", "MakeCarcass", "$16(a", "$1C(a"],
+    "Map": ["TerrainMap", "UnitMap", "PlacementMap", "TerrainCellFromXY",
+            "PaintTerrainCell", "ClampMapCoords", "GetTerrainType",
+            "SetTerrainType", "CellFromXY"],
+    "Player": ["Player1State", "Player2State", "CurrentPlayerPtr",
+               "CanAfford", "PayCost", "PopulationCounts", "MainStatePtr"],
+    "Gfx": ["VDP_", "GfxWorkBuffer", "FlushSpriteTable", "SpriteList",
+            "BuildVisibleUnitList", "UpdateUnitScreenPos"],
+    "Sound": ["PlaySound", "PlaySfx", "BiosPlay", "PendingSfxId"],
+    "Input": ["ReadDPadDirection", "ReadButtonState", "InputState"],
+    "Core": ["GameState", "GameTick", "MainState", "FrameWait",
+             "VDPWaitVBlank", "DelayTimer"],
+    "Z80": ["Z80_BUSREQ", "Z80_RESET", "A01C04", "A00000"],
+}
+
+# Диапазон внутренностей BIOS: всё, что лежит между входом line-F и
+# концом его функций, относится к ядру независимо от прочих признаков.
+BIOS_LO, BIOS_HI = 0x000668, 0x001F00
+
+# Уточнение внутри области: (метка, проверка).
+REFINE = [
+    ("Clear",    lambda j, tr, vd: tr.get("21", 0) and tr.get("22", 0)),
+    ("Palette",  lambda j, tr, vd: "CRAM" in vd or tr.get("20", 0) or tr.get("32", 0)),
+    ("Scroll",   lambda j, tr, vd: "VSRAM" in vd or tr.get("29", 0)),
+    ("Load",     lambda j, tr, vd: tr.get("10", 0) and tr.get("04", 0)),
+    ("Unpack",   lambda j, tr, vd: tr.get("10", 0)),
+    ("Text",     lambda j, tr, vd: tr.get("25", 0) or tr.get("24", 0)),
+    ("Draw",     lambda j, tr, vd: tr.get("04", 0) or tr.get("01", 0)
+                                   or tr.get("2B", 0) or bool(vd) or "VDP_" in j),
+    ("Sfx",      lambda j, tr, vd: tr.get("2F", 0) or tr.get("30", 0)),
+    ("Rand",     lambda j, tr, vd: "Random" in j),
+    ("Loop",     lambda j, tr, vd: "dbf\t" in j),
+    ("Table",    lambda j, tr, vd: bool(re.search(r"lea\tdata_\d+", j))),
+    ("Args",     lambda j, tr, vd: j.startswith("link")),
 ]
 
 
@@ -66,14 +87,8 @@ def vdpkind(v):
     return {1: "VRAM", 3: "CRAM", 5: "VSRAM"}.get(cd, "?")
 
 
-def main():
-    lo = int(sys.argv[1], 16) if len(sys.argv) > 1 else 0
-    hi = int(sys.argv[2], 16) if len(sys.argv) > 2 else 0x200000
+def load():
     asm = os.path.join(HERE, "out", "asm", "m68k")
-    if not os.path.isdir(asm):
-        print("[--] нет out/asm/m68k — сначала `make split`")
-        return 1
-
     rows = []
     for fn in sorted(os.listdir(asm)):
         addr = None
@@ -91,6 +106,17 @@ def main():
                 rows.append((addr, line.strip()))
                 addr = None
     rows.sort()
+    return rows
+
+
+def main():
+    lo = int(sys.argv[1], 16) if len(sys.argv) > 1 else 0
+    hi = int(sys.argv[2], 16) if len(sys.argv) > 2 else 0x200000
+    if not os.path.isdir(os.path.join(HERE, "out", "asm", "m68k")):
+        print("[--] нет out/asm/m68k — сначала `make split`")
+        return 1
+
+    rows = load()
     order = [a for a, _ in rows]
     code = dict(rows)
 
@@ -133,25 +159,62 @@ def main():
             m = re.search(r"#\$([0-9A-F]{8}),\(VDP_CTRL\)", t)
             if m:
                 vd[vdpkind(int(m.group(1), 16))] += 1
-        cat = "Helper"
-        for name, test in RULES:
+
+        score = {d: sum(j.count(k) for k in keys)
+                 for d, keys in DOMAINS.items()}
+        best = max(score, key=lambda d: (score[d], d))
+        if BIOS_LO <= s < BIOS_HI:
+            best = "Bios"
+        elif score[best] == 0:
+            best = ""
+        note = ""
+        for label, test in REFINE:
             if test(j, tr, vd):
-                cat = name
+                note = label
                 break
-        out.append((s, cat, len(body), refs.get(s, 0)))
+        out.append([s, best, note, len(body), refs.get(s, 0), e])
+
+    # Наследование области от вызывающих: процедура без собственных
+    # признаков получает область того, кто её зовёт. Двух проходов
+    # хватает — дальше картина перестаёт меняться.
+    callers = collections.defaultdict(list)
+    for a, t in rows:
+        for m in re.finditer(r"loc_([0-9A-F]{6})", t):
+            callers[int(m.group(1), 16)].append(a)
+
+    def owner(addr):
+        """Чья это процедура — вернуть её область, если та известна."""
+        for o2 in out:
+            if o2[0] <= addr < o2[5]:
+                return o2[1]
+        return ""
+
+    for _ in range(2):
+        for o in out:
+            if o[1]:
+                continue
+            votes = collections.Counter(
+                d for d in (owner(c) for c in callers.get(o[0], ())) if d)
+            if votes:
+                o[1] = votes.most_common(1)[0][0]
+
+    out = [(o[0], (o[1] or "Sub") + o[2], o[3], o[4]) for o in out]
 
     cnt = collections.Counter(c for _, c, _, _ in out)
     print("; Имена ниже выведены по механическим признакам тела: вызванные")
-    print("; трапы BIOS, адреса VDP, задетые известные базы. Они говорят,")
-    print("; ЧЕМ процедура занимается, и ничего не утверждают о том, ЗАЧЕМ.")
+    print("; трапы BIOS, адреса VDP, задетые известные базы и смещения.")
+    print("; Префикс — предметная область с наибольшим счётом, суффикс —")
+    print("; уточнение по первому подошедшему правилу. Имя говорит, ЧЕМ")
+    print("; процедура занимается, и НИЧЕГО не утверждает о том, ЗАЧЕМ.")
     print("; Адрес в имени намеренный: имена уникальны и видно, что они")
     print("; машинные. Сгенерировано tools/nameprocs.py.")
     print(";")
-    print("; По категориям: " + ", ".join("%s %d" % kv for kv in cnt.most_common()))
+    print("; По категориям: " + ", ".join("%s %d" % kv
+                                          for kv in cnt.most_common()))
     print()
     for s, cat, n, r in out:
-        print("%-28s = $%06X   ; %d инстр, %d ссылок"
-              % ("Gfx%s_%06X" % (cat, s), s, n, r))
+        print("%-30s = $%06X   ; %d инстр, %d ссылок"
+              % ("%s_%06X" % (cat, s), s, n, r))
     return 0
 
 
