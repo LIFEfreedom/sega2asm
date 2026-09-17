@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -100,6 +100,12 @@ $(MAIN_ASM): $(SEGA2ASM) $(CONFIG) $(SYMBOLS) $(ROM)
 # ── Проверка сплита (работает без ассемблера) ────────────────────────────
 check: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/check_split.py $(CONFIG)
+
+# ── Карта кода ───────────────────────────────────────────────────────────
+# Пересчитывает, что в каком банке лежит, по механическим признакам.
+# Удобно прогонять после добавления имён: видно, где разбор продвинулся.
+codemap: $(MAIN_ASM)
+	@$(PYTHON) $(TOOLS_DIR)/codemap.py
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые
