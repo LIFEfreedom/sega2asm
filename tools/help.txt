@@ -1,0 +1,17 @@
+Dyna Brothers 2 — проект дизассемблирования
+
+Цели:
+  tools     — собрать sega2asm.exe (нужен Go 1.21+)
+  split     — разрезать game.gen по game.yaml в out/
+  check     — проверить покрытие ROM и побайтовое совпадение .bin
+  build     — собрать build/dynabrothers2.bin (нужен ассемблер, см. ниже)
+  verify    — сверить SHA-1 собранного ROM с оригиналом
+  rebuild   — split + build + verify
+  clean     — удалить build/
+  distclean — удалить build/ и out/
+
+По умолчанию (make) выполняется split + check — это работает без ассемблера.
+
+Ассемблер для build задаётся переменной ASM68K:
+  make build ASM68K=/path/to/asm68k.exe
+  make build ASM68K=/path/to/clownassembler_asm68k

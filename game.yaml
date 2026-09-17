@@ -1,0 +1,317 @@
+# Dyna Brothers 2 - Sega Channel Special (Japan)
+# CRI, 1995.APR — GM T-68063-00 — регион J — 2 621 440 байт (0x280000)
+# SRAM: $200001-$203FFF (odd bytes); контрольная сумма заголовка сходится
+name: dynabrothers2
+sha1: "8E10298DFFF521397F0E82D1787E701D6928750B"
+
+options:
+  platform: megadrive
+  region: ntsc
+  basename: dynabrothers2
+  base_path: ./out
+  target_path: ./game.gen
+  asm_path: asm
+  asset_path: assets
+  build_path: build
+  symbols_path: ./game_symbols.txt
+  charmap_path: ./game_charmap.tbl   # пока не создан, это допустимо
+  header_output: true
+  incbin: true
+
+# ── Границы получены обходом по потоку управления, а не на глаз ───────────
+# Засев: 53 точки (таблица векторов + 62 записи таблицы line-F $6BC),
+# затем прологи функций (48E7 movem.l / 4E56 link a6) для подпрограмм,
+# достижимых только косвенными вызовами.
+# Итог: 59 163 инструкции, 223 528 байт кода. Код кончается на $061B4E —
+# дальше 93 362 байта 0xFF. Последние инструкции перед границей:
+#   4C DF 0F 0F  movem.l (sp)+,d0-d3/a0-a3
+#   4E 75        rts
+# За границей во всей остальной ROM (2.2 МБ) обход находит 72 байта в
+# 4 обрывках по 10-30 байт — ложные срабатывания внутри графики. Кода там нет.
+#
+# ВАЖНО: hints НЕ ресинхронизируют дизассемблер — линейный проход считается
+# заранее, подсказка лишь подавляет вывод (segments/code.go:120-131). Поэтому
+# блоки данных вынесены в отдельные сегменты `bin`: только начало нового
+# сегмента возвращает декодеру выравнивание.
+segments:
+  # Заголовок ROM + таблица векторов 68000
+  - name: header
+    type: header
+    start: 0x000000
+    end:   0x000200
+
+  # Обработчики исключений и прерываний
+  - name: vector_handlers
+    type: m68k
+    start: 0x000200
+    end:   0x0006BC
+
+  # Таблица переходов диспетчера line-F ($000694):
+  #   move.w ($12,pc,d0.w),d0 / lea ($E,pc,d0.w),a0  ->  база $0006BC.
+  # Через эти трапы игра зовёт свой BIOS; в выводе они остаются как dc.w $FFxx.
+  - name: linef_jumptable
+    type: m68k
+    start: 0x0006BC
+    end:   0x000738
+    hints:
+      - offset: 0x0000
+        type: ptr_table_rel
+        length: 0x7C
+        base:  0x0006BC
+        label: LineFJumpTable
+
+  # ── Код и данные $000738-$061B4E ────────────────────────────────────────
+  # Блоки данных >= 0x800 байт вырезаны в `bin`; между ними — код.
+  # плотность кода по обходу: 89.4%
+  - name: code_01
+    type: m68k
+    start: 0x000738
+    end:   0x00220E
+
+  # плотность кода по обходу: 0.0%
+  - name: data_01
+    type: bin
+    start: 0x00220E
+    end:   0x003A0C
+    subdir: code_data
+
+  # плотность кода по обходу: 68.2%
+  - name: code_02
+    type: m68k
+    start: 0x003A0C
+    end:   0x00E916
+
+  # плотность кода по обходу: 0.0%
+  - name: data_02
+    type: bin
+    start: 0x00E916
+    end:   0x00F6C6
+    subdir: code_data
+
+  # плотность кода по обходу: 97.9%
+  - name: code_03
+    type: m68k
+    start: 0x00F6C6
+    end:   0x00FB92
+
+  # плотность кода по обходу: 0.0%
+  - name: data_03
+    type: bin
+    start: 0x00FB92
+    end:   0x013AF2
+    subdir: code_data
+
+  # плотность кода по обходу: 84.7%
+  - name: code_04
+    type: m68k
+    start: 0x013AF2
+    end:   0x021260
+
+  # плотность кода по обходу: 0.0%
+  - name: data_04
+    type: bin
+    start: 0x021260
+    end:   0x021B70
+    subdir: code_data
+
+  # плотность кода по обходу: 94.2%
+  - name: code_05
+    type: m68k
+    start: 0x021B70
+    end:   0x023AB2
+
+  # плотность кода по обходу: 0.0%
+  - name: data_05
+    type: bin
+    start: 0x023AB2
+    end:   0x024D68
+    subdir: code_data
+
+  # плотность кода по обходу: 67.2%
+  - name: code_06
+    type: m68k
+    start: 0x024D68
+    end:   0x028596
+
+  # плотность кода по обходу: 0.0%
+  - name: data_06
+    type: bin
+    start: 0x028596
+    end:   0x02937E
+    subdir: code_data
+
+  # плотность кода по обходу: 72.1%
+  - name: code_07
+    type: m68k
+    start: 0x02937E
+    end:   0x02E6D0
+
+  # плотность кода по обходу: 0.0%
+  - name: data_07
+    type: bin
+    start: 0x02E6D0
+    end:   0x02FC08
+    subdir: code_data
+
+  # плотность кода по обходу: 80.2%
+  - name: code_08
+    type: m68k
+    start: 0x02FC08
+    end:   0x034984
+
+  # плотность кода по обходу: 0.0%
+  - name: data_08
+    type: bin
+    start: 0x034984
+    end:   0x03630A
+    subdir: code_data
+
+  # плотность кода по обходу: 88.1%
+  - name: code_09
+    type: m68k
+    start: 0x03630A
+    end:   0x036D32
+
+  # плотность кода по обходу: 0.0%
+  - name: data_09
+    type: bin
+    start: 0x036D32
+    end:   0x0384CC
+    subdir: code_data
+
+  # плотность кода по обходу: 90.9%
+  - name: code_10
+    type: m68k
+    start: 0x0384CC
+    end:   0x03A21E
+
+  # плотность кода по обходу: 0.0%
+  - name: data_10
+    type: bin
+    start: 0x03A21E
+    end:   0x03CE72
+    subdir: code_data
+
+  # плотность кода по обходу: 92.7%
+  - name: code_11
+    type: m68k
+    start: 0x03CE72
+    end:   0x03DC2C
+
+  # плотность кода по обходу: 0.0%
+  - name: data_11
+    type: bin
+    start: 0x03DC2C
+    end:   0x0412C0
+    subdir: code_data
+
+  # плотность кода по обходу: 92.9%
+  - name: code_12
+    type: m68k
+    start: 0x0412C0
+    end:   0x043278
+
+  # плотность кода по обходу: 0.0%
+  - name: data_12
+    type: bin
+    start: 0x043278
+    end:   0x043D54
+    subdir: code_data
+
+  # плотность кода по обходу: 92.9%
+  - name: code_13
+    type: m68k
+    start: 0x043D54
+    end:   0x0448F2
+
+  # плотность кода по обходу: 0.0%
+  - name: data_13
+    type: bin
+    start: 0x0448F2
+    end:   0x04913E
+    subdir: code_data
+
+  # плотность кода по обходу: 81.4%
+  - name: code_14
+    type: m68k
+    start: 0x04913E
+    end:   0x04C332
+
+  # плотность кода по обходу: 0.0%
+  - name: data_14
+    type: bin
+    start: 0x04C332
+    end:   0x04CB3C
+    subdir: code_data
+
+  # плотность кода по обходу: 91.2%
+  - name: code_15
+    type: m68k
+    start: 0x04CB3C
+    end:   0x04CD5C
+
+  # плотность кода по обходу: 0.0%
+  - name: data_15
+    type: bin
+    start: 0x04CD5C
+    end:   0x04E26C
+    subdir: code_data
+
+  # плотность кода по обходу: 91.1%
+  - name: code_16
+    type: m68k
+    start: 0x04E26C
+    end:   0x04F1A8
+
+  # плотность кода по обходу: 0.0%
+  - name: data_16
+    type: bin
+    start: 0x04F1A8
+    end:   0x0507E2
+    subdir: code_data
+
+  # плотность кода по обходу: 99.0%
+  - name: code_17
+    type: m68k
+    start: 0x0507E2
+    end:   0x051EEE
+
+  # плотность кода по обходу: 0.0%
+  - name: data_17
+    type: bin
+    start: 0x051EEE
+    end:   0x052742
+    subdir: code_data
+
+  # плотность кода по обходу: 80.1%
+  - name: code_18
+    type: m68k
+    start: 0x052742
+    end:   0x05F9CA
+
+  # плотность кода по обходу: 0.0%
+  - name: data_18
+    type: bin
+    start: 0x05F9CA
+    end:   0x060CFA
+    subdir: code_data
+
+  # плотность кода по обходу: 86.5%
+  - name: code_19
+    type: m68k
+    start: 0x060CFA
+    end:   0x061B4E
+
+  # ── За кодом ────────────────────────────────────────────────────────────
+  # 93 362 байта 0xFF — выравнивание до границы банка $078800
+  - name: padding_after_code
+    type: bin
+    start: 0x061B4E
+    end:   0x078800
+
+  # Ресурсы: графика, карты, звук. Сжатие не опознано
+  # (`sega2asm detect` не нашёл ни одной из 31 сигнатуры).
+  - name: assets
+    type: bin
+    start: 0x078800
+    end:   0x280000

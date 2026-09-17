@@ -1,0 +1,11 @@
+; Dyna Brothers 2 - Sega Channel Special (Japan)
+; Точки входа из таблицы векторов 68000
+BusError          = $000200
+AddressError      = $000242
+IllegalInstruction = $000284
+DivideByZero      = $0002C6
+GenericIntHandler = $0003A0
+VBlankHandler     = $00044A
+HBlankHandler     = $00068C
+LineF             = $000694
+EntryPoint        = $000738
