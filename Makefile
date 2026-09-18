@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions stages gfx pcm music whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -131,6 +131,10 @@ dumptext:
 # Сырое сканирование: все прогоны допустимых байт, с шумом.
 findtext:
 	@$(PYTHON) $(TOOLS_DIR)/findtext.py
+
+# Текст ВНУТРИ сжатых блоков: findtext.py сканирует сырое ПЗУ и его не видит
+packedtext:
+	@$(PYTHON) $(TOOLS_DIR)/packedtext.py
 
 # Описания миссий: 92 байта на миссию, семь глав, всё сжатое
 missions:

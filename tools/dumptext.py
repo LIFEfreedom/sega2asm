@@ -301,6 +301,11 @@ def main():
         p("| %02X | %s |\n" % (idx, s.replace("|", "\\|")))
     p("\n")
 
+    p("## Чего здесь нет\n\n")
+    p("Реплики сценок: они лежат УПАКОВАННЫМИ, и сканер по сырому ПЗУ\n")
+    p("их не видит. Выгрузка — `make packedtext`,\n")
+    p("[game-cutscenes.md](game-cutscenes.md).\n\n")
+
     p("## Отдельные надписи\n\n")
     for title, rows in LOOSE:
         p("### %s\n\n" % title)
