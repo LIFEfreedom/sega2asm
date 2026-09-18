@@ -11,6 +11,19 @@ Dyna Brothers 2 — проект дизассемблирования
   clean     — удалить build/
   distclean — удалить build/ и out/
 
+Разбор (пишут в docs/ и out/, ассемблер не нужен):
+  codemap   — что в каком банке лежит
+  findcode  — bin-сегменты, которые на самом деле код
+  dumptext  — текст по таблицам; findtext — сырой скан
+  packedtext— текст внутри сжатых блоков
+  missions  — описания миссий; stages — сценарии этапов
+  gfx       — графика в out/gfx/*.png
+  pcm       — сэмплы DAC в WAV
+  music     — партитуры песен; sfx — звуковые эффекты
+  z80dis    — дизассемблер звукового драйвера
+  unpack    — распаковщик блока:  make unpack ADDR=060424
+  whocalls  — кто ведёт на адрес:  make whocalls WHO=008392
+
 По умолчанию (make) выполняется split + check — это работает без ассемблера.
 
 Ассемблер для build задаётся переменной ASM68K:

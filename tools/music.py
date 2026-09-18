@@ -14,6 +14,10 @@
 | `$81`–`$DF` | нота: номер в таблице частот `$08AA` плюс транспонирование |
 | `$E0`–`$FF` | команда, таблица `$0ADB` |
 
+Разбор самой строки общий со звуковыми эффектами и живёт в
+`tools/notestring.py`; там же сказано, откуда взято число операндов
+каждой команды.
+
 После ноты может идти байт длительности (тоже `< $80`); если следующий
 байт `≥ $80`, берётся длительность предыдущей ноты.
 
@@ -24,11 +28,12 @@
 разбора инструментов было бы натяжкой.
 """
 import os
-import struct
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
+
+import notestring  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -38,27 +43,6 @@ except Exception:
 rom = open(os.path.join(HERE, "game.gen"), "rb").read()
 
 STEPS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-
-# Команды нотной строки: имя и сколько байт занимает операнд.
-# Число операндов определено по тому, трогает ли обработчик de
-# (см. таблицу в docs/game-sound.md).
-CMD = {
-    0xE0: ("панорама", 1), 0xE1: ("поле +16", 1), 0xE2: ("($1C16)", 1),
-    0xE3: ("заглушить и кончить", 1), 0xE4: ("копия пяти байт", 5),
-    0xE5: ("громкость +2", 2), 0xE6: ("громкость", 1),
-    0xE7: ("флаг 1", 0), 0xE8: ("длительность", 1),
-    0xE9: ("LFO и панорама", 2), 0xEA: ("СЭМПЛ DAC", 1),
-    0xEB: ("счётчик", 2), 0xEC: ("громкость PSG", 1),
-    0xED: ("регистр YM I", 2), 0xEE: ("регистр YM II", 2),
-    0xEF: ("ИНСТРУМЕНТ", 1), 0xF0: ("адрес и 7", 3), 0xF1: ("поле +7", 1),
-    0xF2: ("КОНЕЦ", 0), 0xF3: ("шум PSG", 1), 0xF4: ("поле +7", 1),
-    0xF5: ("PSG +8", 1), 0xF6: ("ПЕРЕХОД", 2), 0xF7: ("цикл", 2),
-    0xF8: ("ВЫЗОВ", 2), 0xF9: ("ВОЗВРАТ", 0), 0xFA: ("поле +2", 1),
-    0xFB: ("транспонирование", 1), 0xFC: ("флаг 5", 1),
-    0xFD: ("флаг 3", 1), 0xFE: ("частоты операторов", 8),
-    0xFF: ("расширение", 2),
-}
-
 
 def bank_base(v):
     return 0x1C0000 + v * 0x8000
@@ -104,41 +88,14 @@ def song(v, n):
 
 
 def walk(v, start, mul, limit=4000):
-    """Нотная строка в события; идём до КОНЦА, ПЕРЕХОДА или предела."""
+    """Обёртка над общим разбором: подставляет чтение из банка v."""
     out = []
-    a = start
-    seen = set()
-    while len(out) < limit:
-        if a in seen:
-            out.append((a, "…дальше по кругу", None))
-            break
-        seen.add(a)
-        b = rd(v, a)
-        at = a
-        a += 1
-        if b >= 0xE0:
-            name, nops = CMD.get(b, ("?", 1))
-            ops = [rd(v, a + k) for k in range(nops)]
-            a += nops
-            out.append((at, "%s $%02X" % (name, b),
-                        " ".join("$%02X" % x for x in ops)))
-            if b in (0xF2, 0xF6, 0xF9):
-                break
-            continue
-        if b < 0x80:
-            out.append((at, "пауза", "%d" % (b * mul)))
-            continue
-        if b == 0x80:
-            out.append((at, "снять", None))
-            continue
-        i = b - 0x81
-        nxt = rd(v, a)
-        if nxt < 0x80:
-            a += 1
-            dur = "%d" % (nxt * mul)
-        else:
-            dur = "как раньше"
-        out.append((at, "нота %s (№%d)" % (note_name(i), i), dur))
+    for at, what, arg, _dur in notestring.walk(lambda a: rd(v, a), start, mul,
+                                               limit):
+        if what.startswith("\u043d\u043e\u0442\u0430 \u2116"):
+            i = int(what.split("\u2116")[1])
+            what = "\u043d\u043e\u0442\u0430 %s (\u2116%d)" % (note_name(i), i)
+        out.append((at, what, arg))
     return out
 
 

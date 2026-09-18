@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -178,6 +178,10 @@ pcm:
 # Партитуры всех песен в читаемый вид
 music:
 	@$(PYTHON) $(TOOLS_DIR)/music.py
+
+# Звуковые эффекты: 50 записей драйвера, из них 33 без единого сэмпла
+sfx:
+	@$(PYTHON) $(TOOLS_DIR)/sfx.py
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые
