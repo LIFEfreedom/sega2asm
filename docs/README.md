@@ -21,6 +21,7 @@
 | [game-ai-behaviours.md](game-ai-behaviours.md) | алгоритм поведения каждого вида, строка за строкой |
 | [game-stages.md](game-stages.md) | таблица этапов, формат расстановки, составной объект 20-го этапа |
 | [game-text.md](game-text.md) | весь текст по таблицам: напутствия к 45 миссиям и 8 урокам, названия, списки музыки и звуков |
+| [game-compression.md](game-compression.md) | распаковщик `$FF10`: пять методов, описания миссий, карта миссия→этап |
 | [game-species.md](game-species.md) | номера видов и привязка к именам |
 | [game-actions.md](game-actions.md) | словарь действий `+$15`, развязка стычки |
 | [game-damage.md](game-damage.md) | формула урона, сила и защита, урон от местности |

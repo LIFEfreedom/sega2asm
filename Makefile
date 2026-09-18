@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -131,6 +131,11 @@ dumptext:
 # Сырое сканирование: все прогоны допустимых байт, с шумом.
 findtext:
 	@$(PYTHON) $(TOOLS_DIR)/findtext.py
+
+# Распаковщик трапа $FF10, все пять методов:  make unpack ADDR=060424
+ADDR ?= 060424
+unpack:
+	@$(PYTHON) $(TOOLS_DIR)/unpack.py $(ADDR)
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые
