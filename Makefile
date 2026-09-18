@@ -62,7 +62,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -79,10 +79,17 @@ $(SEGA2ASM): main.go go.mod $(wildcard */*.go) $(wildcard */*/*.go)
 	$(GO) build -o $(SEGA2ASM) .
 
 # ── Анализ ROM ───────────────────────────────────────────────────────────
-# Пересобирает game.yaml и game_symbols.gen.txt из самой ROM. Запускать при
-# смене game.gen; оба файла — производные, в них не правят.
+# Пересобирает game_symbols.gen.txt из самой ROM. Запускать при смене
+# game.gen. game.yaml НЕ трогается: он производный только на первом прогоне,
+# дальше в нём руками режут сегменты и переводят их в m68k. Полная
+# перегенерация — `make analyze ANALYZEARGS=--write`, и она стирает эту работу.
 analyze:
-	$(PYTHON) $(TOOLS_DIR)/analyze.py
+	$(PYTHON) $(TOOLS_DIR)/analyze.py $(ANALYZEARGS)
+
+# Что из bin-сегментов game.yaml обход считает кодом. Переводить по одному,
+# арбитр — `make rebuild`.
+codegaps:
+	@$(PYTHON) $(TOOLS_DIR)/analyze.py --report
 
 # game_symbols.gen.txt в .gitignore, поэтому в свежем клоне его нет —
 # восстанавливаем анализатором, иначе сборка не стартует.

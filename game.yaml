@@ -2340,33 +2340,41 @@ segments:
     start: 0x0287B8
     end:   0x028812
 
+  # Короткие обработчики ИИ по таймеру (GameTick & маска), адрес лежит в
+  # таблице при скрипте миссии.
   - name: data_206
-    type: bin
+    type: m68k
     start: 0x028812
     end:   0x0288B6
-    subdir: code_data
 
   - name: code_207
     type: m68k
     start: 0x0288B6
     end:   0x02894C
 
+  # Восемнадцать цепочек фаз ИИ: адрес лежит в таблице из шести длинных
+  # слов при скрипте миссии, см. docs/game-ai-player.md.
   - name: data_207
-    type: bin
+    type: m68k
     start: 0x02894C
     end:   0x028B3C
-    subdir: code_data
 
   - name: code_208
     type: m68k
     start: 0x028B3C
     end:   0x02946A
 
+  # Шесть самоотносительных слов — переходы фазовой машины, за ними её код.
   - name: data_208
     type: bin
     start: 0x02946A
-    end:   0x029536
+    end:   0x029476
     subdir: code_data
+
+  - name: code_208b
+    type: m68k
+    start: 0x029476
+    end:   0x029536
 
   - name: code_209
     type: m68k
@@ -2384,11 +2392,17 @@ segments:
     start: 0x029574
     end:   0x029652
 
+  # То же для второй фазовой машины: таблица, за ней код.
   - name: data_210
     type: bin
     start: 0x029652
-    end:   0x029716
+    end:   0x02965E
     subdir: code_data
+
+  - name: code_210b
+    type: m68k
+    start: 0x02965E
+    end:   0x029716
 
   - name: code_211
     type: m68k
@@ -2417,11 +2431,11 @@ segments:
     start: 0x0297D2
     end:   0x0299FC
 
+  # Четыре правила «яйцо вида N» без норм, зовутся из цепочек фаз.
   - name: data_213
-    type: bin
+    type: m68k
     start: 0x0299FC
     end:   0x029A54
-    subdir: code_data
 
   - name: code_214
     type: m68k

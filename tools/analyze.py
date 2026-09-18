@@ -2,16 +2,23 @@
 """Анализ ROM Mega Drive -> game.yaml + game_symbols.gen.txt.
 
     python tools/analyze.py [--drop <лог сборки>]
+    python tools/analyze.py --report
 
 Всё выводится из самой ROM, ничего не зашито: таблица векторов, таблица
 диспетчера line-F, граница кода. Обход по потоку управления (семена: векторы,
-таблица line-F, прологи функций) строит карту «код/данные», по которой
-собирается конфиг: в сегменты m68k попадает только подтверждённый код, всё
-остальное — bin. Это важно: подсказки НЕ ресинхронизируют дизассемблер,
-выравнивание возвращает только начало нового сегмента.
+таблица line-F, прологи функций, указатели из таблиц данных) строит карту
+«код/данные», по которой собирается конфиг: в сегменты m68k попадает только
+подтверждённый код, всё остальное — bin. Это важно: подсказки НЕ
+ресинхронизируют дизассемблер, выравнивание возвращает только начало нового
+сегмента.
 
 --drop снимает с кода прогоны, в которых ассемблер нашёл нелегальные для 68000
 кодировки: это следы ложных срабатываний засева по прологам.
+
+--report ничего не перезаписывает, а печатает, внутри каких bin-сегментов
+ТЕКУЩЕГО game.yaml обход нашёл код. Так и надо пользоваться находками третьего
+прохода: game.yaml давно правится руками сегмент за сегментом, и полная
+перегенерация стёрла бы эту работу.
 
 Запускать при смене game.gen.
 
@@ -351,6 +358,118 @@ for a in prologues:
 print("проход 2 (+%d прологов): %d инструкций, %d байт"
       % (len(prologues), len(starts), sum(covered)))
 
+
+# ─────────────── проход 3: указатели из таблиц данных ────────────────────
+# Часть процедур недостижима обходом по потоку: адрес лежит в таблице, а не
+# в команде, и пролога `movem` у таких процедур нет. Так спрятан, например,
+# весь слой фаз компьютерного противника (docs/game-ai-player.md).
+#
+# Таблицы ищутся по самой ROM, двумя признаками, и оба самопроверяемые:
+# кандидат принимается, только если с указанного адреса декодируется
+# связный кусок кода до первой остановки.
+
+def flows_ok(a, limit=0x400):
+    """Декодируется ли с адреса связный кусок кода до первой остановки."""
+    end = a + limit
+    while a < end:
+        if a & 1 or a < 0x200 or a + 1 >= N:
+            return False
+        try:
+            ln, _, stop = decode(a)
+        except Bad:
+            return False
+        if stop:
+            return True
+        a += ln
+    return False
+
+
+def code_start_ok(v):
+    """Годится ли значение в указатель на процедуру.
+
+    Попадать оно обязано на ГРАНИЦУ команды: адрес внутри уже разобранной
+    команды — верный признак, что это не указатель, а совпадение.
+    """
+    if v & 1 or not (0x200 <= v < CODE_HI):
+        return False
+    if covered[v] and v not in starts:
+        return False
+    return flows_ok(v)
+
+
+def word_tables():
+    """`jmp/jsr (d8,pc,Xn.w)` — диспетчер по самоотносительным словам.
+
+    Смещение в самой команде задаёт адрес таблицы точно, гадать не о чем;
+    длина — пока слова разрешаются в код. Тем же приёмом выше снята
+    таблица line-F, здесь он распространён на все найденные диспетчеры.
+    """
+    found = {}
+    for a in starts:
+        if U16(a) not in (0x4EBB, 0x4EFB):         # JSR / JMP (d8,pc,Xn)
+            continue
+        ext = U16(a + 2)
+        if ext & 0x0800:                           # длинный индекс — не наш
+            continue
+        d8 = ext & 0xFF
+        t = a + 2 + (d8 - 256 if d8 > 127 else d8)
+        if t in found:
+            continue
+        run, limit = [], N
+        for i in range(0x400):
+            e = t + i * 2
+            if e + 1 >= N or e >= limit:
+                break
+            if covered[e] or covered[e + 1]:   # пошёл код, лежащий за таблицей
+                break
+            v = (t + S16(e)) & 0xFFFFFF
+            if not code_start_ok(v):
+                break
+            if v > t:
+                limit = min(limit, v)          # таблица не залезает на свою цель
+            run.append(v)
+        if run:
+            found[t] = run
+    return found
+
+
+def long_tables(min_run=4):
+    """Прогон длинных слов, указывающих в код, в НЕ покрытых байтах.
+
+    Покрытые байты не смотрим вовсе: там такой прогон — это сам код.
+    Четыре подряд — уже не совпадение: случайное длинное слово попадает в
+    диапазон кода примерно раз на четыре тысячи.
+    """
+    found, a = {}, 0x200
+    while a + 4 * min_run <= CODE_HI:
+        run, b = [], a
+        while b + 4 <= CODE_HI and not (covered[b] or covered[b + 1]
+                                        or covered[b + 2] or covered[b + 3]):
+            v = U32(b)
+            if v & 1 or not (0x200 <= v < CODE_HI):
+                break
+            run.append(v)
+            b += 4
+        if len(run) >= min_run and all(code_start_ok(v) for v in run):
+            found[a] = run
+            a = b
+        else:
+            a += 2
+    return found
+
+
+for rnd in range(1, 9):
+    tabs = {}
+    tabs.update(word_tables())
+    tabs.update(long_tables())
+    fresh = sorted({v for run in tabs.values() for v in run} - starts)
+    if not fresh:
+        break
+    targets.update(fresh)
+    walk(fresh)
+    print("проход 3.%d (+%d таблиц, %d новых адресов): %d инструкций, %d байт"
+          % (rnd, len(tabs), len(fresh), len(starts), sum(covered)))
+
 # Таблица переходов диспетчера — данные, но лежит вплотную за его концом, и
 # поток в неё затекает. Снимаем явно: иначе она даёт нелегальные инструкции,
 # а снятие всего прогона целиком утащило бы вместе с ней сам обработчик.
@@ -358,6 +477,64 @@ if tbl is not None:
     for k in range(tbl, tbl + tbl_n * 2):
         covered[k] = 0
     print("таблица line-F $%06X-$%06X помечена данными" % (tbl, tbl + tbl_n * 2))
+
+# ─────────────────────────── --report ────────────────────────────────────
+# game.yaml давно правится руками: 53 сегмента переведены в m68k по одному,
+# арбитром — побайтовая пересборка. Перезаписать его целиком значит стереть
+# эту работу, поэтому находки нового прохода печатаются списком, а перевод
+# остаётся ручным, как и раньше.
+if "--report" in sys.argv:
+    def yaml_segments(path):
+        cur = {}
+        for line in open(path, encoding="utf-8"):
+            m = re.match(r"\s*-?\s*name:\s*(\S+)", line)
+            if m:
+                cur = {"name": m.group(1)}
+            m = re.match(r"\s*type:\s*(\S+)", line)
+            if m and cur:
+                cur["type"] = m.group(1)
+            m = re.match(r"\s*start:\s*0x([0-9A-Fa-f]+)", line)
+            if m and cur:
+                cur["start"] = int(m.group(1), 16)
+            m = re.match(r"\s*end:\s*0x([0-9A-Fa-f]+)", line)
+            if m and cur:
+                cur["end"] = int(m.group(1), 16)
+                yield cur
+                cur = {}
+
+    MIN_RUN = 8
+    rows, total = [], 0
+    for sg in yaml_segments(os.path.join(HERE, "game.yaml")):
+        if sg.get("type") != "bin":
+            continue
+        runs, run = [], None
+        for i in range(sg["start"], sg["end"]):
+            if covered[i]:
+                if run is None:
+                    run = i
+            elif run is not None:
+                runs.append((run, i))
+                run = None
+        if run is not None:
+            runs.append((run, sg["end"]))
+        runs = [r for r in runs if r[1] - r[0] >= MIN_RUN]
+        if runs:
+            n = sum(b - a for a, b in runs)
+            total += n
+            rows.append((n, sg, runs))
+    rows.sort(key=lambda r: -r[0])
+    print("\nbin-сегменты, внутри которых обход нашёл код.")
+    print("Переводить по одному, арбитр — `make rebuild`.\n")
+    for n, sg, runs in rows:
+        whole = len(runs) == 1 and runs[0] == (sg["start"], sg["end"])
+        print("  %-14s $%06X-$%06X  +%5d байт%s" % (
+            sg["name"], sg["start"], sg["end"], n,
+            "   ЦЕЛИКОМ" if whole else ""))
+        if not whole:
+            for a, b in runs:
+                print("%36s$%06X-$%06X" % ("", a, b))
+    print("\nсегментов %d, байт %d" % (len(rows), total))
+    sys.exit(0)
 
 COV = os.path.join(HERE, "tools", ".coverage.pkl")
 if "--drop" in sys.argv:
@@ -468,8 +645,17 @@ segments:
 
 tail = ("\n\n  - name: rest\n    type: bin\n    start: 0x%06X\n    end:   0x%06X\n"
         % (CODE_HI, N))
-open(os.path.join(HERE, "game.yaml"), "w", encoding="utf-8").write(
-    head + "\n\n".join(body) + tail)
+# ОСТОРОЖНО: game.yaml давно не чисто производный файл. Поверх первого
+# прогона в нём руками переведены десятки сегментов, разрезаны свалки и
+# расставлены имена, на которые ссылаются документы. Перезапись стирает всё
+# это, поэтому существующий файл трогаем только по явному --write, а находки
+# смотрим через --report.
+YAML = os.path.join(HERE, "game.yaml")
+if os.path.exists(YAML) and "--write" not in sys.argv:
+    print("game.yaml оставлен как есть (перезапись — только с --write);"
+          " находки: --report")
+else:
+    open(YAML, "w", encoding="utf-8").write(head + "\n\n".join(body) + tail)
 
 # ───────────────────── game_symbols.gen.txt ──────────────────────────────
 named = {ENTRY: "EntryPoint", U32(2 * 4): "BusError", U32(3 * 4): "AddressError",
@@ -491,6 +677,6 @@ open(os.path.join(HERE, "game_symbols.gen.txt"), "w", encoding="utf-8").write(
     "\n".join(out) + "\n")
 
 m = sum(1 for l in body if "m68k" in l)
-print("\ngame.yaml: %d сегментов (m68k %d, bin %d), кода %d байт"
+print("\nразметка обходом: %d сегментов (m68k %d, bin %d), кода %d байт"
       % (len(body) + 2, m, len(body) - m + 2, sum(covered)))
 print("game_symbols.gen.txt: %d символов" % len(good))
