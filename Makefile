@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -156,6 +156,10 @@ gfx:
 # Читает листинги, поэтому зависит от split.
 stages: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/stagescript.py
+
+# Таблица исключений 68000: точки входа, до которых по ссылкам не добраться
+vectors:
+	@$(PYTHON) $(TOOLS_DIR)/vectors.py
 
 # Кто ведёт на адрес: скан сырых байт по всем формам перехода. Нужен там,
 # где анализатор не считает окрестность кодом:  make whocalls WHO=008392
