@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -119,6 +119,18 @@ FROM ?= 000000
 TO   ?= 200000
 nameprocs:
 	@$(PYTHON) $(TOOLS_DIR)/nameprocs.py $(FROM) $(TO)
+
+# ── Текст ────────────────────────────────────────────────────────────────
+# Выгружает текст ПО ТАБЛИЦАМ: напутствия к миссиям, названия, списки
+# музыки и звуков, надписи интерфейса. В отличие от findtext.py, который
+# сканирует ROM подряд и ловит графику, здесь каждая строка привязана
+# к месту в игре.
+dumptext:
+	@$(PYTHON) $(TOOLS_DIR)/dumptext.py
+
+# Сырое сканирование: все прогоны допустимых байт, с шумом.
+findtext:
+	@$(PYTHON) $(TOOLS_DIR)/findtext.py
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые
