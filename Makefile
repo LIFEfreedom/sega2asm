@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions stages whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions stages gfx whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -140,6 +140,13 @@ missions:
 ADDR ?= 060424
 unpack:
 	@$(PYTHON) $(TOOLS_DIR)/unpack.py $(ADDR)
+
+# ── Графика ──────────────────────────────────────────────────────────────
+# Распаковывает блоки и рисует их в out/gfx/*.png. Без палитры — серым,
+# с палитрой:  make gfx GFXARGS="--sprites 43 --pal 031D3C"
+GFXARGS ?=
+gfx:
+	@$(PYTHON) $(TOOLS_DIR)/gfx.py $(GFXARGS)
 
 # Сценарии событий этапов: что делает покадровый обработчик каждой карты.
 # Читает листинги, поэтому зависит от split.
