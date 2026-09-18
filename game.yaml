@@ -4067,12 +4067,42 @@ segments:
   - name: text_briefings
     type: bin
     start: 0x197160
-    end:   0x198790
+    end:   0x19879E
     subdir: rom_data
 
-  - name: data_198790
+  - name: scripts_story
     type: bin
-    start: 0x198790
+    start: 0x19879E
+    end:   0x198A66
+    subdir: rom_data
+
+  - name: data_story1
+    type: bin
+    start: 0x198A66
+    end:   0x1B4D72
+    subdir: rom_data
+
+  - name: data_story2
+    type: bin
+    start: 0x1B4D72
+    end:   0x1CC30C
+    subdir: rom_data
+
+  - name: pal_story
+    type: bin
+    start: 0x1CC30C
+    end:   0x1CC68C
+    subdir: rom_data
+
+  - name: table_story3
+    type: bin
+    start: 0x1CC68C
+    end:   0x1CC69C
+    subdir: rom_data
+
+  - name: data_story3
+    type: bin
+    start: 0x1CC69C
     end:   0x1CF000
     subdir: rom_data
 

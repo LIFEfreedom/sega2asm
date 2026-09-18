@@ -39,7 +39,7 @@ def chapters():
         p = struct.unpack(">I", rom[0x060400 + c * 4:0x060404 + c * 4])[0]
         if not (0 < p < 0x280000):
             continue
-        method, size, d = unpack(rom, p)
+        method, size, d, _end = unpack(rom, p)
         out.append((c, p, method, [d[i * REC:(i + 1) * REC]
                                    for i in range(size // REC)]))
     return out

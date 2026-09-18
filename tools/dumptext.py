@@ -100,7 +100,7 @@ def sounds(root):
 
 def mission_maps(chapter):
     """Номера карт из распакованного описания главы: `+$3` каждой записи."""
-    _, size, d = unpack(rom, chapter)
+    _, size, d, _end = unpack(rom, chapter)
     return [d[i * 0x5C + 3] for i in range(size // 0x5C)]
 
 
