@@ -103,4 +103,49 @@
 | 132 | — | `$02E722` | на тике 4500; музыка 19 = банк 3 песня $87; зовёт PlaySound, GfxDraw_00E10C, TerrainCellFromXY, MapLoop_0212A2 |
 | 217 | гл.8 м.12 | `$02E6D6` | старт на тике $5B68; повтор каждые $0E10; зовёт Map_02F412 |
 | 222 | гл.8 м.20 | `$02E836` | зовёт UnitLoop_02EB50 |
-| 223 | гл.8 м.24 | `$02E8C6` | зовёт loc_01F352, loc_01F410, loc_02FAC2 |
+| 223 | гл.8 м.24 | `$02E8C6` | зовёт UnitRand_01F352, loc_01F410, Map_02FAC2 |
+
+## Что делается при входе на карту
+
+Таблица `table_stagestart` `$02CE90` устроена так же, но тела у неё
+короткие: почти все сводятся к одному вызову. Смысл вызова виден из
+`$0166B2`, который каждый кадр решает, кончилась ли миссия: после
+первых `$200` тиков он смотрит перепись обоих игроков, и если у
+второго не осталось юнитов, ставит победу — **но перед этим
+умножает её на байт `WipeoutWinAllowed`**. Поэтому обработчик входа
+фактически задаёт цель миссии: `EnableWipeoutWin` — «перебей всех и
+победил», `DisableWipeoutWin` — «этого мало».
+
+Из 256 этапов 229 обходятся ровно этим вызовом и ничем больше.
+Различных адресов 19, но различных тел всего 7: одинаковые
+восьмибайтовые кусочки размножены, а не разделены.
+
+| этап | миссии | вход | тело |
+|---|---|---|---|
+| 3 | гл.1 м.7 | `$02E91A` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 7 | гл.1 м.13 | `$02E906` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 11 | гл.1 м.19 | `$02E91A` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 17 | гл.1 м.36 | `$02E92E` | bsr.w SetSpreadingTerrainWide / jsr (EnableWipeoutWin).l / rts |
+| 20 | гл.1 м.45 | `$02E942` | jsr (DisableWipeoutWin).l / bsr.w StartFinalCollapse / rts |
+| 23 | гл.1 м.4 | `$02E95E` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 26 | гл.1 м.11 | `$02E95E` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 27 | гл.1 м.21 | `$02E906` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 31 | гл.1 м.34 | `$02E92E` | bsr.w SetSpreadingTerrainWide / jsr (EnableWipeoutWin).l / rts |
+| 35 | гл.1 м.20 | `$02E95E` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 43 | гл.1 м.30 | `$02E95E` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 51 | гл.0 м.1 | `$02E972` | jsr (DisableWipeoutWin).l / rts |
+| 72 | гл.3 м.9 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 73 | гл.3 м.7 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 77 | гл.8 м.13 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 78 | гл.4 м.6 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 80 | гл.3 м.1 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 81 | гл.3 м.2 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 82 | гл.4 м.2 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 83 | гл.8 м.15 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 84 | гл.4 м.5 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 85 | гл.4 м.4 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 86 | гл.4 м.8 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 122 | — | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 127 | гл.5 м.8 | `$02E982` | bsr.w SetSpreadingTerrain / jsr (EnableWipeoutWin).l / rts |
+| 222 | гл.8 м.20 | `$02E9B8` | lea data_245(pc),a6 / jsr (LoadPlacement).l / jsr (DisableWipeoutWin).l / rts |
+| 255 | гл.8 м.5, гл.8 м.9 | `$02E99E` | jsr (Random).l / andi.l #$00000007,d0 / move.l d0,(GameTick).l / jsr (EnableWipeoutWin).l / rts |

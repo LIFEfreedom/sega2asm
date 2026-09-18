@@ -70,6 +70,11 @@ def body(code, a, limit=80):
         i = bisect.bisect_right(addrs, cur)
         if i >= len(addrs):
             break
+        # Через дыру не прыгаем: за ней уже другой сегмент, и его текст
+        # к этому обработчику отношения не имеет.
+        if addrs[i] - cur > 10:
+            out.append("…дальше bin")
+            break
         cur = addrs[i]
     return out
 
@@ -172,6 +177,35 @@ def main():
     for i, t, _s, what in rows:
         p("| %d | %s | `$%06X` | %s |\n"
           % (i, ", ".join(miss.get(i, [])) or "—", t, what))
+
+    # ── вход на карту ────────────────────────────────────────────────
+    p("\n## Что делается при входе на карту\n\n")
+    p("Таблица `table_stagestart` `$02CE90` устроена так же, но тела у неё\n")
+    p("короткие: почти все сводятся к одному вызову. Смысл вызова виден из\n")
+    p("`$0166B2`, который каждый кадр решает, кончилась ли миссия: после\n")
+    p("первых `$200` тиков он смотрит перепись обоих игроков, и если у\n")
+    p("второго не осталось юнитов, ставит победу — **но перед этим\n")
+    p("умножает её на байт `WipeoutWinAllowed`**. Поэтому обработчик входа\n")
+    p("фактически задаёт цель миссии: `EnableWipeoutWin` — «перебей всех и\n")
+    p("победил», `DisableWipeoutWin` — «этого мало».\n\n")
+    bodies = {}
+    for t in sorted(set(start)):
+        bodies[t] = body(code, t)
+    plain = [t for t in bodies
+             if bodies[t] == ["jsr\t(EnableWipeoutWin).l", "rts"]]
+    n_plain = sum(1 for t in start if t in plain)
+    p("Из 256 этапов %d обходятся ровно этим вызовом и ничем больше.\n"
+      "Различных адресов %d, но различных тел всего %d: одинаковые\n"
+      "восьмибайтовые кусочки размножены, а не разделены.\n\n"
+      % (n_plain, len(set(start)),
+         len(set(tuple(v) for v in bodies.values()))))
+    p("| этап | миссии | вход | тело |\n|---|---|---|---|\n")
+    for i, t in enumerate(start):
+        if t in plain:
+            continue
+        p("| %d | %s | `$%06X` | %s |\n"
+          % (i, ", ".join(miss.get(i, [])) or "—", t,
+             " / ".join(x.replace("\t", " ") for x in bodies[t])))
     f.close()
     print("записано: %s" % os.path.relpath(out_path, HERE))
     return 0

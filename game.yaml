@@ -2841,11 +2841,12 @@ segments:
   - name: code_245b
     type: m68k
     start: 0x02E8C6
-    end:   0x02E9C8
+    end:   0x02E9CA
 
+  # Расстановка этапа 222: её берёт lea $02E9CA(pc),a6 строкой выше
   - name: data_245
     type: bin
-    start: 0x02E9C8
+    start: 0x02E9CA
     end:   0x02EAF6
     subdir: code_data
 
@@ -2865,22 +2866,20 @@ segments:
     start: 0x02EE36
     end:   0x02F0DE
 
-  - name: data_247
-    type: bin
+  - name: code_247b
+    type: m68k
     start: 0x02F0DE
     end:   0x02F0EE
-    subdir: code_data
 
   - name: code_248
     type: m68k
     start: 0x02F0EE
     end:   0x02F1C6
 
-  - name: data_248
-    type: bin
+  - name: code_248b
+    type: m68k
     start: 0x02F1C6
     end:   0x02F1D2
-    subdir: code_data
 
   - name: code_249
     type: m68k
