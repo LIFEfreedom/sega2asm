@@ -56,6 +56,17 @@ def listing_index():
     return code
 
 
+def label_index():
+    """Имя метки -> адрес, из всех листингов."""
+    out = {}
+    for f in glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm")):
+        for ln in open(f, encoding="utf-8", errors="replace"):
+            m = re.match(r"^([A-Za-z_]\w*):\s+; \$([0-9A-F]{6})", ln)
+            if m:
+                out[m.group(1)] = int(m.group(2), 16)
+    return out
+
+
 def body(code, a, limit=80):
     """Инструкции от a до первого rts."""
     out, cur, addrs = [], a, sorted(code)
@@ -81,7 +92,7 @@ def body(code, a, limit=80):
 
 def digest(ins):
     d6 = d7 = None
-    ticks, music, calls = [], [], []
+    ticks, music, calls, arg7 = [], [], [], []
     for t in ins:
         m = re.match(r"move\.w\s+#\$([0-9A-F]+),d6", t)
         if m:
@@ -95,10 +106,51 @@ def digest(ins):
         m = re.match(r"move\.b\s+#\$([0-9A-F]+),d0", t)
         if m:
             music.append(int(m.group(1), 16))
+        # У тел-условий d7 значит не тик, а тип или число — и тогда его
+        # кладут байтом, а не словом.
+        m = re.match(r"move\.b\s+#\$([0-9A-F]+),d7", t)
+        if m:
+            arg7.append(int(m.group(1), 16))
         m = re.match(r"(?:bsr\.w|jsr)\s+\(?([A-Za-z_]\w*)", t)
         if m:
             calls.append(m.group(1))
-    return d6, d7, ticks, music, calls
+    return d6, d7, ticks, music, calls, arg7
+
+
+SWEEPS = {"SpreadTerrainRandom": "38x38, шанс 10%",
+          "ConvertTerrainInner": "38x38, все клетки",
+          "ConvertTerrainAll": "40x40, все клетки",
+          "SeedEmptyTerrain": "только пустые, шанс 25%"}
+
+
+def terrain_ops(ins):
+    """Пары «маска типов -> тип» из тела: d4 маска, d5 тип, затем проход.
+
+    Значений `d5` до вызова может быть несколько — тогда тип выбирается
+    броском, как в `$02F30A`; собираем их все.
+    """
+    d4 = None
+    cand = []
+    out = []
+    for t in ins:
+        m = re.match(r"move\.l\s+#\$([0-9A-F]+),d4", t)
+        if m:
+            d4 = int(m.group(1), 16)
+        if re.match(r"moveq\s+#1,d4", t):
+            d4 = 1
+        m = re.match(r"move\.w\s+#\$([0-9A-F]+),d5", t)
+        if m:
+            cand.append(int(m.group(1), 16))
+        m = re.match(r"(?:bsr\.w|jsr)\s+\(?(\w+)", t)
+        if m and m.group(1) in SWEEPS:
+            types = [b for b in range(32) if d4 and d4 >> b & 1]
+            if not cand and out:
+                cand = list(out[-1][2])       # повтор того же прохода
+            op = (m.group(1), tuple(types), tuple(cand))
+            if not out or out[-1] != op:
+                out.append(op)
+            cand = []
+    return out
 
 
 def stage_to_missions():
@@ -152,7 +204,7 @@ def main():
     rows = []
     for i in live:
         ins = body(code, tgt[i])
-        d6, d7, ticks, music, calls = digest(ins)
+        d6, d7, ticks, music, calls, arg7 = digest(ins)
         if len(ins) <= 1:
             continue
         bits = []
@@ -160,6 +212,8 @@ def main():
             bits.append("старт на тике $%04X" % d7)
         if d6 is not None:
             bits.append("повтор каждые $%04X" % d6)
+        for x in arg7:
+            bits.append("параметр d7 = %d" % x)
         for t in ticks:
             bits.append("на тике %d" % t)
         for m in music:
@@ -206,6 +260,61 @@ def main():
         p("| %d | %s | `$%06X` | %s |\n"
           % (i, ", ".join(miss.get(i, [])) or "—", t,
              " / ".join(x.replace("\t", " ") for x in bodies[t])))
+
+    # ── общие тела ───────────────────────────────────────────────────
+    p("\n## Общие тела: что именно происходит\n\n")
+    p("Сценарий сам почти ничего не делает — он задаёт `d6` и `d7` и зовёт\n")
+    p("тело из библиотеки около `$02F1D2`. У всех тел один скелет:\n\n")
+    p("```\n")
+    p("    d0 = StageEventTimer\n")
+    p("    если d0 == 0:  сработать, когда GameTick дорастёт до d7\n")
+    p("    иначе:         d0 -= 1; сработать на нуле\n")
+    p("    сработав:      <действие>; StageEventTimer = d6\n")
+    p("```\n\n")
+    p("Действие почти всегда — **проход по карте местности**. Соглашение у\n")
+    p("всех четырёх проходов одно: `d4` — маска типов, которые можно\n")
+    p("менять (бит по номеру типа), `d5` — тип, в который менять.\n\n")
+    p("| проход | охват |\n|---|---|\n")
+    for k, v in sorted(SWEEPS.items()):
+        p("| `%s` | %s |\n" % (k, v))
+    p("\nНесколько тел местность не трогают, а **проверяют цель миссии**.\n"
+      "У них `d7` значит не тик, а тип или число, и кладут его байтом:\n\n")
+    p("| тело | смысл | где |\n|---|---|---|\n")
+    p("| `LoseIfNeutralTypeGone` | не осталось нейтрального юнита типа "
+      "`d7` — поражение | этапы 29, 30, 34, 36, всюду тип 50 |\n")
+    p("| `AllowWinIfNeutralTypeGone` | не осталось типа `d7` — победу "
+      "разрешить | этап 222, тип 68 |\n")
+    p("| `WinIfHerbivoresReach` | травоядных у игрока 1 стало `>= d7` — "
+      "победа | этап 51, восемь |\n")
+    p("\nПоследние два стоят на картах, где обработчик входа победу\n"
+      "запретил, — так и получаются цели, отличные от «перебей всех».\n")
+    p("\nТела, которые зовут сценарии:\n\n")
+    users = {}
+    for i in live:
+        for c in digest(body(code, tgt[i]))[4]:
+            users.setdefault(c, []).append(i)
+    p("| тело | этапы | действие |\n|---|---|---|\n")
+    labels = label_index()
+    for name in sorted(users, key=lambda n: -len(users[n])):
+        # только библиотека сценариев, не общие процедуры движка
+        if not (0x02EA00 <= labels.get(name, 0) < 0x030060):
+            continue
+        ins = body(code, labels[name], limit=120)
+        ops = terrain_ops(ins)
+        if ops:
+            what = "; ".join(
+                "%s -> %s (`%s`)"
+                % ("типы " + ", ".join(str(t) for t in ts) if ts else "пусто",
+                   " либо ".join(str(x) for x in d5) or "?", fn)
+                for fn, ts, d5 in ops)
+        else:
+            seen = []
+            for c in digest(ins)[4]:
+                if c not in seen and c not in SWEEPS:
+                    seen.append(c)
+            what = "местность не трогает; зовёт " + ", ".join(seen[:5])
+        p("| `%s` | %s | %s |\n"
+          % (name, ", ".join(str(x) for x in sorted(set(users[name]))), what))
     f.close()
     print("записано: %s" % os.path.relpath(out_path, HERE))
     return 0
