@@ -2450,7 +2450,9 @@ segments:
     start: 0x02CE68
     end:   0x02CE90
 
-  - name: data_216
+  # 256 самоотносительных слов по номеру этапа (+$3 описания миссии):
+  # что сделать один раз при входе на карту. Читает $02CE68.
+  - name: table_stagestart
     type: bin
     start: 0x02CE90
     end:   0x02D090
@@ -2461,11 +2463,20 @@ segments:
     start: 0x02D090
     end:   0x02D0B8
 
-  - name: data_217
+  # То же по номеру этапа, но покадрово: сценарий событий карты.
+  # Читает $02D090 сразу после приращения GameTick.
+  - name: table_stageframe
     type: bin
     start: 0x02D0B8
-    end:   0x02D2D8
+    end:   0x02D2B8
     subdir: code_data
+
+  # Первые четыре записи таблицы ведут сюда, сразу за её конец: самые
+  # короткие сценарии — пустой и «задать пару порогов и позвать общую».
+  - name: code_217b
+    type: m68k
+    start: 0x02D2B8
+    end:   0x02D2D8
 
   - name: code_218
     type: m68k
@@ -2475,8 +2486,13 @@ segments:
   - name: data_218
     type: bin
     start: 0x02D322
-    end:   0x02D358
+    end:   0x02D32C
     subdir: code_data
+
+  - name: code_218b
+    type: m68k
+    start: 0x02D32C
+    end:   0x02D358
 
   - name: code_219
     type: m68k
@@ -2486,8 +2502,13 @@ segments:
   - name: data_219
     type: bin
     start: 0x02D406
-    end:   0x02D4FE
+    end:   0x02D484
     subdir: code_data
+
+  - name: code_219b
+    type: m68k
+    start: 0x02D484
+    end:   0x02D4FE
 
   - name: code_220
     type: m68k
@@ -2505,77 +2526,85 @@ segments:
     start: 0x02D51C
     end:   0x02D560
 
-  - name: data_221
-    type: bin
+  - name: code_221c
+    type: m68k
     start: 0x02D560
+    end:   0x02D586
+
+  - name: code_221b
+    type: m68k
+    start: 0x02D586
     end:   0x02D588
-    subdir: code_data
 
   - name: code_222
     type: m68k
     start: 0x02D588
     end:   0x02D5B8
 
-  - name: data_222
-    type: bin
+  - name: code_222b
+    type: m68k
     start: 0x02D5B8
     end:   0x02D5E8
-    subdir: code_data
 
   - name: code_223
     type: m68k
     start: 0x02D5E8
     end:   0x02D650
 
-  - name: data_223
-    type: bin
+  - name: code_223b
+    type: m68k
     start: 0x02D650
     end:   0x02D652
-    subdir: code_data
 
   - name: code_224
     type: m68k
     start: 0x02D652
     end:   0x02D67E
 
-  - name: data_224
-    type: bin
+  - name: code_224c
+    type: m68k
     start: 0x02D67E
+    end:   0x02D684
+
+  - name: code_224b
+    type: m68k
+    start: 0x02D684
     end:   0x02D696
-    subdir: code_data
 
   - name: code_225
     type: m68k
     start: 0x02D696
     end:   0x02D786
 
-  - name: data_225
-    type: bin
+  - name: code_225c
+    type: m68k
     start: 0x02D786
+    end:   0x02D794
+
+  - name: code_225b
+    type: m68k
+    start: 0x02D794
     end:   0x02D7B8
-    subdir: code_data
 
   - name: code_226
     type: m68k
     start: 0x02D7B8
     end:   0x02D806
 
-  - name: data_226
-    type: bin
+  - name: code_226b
+    type: m68k
     start: 0x02D806
     end:   0x02D814
-    subdir: code_data
 
   - name: code_227
     type: m68k
     start: 0x02D814
     end:   0x02D844
 
-  - name: data_227
-    type: bin
+  - name: code_227b
+    type: m68k
     start: 0x02D844
     end:   0x02D84E
-    subdir: code_data
 
   - name: code_228
     type: m68k
@@ -2585,30 +2614,38 @@ segments:
   - name: data_228
     type: bin
     start: 0x02D8C8
-    end:   0x02D8F6
+    end:   0x02D8E4
     subdir: code_data
+
+  - name: code_228b
+    type: m68k
+    start: 0x02D8E4
+    end:   0x02D8F6
 
   - name: code_229
     type: m68k
     start: 0x02D8F6
     end:   0x02D93C
 
-  - name: data_229
-    type: bin
+  - name: code_229b
+    type: m68k
     start: 0x02D93C
     end:   0x02D946
-    subdir: code_data
 
   - name: code_230
     type: m68k
     start: 0x02D946
     end:   0x02D9CA
 
-  - name: data_230
-    type: bin
+  - name: code_230c
+    type: m68k
     start: 0x02D9CA
+    end:   0x02D9CC
+
+  - name: code_230b
+    type: m68k
+    start: 0x02D9CC
     end:   0x02DADC
-    subdir: code_data
 
   - name: code_231
     type: m68k
@@ -2618,83 +2655,103 @@ segments:
   - name: data_231
     type: bin
     start: 0x02DB9A
-    end:   0x02DC2E
+    end:   0x02DC1E
     subdir: code_data
+
+  - name: code_231b
+    type: m68k
+    start: 0x02DC1E
+    end:   0x02DC2E
 
   - name: code_232
     type: m68k
     start: 0x02DC2E
     end:   0x02DD46
 
-  - name: data_232
-    type: bin
+  - name: code_232c
+    type: m68k
     start: 0x02DD46
+    end:   0x02DD54
+
+  - name: code_232b
+    type: m68k
+    start: 0x02DD54
     end:   0x02DD5E
-    subdir: code_data
 
   - name: code_233
     type: m68k
     start: 0x02DD5E
     end:   0x02DDA4
 
-  - name: data_233
-    type: bin
+  - name: code_233b
+    type: m68k
     start: 0x02DDA4
     end:   0x02DDA6
-    subdir: code_data
 
   - name: code_234
     type: m68k
     start: 0x02DDA6
     end:   0x02E2D0
 
-  - name: data_234
-    type: bin
+  - name: code_234b
+    type: m68k
     start: 0x02E2D0
     end:   0x02E2D2
-    subdir: code_data
 
   - name: code_235
     type: m68k
     start: 0x02E2D2
     end:   0x02E332
 
-  - name: data_235
-    type: bin
+  - name: code_235c
+    type: m68k
     start: 0x02E332
+    end:   0x02E334
+
+  - name: code_235b
+    type: m68k
+    start: 0x02E334
     end:   0x02E36C
-    subdir: code_data
 
   - name: code_236
     type: m68k
     start: 0x02E36C
     end:   0x02E39C
 
-  - name: data_236
-    type: bin
+  - name: code_236c
+    type: m68k
     start: 0x02E39C
+    end:   0x02E3AA
+
+  - name: code_236b
+    type: m68k
+    start: 0x02E3AA
     end:   0x02E3D4
-    subdir: code_data
 
   - name: code_237
     type: m68k
     start: 0x02E3D4
     end:   0x02E434
 
-  - name: data_237
-    type: bin
+  - name: code_237b
+    type: m68k
     start: 0x02E434
     end:   0x02E442
-    subdir: code_data
 
   - name: code_238
     type: m68k
     start: 0x02E442
     end:   0x02E488
 
+  - name: code_238b
+    type: m68k
+    start: 0x02E488
+    end:   0x02E4EC
+
+  # Таблица, которую берёт lea $02E4EC(pc),a6 в конце сценария
   - name: data_238
     type: bin
-    start: 0x02E488
+    start: 0x02E4EC
     end:   0x02E570
     subdir: code_data
 
@@ -2703,44 +2760,50 @@ segments:
     start: 0x02E570
     end:   0x02E62C
 
-  - name: data_239
-    type: bin
+  - name: code_239c
+    type: m68k
     start: 0x02E62C
+    end:   0x02E63A
+
+  - name: code_239b
+    type: m68k
+    start: 0x02E63A
     end:   0x02E648
-    subdir: code_data
 
   - name: code_240
     type: m68k
     start: 0x02E648
     end:   0x02E68E
 
-  - name: data_240
-    type: bin
+  - name: code_240c
+    type: m68k
     start: 0x02E68E
+    end:   0x02E69C
+
+  - name: code_240b
+    type: m68k
+    start: 0x02E69C
     end:   0x02E6AA
-    subdir: code_data
 
   - name: code_241
     type: m68k
     start: 0x02E6AA
     end:   0x02E6D6
 
-  - name: data_241
-    type: bin
+  - name: code_241b
+    type: m68k
     start: 0x02E6D6
     end:   0x02E6E4
-    subdir: code_data
 
   - name: code_242
     type: m68k
     start: 0x02E6E4
     end:   0x02E722
 
-  - name: data_242
-    type: bin
+  - name: code_242b
+    type: m68k
     start: 0x02E722
     end:   0x02E728
-    subdir: code_data
 
   - name: code_243
     type: m68k
@@ -2750,28 +2813,39 @@ segments:
   - name: data_243
     type: bin
     start: 0x02E7E6
-    end:   0x02E842
+    end:   0x02E836
     subdir: code_data
+
+  - name: code_243b
+    type: m68k
+    start: 0x02E836
+    end:   0x02E842
 
   - name: code_244
     type: m68k
     start: 0x02E842
     end:   0x02E872
 
-  - name: data_244
-    type: bin
+  - name: code_244b
+    type: m68k
     start: 0x02E872
     end:   0x02E880
-    subdir: code_data
 
   - name: code_245
     type: m68k
     start: 0x02E880
     end:   0x02E8C6
 
+  # Общие сценарии этапов: заглушка $02E8FA и то, на что смотрят обе
+  # таблицы, когда у этапа нет своего. Вход только через них.
+  - name: code_245b
+    type: m68k
+    start: 0x02E8C6
+    end:   0x02E9C8
+
   - name: data_245
     type: bin
-    start: 0x02E8C6
+    start: 0x02E9C8
     end:   0x02EAF6
     subdir: code_data
 

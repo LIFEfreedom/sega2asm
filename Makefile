@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions stages whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -140,6 +140,11 @@ missions:
 ADDR ?= 060424
 unpack:
 	@$(PYTHON) $(TOOLS_DIR)/unpack.py $(ADDR)
+
+# Сценарии событий этапов: что делает покадровый обработчик каждой карты.
+# Читает листинги, поэтому зависит от split.
+stages: $(MAIN_ASM)
+	@$(PYTHON) $(TOOLS_DIR)/stagescript.py
 
 # Кто ведёт на адрес: скан сырых байт по всем формам перехода. Нужен там,
 # где анализатор не считает окрестность кодом:  make whocalls WHO=008392
