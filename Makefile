@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -131,6 +131,10 @@ dumptext:
 # Сырое сканирование: все прогоны допустимых байт, с шумом.
 findtext:
 	@$(PYTHON) $(TOOLS_DIR)/findtext.py
+
+# Описания миссий: 92 байта на миссию, семь глав, всё сжатое
+missions:
+	@$(PYTHON) $(TOOLS_DIR)/missions.py
 
 # Распаковщик трапа $FF10, все пять методов:  make unpack ADDR=060424
 ADDR ?= 060424
