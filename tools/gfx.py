@@ -2,6 +2,7 @@
 """Достаёт графику: распаковывает блоки и рисует их в PNG.
 
     make gfx                                    сводка по всему
+    make gfx GFXARGS=--all                      ВСЁ в цвете в out/gfx/
     make gfx GFXARGS="--stages 1 0"             набор тайлов этапа 1 палитрой 0
     make gfx GFXARGS="--sprites 43"             кадры набора 43
     make gfx GFXARGS=062BDA                     блок по адресу
@@ -33,6 +34,7 @@
 другой вид: шесть байт на цвет, «текущий» и «целевой» по три нибблa, —
 так устроено затухание (`$00C5B0`), и по этому виду искать бесполезно.
 """
+import io
 import os
 import struct
 import sys
@@ -249,6 +251,97 @@ def do_sprites(d, pal, only=None):
         print("  итого кадров %d, пустых записей %d" % (total, empty))
 
 
+def palette_strip(pals, path, cell=16, scale=1):
+    """Полоса палитр: строка на палитру, клетка на цвет."""
+    w, h = 16 * cell, len(pals) * cell
+    img = [[(0, 0, 0)] * w for _ in range(h)]
+    for r, pal in enumerate(pals):
+        for c, col in enumerate(pal):
+            for y in range(cell):
+                for x in range(cell):
+                    img[r * cell + y][c * cell + x] = col
+    png(path, w, h, img)
+
+
+def do_all(d):
+    """Всё, что является тайлами, в цвете; плюс оглавление."""
+    lines = ["# Выгрузка графики", "",
+             "СГЕНЕРИРОВАНО `tools/gfx.py --all` (`make gfx GFXARGS=--all`).",
+             "", "Тайлы местности покрашены палитрой своей записи этапа,",
+             "спрайты — палитрой юнитов `data_99[3]` = `$00F7E4`.", ""]
+    recs = stage_records()
+    unit = read_palette(UNIT_PAL)
+    alt = read_palette(PAL_ARRAY + 32)   # слот 1: вторая палитра юнитов
+
+    lines += ["## Тайлы местности", "",
+              "| этап | набор | тайлов | файл |", "|---|---|---|---|"]
+    used = set()
+    seen = {}
+    for k, (pals, assets) in enumerate(recs):
+        palette_strip(pals, os.path.join(d, "stage%02d_palettes.png" % k))
+        for a in assets:
+            used.add(a)
+            p = L(ASSETS + 4 * a)
+            _m, _size, data, _e = unpack(rom, p)
+            if bytes(data[:4]) == METATILE_MARK:
+                continue
+            key = (a, tuple(pals[0]))
+            if key in seen:
+                lines.append("| %d | %d | — | то же, что у этапа %d |"
+                             % (k, a, seen[key]))
+                continue
+            seen[key] = k
+            name = "terrain_stage%02d_asset%02d.png" % (k, a)
+            t = render(data, os.path.join(d, name), pal=pals[0])
+            lines.append("| %d | %d | %d | `%s` |" % (k, a, t, name))
+
+    rest = [i for i in range(table_len(ASSETS)) if i not in used]
+    if rest:
+        lines += ["", "Наборы, которые не берёт ни одна запись этапа "
+                  "(рисуются серым): " + ", ".join(str(i) for i in rest), ""]
+        for a in rest:
+            p = L(ASSETS + 4 * a)
+            _m, _size, data, _e = unpack(rom, p)
+            if bytes(data[:4]) == METATILE_MARK:
+                continue
+            render(data, os.path.join(d, "terrain_asset%02d.png" % a))
+
+    lines += ["", "## Спрайты", "",
+              "Слоты 1 и 2 CRAM — обе палитры юнитов, и какой набор в каком,",
+              "по коду не видно; поэтому оба варианта.", "",
+              "| набор | кадров | файлы |", "|---|---|---|"]
+    for i in range(SPRITE_SETS):
+        sub = L(SPRITES + 4 * i)
+        k = table_len(sub)
+        if not k:
+            lines.append("| %d | — | подтаблица не разбирается |" % i)
+            continue
+        frames = []
+        for j in range(k):
+            p = L(sub + 4 * j)
+            if not (0 < p < 0x200000):
+                continue
+            _m, _size, data, _e = unpack(rom, p)
+            frames.append(columnwise(bytes(data)))
+        for tag, pl in (("pal1", alt), ("pal3", unit)):
+            name = "sprites_%02d_%s.png" % (i, tag)
+            render_frames(frames, os.path.join(d, name), pal=pl)
+        lines.append("| %d | %d | `sprites_%02d_pal1.png`, `sprites_%02d_pal3.png` |"
+                     % (i, len(frames), i, i))
+
+    lines += ["", "## Палитры", "",
+              "По записи этапа — полоса из её четырнадцати палитр:", "",
+              "| запись | файл |", "|---|---|"]
+    for k in range(len(recs)):
+        lines.append("| %d | `stage%02d_palettes.png` |" % (k, k))
+    lines.append("")
+    idx = os.path.join(d, "index.md")
+    f = io.open(idx, "w", encoding="utf-8")
+    f.write(chr(10).join(lines))
+    f.close()
+    print("записано: %s" % os.path.relpath(idx, HERE))
+
+
 def main():
     args = sys.argv[1:]
     d = out_dir()
@@ -264,6 +357,10 @@ def main():
         do_sprites(d, pal)
         print()
         do_stages(d)
+        return 0
+
+    if args[0] == "--all":
+        do_all(d)
         return 0
 
     if args[0] == "--findpal":
