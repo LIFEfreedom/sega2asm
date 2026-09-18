@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -140,6 +140,12 @@ missions:
 ADDR ?= 060424
 unpack:
 	@$(PYTHON) $(TOOLS_DIR)/unpack.py $(ADDR)
+
+# Кто ведёт на адрес: скан сырых байт по всем формам перехода. Нужен там,
+# где анализатор не считает окрестность кодом:  make whocalls WHO=008392
+WHO ?= 008392
+whocalls:
+	@$(PYTHON) $(TOOLS_DIR)/whocalls.py $(WHO)
 
 # ── Звук ─────────────────────────────────────────────────────────────────
 # Дизассемблер Z80: сам достаёт звуковой драйвер из z80_driver, распаковывает
