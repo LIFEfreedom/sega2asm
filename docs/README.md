@@ -31,6 +31,7 @@
 | [game-neutral.md](game-neutral.md) | нейтральные слоты, падаль, слово категории |
 | [game-map.md](game-map.md) | три карты, цены команд, растения как местность |
 | [game-data.md](game-data.md) | меню и названия; **есть устаревшие места** |
+| [rom-map.md](rom-map.md) | карта ROM за пределами кода: 23 сегмента вместо одного `rest` |
 | [ram-map.md](ram-map.md) | карта ОЗУ с кластеризацией |
 | [text.md](text.md) | весь текст ROM |
 

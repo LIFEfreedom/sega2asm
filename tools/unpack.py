@@ -44,8 +44,10 @@ class Bits:
         self.cur = buf[self.p]
         self.p += 1
         self.n = 7                      # индекс следующего бита в cur
+        self.last = self.p - 1          # последний использованный байт
 
     def bit(self):
+        self.last = self.p - 1
         v = (self.cur >> self.n) & 1
         self.n -= 1
         if self.n < 0:
@@ -92,7 +94,7 @@ def m1(rom, a, size):
             n = (t & 0x7F) + 1
             copy_match(out, rom[p] + 1, n)
             p += 1
-    return out
+    return out, p
 
 
 def m3(rom, a, size):
@@ -113,7 +115,7 @@ def m3(rom, a, size):
                 d = rom[p]
                 p += 1
             copy_match(out, d + 1, n)
-    return out
+    return out, p
 
 
 def m2(rom, a, size):
@@ -125,7 +127,7 @@ def m2(rom, a, size):
         k = bs.unary()
         extra, base = CLASSES[k]
         out.append(rom[dic + base + bs.bits(extra)])
-    return out
+    return out, bs.last + 1
 
 
 def m7(rom, a, size):
@@ -153,8 +155,8 @@ def m7(rom, a, size):
                     d = (d << 2) | bs.bits(2)
                 copy_match(out, d + 1, n)
                 left -= n
-        p = bs.p if bs.n == 7 else bs.p
-    return out
+        p = bs.last + 1
+    return out, p
 
 
 # ── Метод 6: адаптивный Хаффман ──────────────────────────────────────────
@@ -274,8 +276,8 @@ def m6(rom, a, size):
                     d = (d << 2) | bs.bits(2)
                 copy_match(out, d + 1, n)
                 left -= n
-        p = bs.p
-    return out
+        p = bs.last + 1
+    return out, p
 
 
 def peek(self):
@@ -292,8 +294,8 @@ def unpack(rom, a):
     method = rom[a + 2]
     if method not in METHODS:
         raise ValueError("метод %d не существует" % method)
-    out = METHODS[method](rom, a, size)
-    return method, size, bytes(out[:size])
+    out, end = METHODS[method](rom, a, size)
+    return method, size, bytes(out[:size]), end
 
 
 def main():
@@ -302,9 +304,9 @@ def main():
         return 1
     rom = open(os.path.join(HERE, "game.gen"), "rb").read()
     a = int(sys.argv[1], 16)
-    method, size, data = unpack(rom, a)
-    print("$%06X: метод %d, длина %d, распаковано %d"
-          % (a, method, size, len(data)))
+    method, size, data, end = unpack(rom, a)
+    print("$%06X: метод %d, длина %d, распаковано %d, сжатых байт %d"
+          % (a, method, size, len(data), end - a))
     if "--hex" in sys.argv:
         for i in range(0, len(data), 16):
             print("  %04X  %s" % (i, " ".join("%02X" % b

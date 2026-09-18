@@ -14,3 +14,7 @@ tools/clownassembler_asm68k.exe
 
 # промежуточная карта покрытия анализатора
 tools/.coverage.pkl
+
+# кэш интерпретатора
+__pycache__
+*.pyc

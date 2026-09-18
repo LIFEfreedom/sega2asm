@@ -196,7 +196,8 @@ loc_000EFA:
 сослался. Теперь привязка не по совпадению, а по полю `+$3`.
 
 Все 92 байта описания миссии разобраны в
-[game-missions.md](game-missions.md).
+[game-missions.md](game-missions.md), а сжатые области ROM размечены в
+[rom-map.md](rom-map.md).
 
 ## Чего я НЕ установил
 

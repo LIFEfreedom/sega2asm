@@ -3920,7 +3920,140 @@ segments:
     start: 0x05E232
     end:   0x05E244
 
-  - name: rest
+  - name: pad_05E244
     type: bin
     start: 0x05E244
+    end:   0x060400
+    subdir: rom_data
+
+  - name: table_chapters
+    type: bin
+    start: 0x060400
+    end:   0x060424
+    subdir: rom_data
+
+  - name: data_chapters
+    type: bin
+    start: 0x060424
+    end:   0x060DF4
+    subdir: rom_data
+
+  - name: pad_060DF4
+    type: bin
+    start: 0x060DF4
+    end:   0x061800
+    subdir: rom_data
+
+  - name: table_assets
+    type: bin
+    start: 0x061800
+    end:   0x061878
+    subdir: rom_data
+
+  - name: data_assets
+    type: bin
+    start: 0x061878
+    end:   0x07820C
+    subdir: rom_data
+
+  - name: pad_07820C
+    type: bin
+    start: 0x07820C
+    end:   0x078800
+    subdir: rom_data
+
+  - name: table_gfx_root
+    type: bin
+    start: 0x078800
+    end:   0x078818
+    subdir: rom_data
+
+  - name: table_gfx_a
+    type: bin
+    start: 0x078818
+    end:   0x0788D8
+    subdir: rom_data
+
+  - name: table_gfx_b
+    type: bin
+    start: 0x0788D8
+    end:   0x0789E8
+    subdir: rom_data
+
+  - name: data_gfx
+    type: bin
+    start: 0x0789E8
+    end:   0x15E950
+    subdir: rom_data
+
+  - name: table_15E950
+    type: bin
+    start: 0x15E950
+    end:   0x15EA98
+    subdir: rom_data
+
+  - name: data_15EA98
+    type: bin
+    start: 0x15EA98
+    end:   0x1625FA
+    subdir: rom_data
+
+  - name: data_1625FA
+    type: bin
+    start: 0x1625FA
+    end:   0x164400
+    subdir: rom_data
+
+  - name: table_stages
+    type: bin
+    start: 0x164400
+    end:   0x164C00
+    subdir: rom_data
+
+  - name: data_terrainmaps
+    type: bin
+    start: 0x164C00
+    end:   0x17563C
+    subdir: rom_data
+
+  - name: data_placements
+    type: bin
+    start: 0x17563C
+    end:   0x176AE8
+    subdir: rom_data
+
+  - name: pad_176AE8
+    type: bin
+    start: 0x176AE8
+    end:   0x177400
+    subdir: rom_data
+
+  - name: data_177400
+    type: bin
+    start: 0x177400
+    end:   0x197160
+    subdir: rom_data
+
+  - name: text_briefings
+    type: bin
+    start: 0x197160
+    end:   0x198790
+    subdir: rom_data
+
+  - name: data_198790
+    type: bin
+    start: 0x198790
+    end:   0x1FF800
+    subdir: rom_data
+
+  - name: data_terrainmaps2
+    type: bin
+    start: 0x1FF800
+    end:   0x1FFF10
+    subdir: rom_data
+
+  - name: pad_1FFF10
+    type: bin
+    start: 0x1FFF10
     end:   0x200000
+    subdir: rom_data
