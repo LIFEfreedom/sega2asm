@@ -19,6 +19,7 @@
 | [game-ai-core.md](game-ai-core.md) | приказы игрока, поиск цели, фильтры |
 | [game-ai-rules.md](game-ai-rules.md) | каталог всех правил, конус зрения, дальность зрения по видам, взросление |
 | [game-ai-behaviours.md](game-ai-behaviours.md) | алгоритм поведения каждого вида, строка за строкой |
+| [game-stages.md](game-stages.md) | таблица этапов, формат расстановки, составной объект 20-го этапа |
 | [game-species.md](game-species.md) | номера видов и привязка к именам |
 | [game-actions.md](game-actions.md) | словарь действий `+$15`, развязка стычки |
 | [game-damage.md](game-damage.md) | формула урона, сила и защита, урон от местности |
