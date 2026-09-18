@@ -1,31 +1,37 @@
 #!/usr/bin/env python3
 """Достаёт графику: распаковывает блоки и рисует их в PNG.
 
-    make gfx                           сводка по обоим хранилищам
-    python tools/gfx.py --assets       30 наборов тайлов местности
-    python tools/gfx.py --sprites      сводка по 48 наборам спрайтов
-    python tools/gfx.py --sprites 0    все кадры набора 0 лентой
-    python tools/gfx.py 062BDA         произвольный блок по адресу
-    python tools/gfx.py --findpal      где в ROM лежат палитры
+    make gfx                                    сводка по всему
+    make gfx GFXARGS="--stages 1 0"             набор тайлов этапа 1 палитрой 0
+    make gfx GFXARGS="--sprites 43"             кадры набора 43
+    make gfx GFXARGS=062BDA                     блок по адресу
+    make gfx GFXARGS=--findpal                  палитры в ROM
 
-К любому режиму добавляется `--pal 031D1C` — палитра из ROM; без неё
-рисуется серым по номеру цвета, чего хватает, чтобы опознать содержимое.
-
-Два независимых хранилища:
+Три хранилища и две палитры по умолчанию.
 
 * `table_assets` `$061800` — 30 записей, наборы тайлов местности.
   Идут четвёрками: описание метатайлов, затем наборы по 96, 256 и 128
   тайлов. Описание узнаётся по началу `FF 15 16 17` и тайлами не является.
-* `table_gfx_a` `$078818` — 48 записей, и каждая ведёт на СВОЮ таблицу
-  указателей: три уровня, а не два. На третьем лежат кадры ровно по
-  512 байт, то есть по 16 тайлов — спрайт 4x4. Всего 5464 кадра.
+* `table_gfx_a` `$078818` — 48 записей, каждая ведёт на СВОЮ таблицу
+  указателей: три уровня, а не два. На третьем — кадры ровно по 512 байт,
+  то есть по 16 тайлов, спрайт 4x4. Всего 5464 кадра.
+* `$01318C` — одиннадцать записей по `$1CC` байт: **14 палитр и номера
+  трёх наборов тайлов**. Это и есть пара «графика — цвет» для поля боя.
+
+Палитры поля боя раскладываются по слотам CRAM в `$005384`:
+слот 0 — `data_99[0]`, слоты 1 и 2 — `data_99` по номерам из байтов
+`+$28` и `+$29` описания миссии (на деле всегда 1 и 3), слот 3 — палитра
+из записи этапа по байту `+$4C`. Поэтому спрайты по умолчанию рисуются
+палитрой `data_99[3]`, а тайлы — палитрой записи.
 
 Тайл: 8x8 точек по 4 бита, 32 байта, строки сверху вниз, в байте сначала
 левая точка. **У спрайтов тайлы идут по столбцам**, поэтому кадр 4x4
 перед выводом переставляется — иначе картинка рассыпается на полосы.
 
-Палитра — 16 слов CRAM вида `0BGR`: по три значащих бита на составляющую,
-остальные нули. Это же и признак, по которому палитры находятся в ROM.
+Палитра — 16 слов CRAM вида `0BGR`, по три значащих бита на составляющую.
+Это же правило служит признаком поиска (`--findpal`). В ОЗУ у палитры
+другой вид: шесть байт на цвет, «текущий» и «целевой» по три нибблa, —
+так устроено затухание (`$00C5B0`), и по этому виду искать бесполезно.
 """
 import os
 import struct
@@ -45,6 +51,11 @@ from unpack import unpack  # noqa: E402
 rom = open(os.path.join(HERE, "game.gen"), "rb").read()
 ASSETS = 0x061800
 SPRITES = 0x078818
+PAL_ARRAY = 0x00F784      # data_99: девять палитр по 32 байта подряд
+STAGE_GFX = 0x01318C      # одиннадцать записей по $1CC
+STAGE_REC = 0x01CC
+UNIT_PAL = PAL_ARRAY + 32 * 3   # слот 2 поля боя: им нарисованы юниты
+METATILE_MARK = bytes([0xFF, 0x15, 0x16, 0x17])
 GREY = [(0, 0, 0)] + [(17 * i,) * 3 for i in range(1, 16)]
 
 L = lambda a: struct.unpack(">I", rom[a:a + 4])[0]
@@ -168,7 +179,45 @@ def do_assets(d, pal):
 SPRITE_SETS = 48
 
 
+def stage_records():
+    """Записи графики этапа: 14 палитр и номера трёх наборов тайлов."""
+    _m, size, d, _e = unpack(rom, STAGE_GFX)
+    out = []
+    for k in range(size // STAGE_REC):
+        r = bytes(d[k * STAGE_REC:(k + 1) * STAGE_REC])
+        pals = [[(((v >> 1) & 7) * 36, ((v >> 5) & 7) * 36, ((v >> 9) & 7) * 36)
+                 for v in [(r[i * 32 + 2 * j] << 8) | r[i * 32 + 2 * j + 1]
+                           for j in range(16)]] for i in range(14)]
+        assets = [((r[0x1C2 + 2 * i] << 8) | r[0x1C3 + 2 * i]) // 4
+                  for i in range(3)]
+        out.append((pals, assets))
+    return out
+
+
+def do_stages(d, only=None, pal_no=0):
+    recs = stage_records()
+    print("== %d записей графики этапа, $%06X ==" % (len(recs), STAGE_GFX))
+    for k, (pals, assets) in enumerate(recs):
+        if only is not None and k != only:
+            continue
+        print("  %2d  наборы тайлов %s, палитр 14" % (k, assets))
+        if only is None:
+            continue
+        for a in assets:
+            p = L(ASSETS + 4 * a)
+            _m, size, data, _e = unpack(rom, p)
+            if bytes(data[:4]) == METATILE_MARK:
+                print("      набор %2d — описание метатайлов, пропущен" % a)
+                continue
+            path = os.path.join(d, "stage%02d_pal%d_asset%02d.png"
+                                % (k, pal_no, a))
+            t = render(data, path, pal=pals[pal_no])
+            print("      набор %2d  %4d тайлов -> %s"
+                  % (a, t, os.path.relpath(path, HERE)))
+
+
 def do_sprites(d, pal, only=None):
+    pal = pal or read_palette(UNIT_PAL)
     n = SPRITE_SETS
     total = empty = 0
     print("== %d наборов спрайтов, таблица $%06X ==" % (n, SPRITES))
@@ -213,6 +262,8 @@ def main():
         do_assets(d, pal)
         print()
         do_sprites(d, pal)
+        print()
+        do_stages(d)
         return 0
 
     if args[0] == "--findpal":
@@ -228,6 +279,12 @@ def main():
 
     if args[0] == "--sprites":
         do_sprites(d, pal, int(args[1]) if len(args) > 1 else None)
+        return 0
+
+    if args[0] == "--stages":
+        only = int(args[1]) if len(args) > 1 else None
+        pal_no = int(args[2]) if len(args) > 2 else 0
+        do_stages(d, only, pal_no)
         return 0
 
     a = int(args[0], 16)
