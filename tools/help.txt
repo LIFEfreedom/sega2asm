@@ -18,6 +18,7 @@ Dyna Brothers 2 — проект дизассемблирования
   dumptext  — текст по таблицам; findtext — сырой скан
   packedtext— текст внутри сжатых блоков
   missions  — описания миссий; stages — сценарии этапов
+  aiscripts — что делает противник на каждом этапе
   gfx       — графика в out/gfx/*.png
   pcm       — сэмплы DAC в WAV
   music     — партитуры песен; sfx — звуковые эффекты
