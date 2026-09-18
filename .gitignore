@@ -18,3 +18,7 @@ tools/.coverage.pkl
 # кэш интерпретатора
 __pycache__
 *.pyc
+
+# чужие эмуляторы для make render: AGPL (clownz80) и LGPL (Nuked-OPN2),
+# поэтому в репозиторий не кладутся — достаются целью `make deps`
+third_party

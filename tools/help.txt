@@ -20,6 +20,7 @@ Dyna Brothers 2 — проект дизассемблирования
   gfx       — графика в out/gfx/*.png
   pcm       — сэмплы DAC в WAV
   music     — партитуры песен; sfx — звуковые эффекты
+  render    — звук с эмулятора в WAV (нужны `make deps` и компилятор C)
   z80dis    — дизассемблер звукового драйвера
   unpack    — распаковщик блока:  make unpack ADDR=060424
   whocalls  — кто ведёт на адрес:  make whocalls WHO=008392

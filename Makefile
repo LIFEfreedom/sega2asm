@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -182,6 +182,23 @@ music:
 # Звуковые эффекты: 50 записей драйвера, из них 33 без единого сэмпла
 sfx:
 	@$(PYTHON) $(TOOLS_DIR)/sfx.py
+
+# Чужие ядра для render: clownz80 и Nuked-OPN2, в репозиторий не входят
+deps:
+	@$(PYTHON) $(TOOLS_DIR)/deps.py
+
+# Звук с эмулятора: драйвер исполняется, а не пересказывается.
+# Нужен компилятор C (CC) и `make deps`.  make render RENDERARGS=--music
+CC        ?= gcc
+RENDER    := $(BUILD_DIR)/render.exe
+RENDERARGS ?=
+
+$(RENDER): $(TOOLS_DIR)/render/render.c third_party/clownz80/unity.c third_party/Nuked-OPN2/ym3438.c
+	@$(PYTHON) -c "import os,sys; os.makedirs(sys.argv[1], exist_ok=True)" $(BUILD_DIR)
+	$(CC) -O2 -o $@ $^ -lm
+
+render: $(RENDER)
+	@$(PYTHON) $(TOOLS_DIR)/render.py $(RENDERARGS)
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые
