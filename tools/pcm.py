@@ -36,6 +36,12 @@ rom = open(os.path.join(HERE, "game.gen"), "rb").read()
 
 Z80_CLOCK = 3579545.0
 DELTAS = [0, 1, 2, 4, 8, 16, 32, 64, -128, -1, -2, -4, -8, -16, -32, -64]
+# Где сэмпл слышно. Записано только то, что доказано разбором кода:
+# остальные привязки к месту в игре не установлены.
+WHERE = {
+    (7, 3): "дождь, `GfxDraw_00E1EE` `$00E1EE`",
+    (6, 4): "тряска экрана, `SoundSfx_00E036` `$00E036`",
+}
 SFX_TABLE = 0x00201C      # пары (банк, команда) по номеру звука
 SFX_NAMES = 0x04C2F6      # звукоподражания, тот же номер
 
@@ -88,26 +94,70 @@ def sfx_names():
         return {}
 
 
-def commands():
-    """(банк, сэмпл) -> номера звуковых команд, которые его заводят."""
-    import gfx  # noqa: F401  (только ради общего пути)
+def dac_sample(img, cmd):
+    """Команда драйвера -> номер сэмпла, либо None, если это не DAC.
+
+    Запись команды лежит по указателю из таблицы `$1100`, нотная строка —
+    по третьему и четвёртому байту описания канала. Сэмпл заводит
+    команда `$EA nn`.
+    """
+    le = lambda a: img[a] | (img[a + 1] << 8)
+    if not 0x90 <= cmd <= 0xCF:
+        return None
+    rec = le(0x1100 + 2 * (cmd - 0x90))
+    for k in range(img[rec + 3]):
+        p = le(rec + 4 + 6 * k + 2)
+        for _ in range(8):
+            if img[p] == 0xEA:
+                return img[p + 1] - 1
+            p += 1
+    return None
+
+
+def named():
+    """(банк, сэмпл) -> номера звуков из table_sfx, у которых есть имя."""
     from z80dis import load
     img = load()
-    le = lambda a: img[a] | (img[a + 1] << 8)
     out = {}
     for i in range((0x207E - SFX_TABLE) // 2):
         b, c = rom[SFX_TABLE + 2 * i], rom[SFX_TABLE + 2 * i + 1]
-        if b > 0x7F or not (0x90 <= c <= 0xCF):
+        if b > 0x7F:
             continue
-        rec = le(0x1100 + 2 * (c - 0x90))
-        for k in range(img[rec + 3]):
-            seq = le(rec + 4 + 6 * k + 2)
-            p = seq
-            for _ in range(8):
-                if img[p] == 0xEA:
-                    out.setdefault((b, img[p + 1] - 1), []).append(i)
-                    break
-                p += 1
+        s = dac_sample(img, c)
+        if s is not None:
+            out.setdefault((b, s), []).append(i)
+    return out
+
+
+def raw():
+    """(банк, сэмпл) -> адреса площадок трапа `$FF2F` с константой.
+
+    `$FF2F` отдаёт драйверу КОМАНДУ как есть, мимо `table_sfx`, и таких
+    вызовов 95 против 13. Банк при этом не передаётся — остаётся тот, что
+    выбран раньше, поэтому одна и та же команда в разных банках звучит
+    по-разному. Банк ищется назад по ближайшему `$FF36` (всегда 5) или
+    `$FF2D` с константой; где рядом нет ни того, ни другого, банк
+    неизвестен и такая площадка в счёт не идёт.
+    """
+    from z80dis import load
+    img = load()
+    out = {}
+    for i in range(0, len(rom) - 6, 2):
+        if (rom[i], rom[i + 1], rom[i + 4], rom[i + 5]) != (0x3F, 0x3C, 0xFF, 0x2F):
+            continue
+        s = dac_sample(img, rom[i + 2] << 8 | rom[i + 3])
+        if s is None:
+            continue
+        bank = None
+        for j in range(i + 4, max(0, i - 0x600), -2):
+            if rom[j] == 0xFF and rom[j + 1] == 0x36:
+                bank = 5
+                break
+            if (rom[j], rom[j + 1], rom[j - 4], rom[j - 3]) == (0xFF, 0x2D, 0x3F, 0x3C):
+                bank = rom[j - 1]
+                break
+        if bank in (5, 6, 7):
+            out.setdefault((bank, s), []).append(i + 4)
     return out
 
 
@@ -116,9 +166,9 @@ def main():
     os.makedirs(d, exist_ok=True)
     names = sfx_names()
     try:
-        used = commands()
+        by_name, by_raw = named(), raw()
     except Exception:
-        used = {}
+        by_name, by_raw = {}, {}
     total = 0
     idx = open(os.path.join(d, "index.md"), "w", encoding="utf-8",
                newline="\n")
@@ -132,19 +182,30 @@ def main():
     idx.write("Частота — **оценка**: `3.58 МГц / (13·шаг + 117)`. В цикле "
               "задержки\nстоит `ei`, и прерывание кадра ворует такты, так "
               "что настоящая\nчастота чуть ниже и слегка плавает.\n\n")
+    idx.write("Столбец «звук» — звукоподражание из списка `$04C2F6`; оно есть\n"
+              "только у сэмплов, которые заводят через `table_sfx`. Столбец\n"
+              "«зовут» перечисляет площадки трапа `$FF2F`, который отдаёт\n"
+              "команду драйверу напрямую: имени у такого вызова нет, зато\n"
+              "видно место в коде.\n\n")
     lines = []
-    print("| банк | сэмпл | шаг | отсчётов | Гц | звук | файл |")
-    print("|---|---|---|---|---|---|---|")
-    lines.append("| банк | сэмпл | шаг | отсчётов | Гц | звук | файл |")
-    lines.append("|---|---|---|---|---|---|---|")
+    head = "| банк | сэмпл | шаг | отсчётов | Гц | звук | зовут | файл |"
+    rule = "|---|---|---|---|---|---|---|---|"
+    print(head)
+    print(rule)
+    lines.append(head)
+    lines.append(rule)
     for v in (5, 6, 7):
         for i, step, length, addr in samples(v):
             if length < 2:
                 continue
             pcm = decode(v, addr, length)
             hz = rate(step)
-            who = used.get((v, i), [])
+            who = by_name.get((v, i), [])
             label = ", ".join(names.get(x, "№%02X" % x) for x in who) or "—"
+            part = ["`$%06X`" % a for a in by_raw.get((v, i), [])]
+            if (v, i) in WHERE:
+                part.insert(0, WHERE[(v, i)])
+            place = ", ".join(part) or "—"
             name = "bank%d_sample%d.wav" % (v, i)
             with wave.open(os.path.join(d, name), "wb") as f:
                 f.setnchannels(1)
@@ -152,17 +213,19 @@ def main():
                 f.setframerate(hz)
                 f.writeframes(pcm)
             total += 1
-            row = ("| %d | %d | %d | %d | %d | %s | `%s` |"
-                   % (v, i, step, len(pcm), hz, label, name))
+            row = ("| %d | %d | %d | %d | %d | %s | %s | `%s` |"
+                   % (v, i, step, len(pcm), hz, label, place, name))
             print(row)
             lines.append(row)
     idx.write("\n".join(lines))
     idx.write("\n\nБанк 6, сэмплы 1 и 2 стоят особняком: у них 38 и 62 "
               "процента\nприращений нулевые, огибающей нет, и уровень "
               "гуляет во весь размах.\nОстальные при том же декодере дают "
-              "правильную огибающую, так что\nдело не в разборе. Имени у "
-              "их команд в списке звукоподражаний тоже\nнет — похоже на "
-              "неиспользованное.\n")
+              "правильную огибающую, так что\nдело не в разборе. Имени в "
+              "списке звукоподражаний у них нет, но играются\n"
+              "они оба — трапом `$FF2F`.\n\n")
+    idx.write("Ни одного вызова не нашлось только у банка 5 сэмпла 4 "
+              "и банка 6\nсэмпла 3.\n")
     idx.close()
     print()
     print("записано %d файлов в %s" % (total, os.path.relpath(d, HERE)))
