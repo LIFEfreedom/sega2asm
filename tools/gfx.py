@@ -58,6 +58,7 @@ STAGE_GFX = 0x01318C      # одиннадцать записей по $1CC
 STAGE_REC = 0x01CC
 UNIT_PAL = PAL_ARRAY + 32 * 3   # слот 2 поля боя: им нарисованы юниты
 METATILE_MARK = bytes([0xFF, 0x15, 0x16, 0x17])
+SPRITE_CUT = frozenset([0])   # у спрайтов нулевой цвет прозрачен
 GREY = [(0, 0, 0)] + [(17 * i,) * 3 for i in range(1, 16)]
 
 L = lambda a: struct.unpack(">I", rom[a:a + 4])[0]
@@ -88,41 +89,108 @@ def find_palettes(lo=0, hi=None, variety=6):
     return out
 
 
-def png(path, w, h, rows):
-    raw = b"".join(b"\0" + bytes(c for p in r for c in p) for r in rows)
+def png(path, w, h, rows, alpha=False):
+    """Тип 2 (RGB) или 6 (RGBA), если точки заданы четвёрками."""
+    nul = bytes([0])
+    raw = b"".join(nul + bytes(c for q in r for c in q) for r in rows)
 
     def chunk(tag, data):
         c = tag + data
         return (struct.pack(">I", len(data)) + c
                 + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF))
 
+    sig = bytes([137, 80, 78, 71, 13, 10, 26, 10])
     with open(path, "wb") as f:
-        f.write(b"\x89PNG\r\n\x1a\n")
-        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)))
+        f.write(sig)
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8,
+                                           6 if alpha else 2, 0, 0, 0)))
         f.write(chunk(b"IDAT", zlib.compress(raw, 9)))
         f.write(chunk(b"IEND", b""))
 
 
-def render(data, path, cols=16, pal=None, scale=2):
+def ground_colours(data):
+    """Цвета фона: набор красок самого простого тайла.
+
+    Земля в этих наборах нарисована прямо в тайле, отдельного слоя нет.
+    Но чистые тайлы земли в наборе есть всегда, и красок в них меньше,
+    чем в любом тайле с предметом. Берём самый частый из наименьших
+    наборов красок — это и есть фон.
+    """
+    import collections
+    per = []
+    for i in range(len(data) // 32):
+        s = set()
+        for b in data[i * 32:(i + 1) * 32]:
+            s.add(b >> 4)
+            s.add(b & 15)
+        per.append(frozenset(s))
+    if not per:
+        return frozenset()
+    least = min(len(s) for s in per)
+    cnt = collections.Counter(s for s in per if len(s) == least)
+    return cnt.most_common(1)[0][0]
+
+
+def flood_background(idx, w, h, cut):
+    """Точки фона: те, что дотягиваются до края листа заливкой.
+
+    Не «все точки цвета фона»: те же краски идут на затенение внутри
+    предметов, и выбивание по всему полю дырявит их насквозь. Заливать
+    надо ЛИСТ ЦЕЛИКОМ, а не отдельный тайл: предмет больше восьми точек
+    и внутри своего тайла до края достаёт.
+    """
+    seen = bytearray(w * h)
+    stack = []
+    for x in range(w):
+        stack.append((x, 0))
+        stack.append((x, h - 1))
+    for y in range(h):
+        stack.append((0, y))
+        stack.append((w - 1, y))
+    while stack:
+        x, y = stack.pop()
+        if not (0 <= x < w and 0 <= y < h):
+            continue
+        p = y * w + x
+        if seen[p] or idx[y][x] not in cut:
+            continue
+        seen[p] = 1
+        stack.append((x + 1, y))
+        stack.append((x - 1, y))
+        stack.append((x, y + 1))
+        stack.append((x, y - 1))
+    return seen
+
+
+def render(data, path, cols=16, pal=None, scale=2, cut=None):
+    """cut — набор индексов фона; они станут прозрачными."""
     pal = pal or GREY
     n = len(data) // 32
     rows = (n + cols - 1) // cols
     w, h = cols * 8, rows * 8
-    img = [[(40, 40, 60)] * w for _ in range(h)]
+    idx = [[0] * w for _ in range(h)]
     for t in range(n):
         tx, ty = (t % cols) * 8, (t // cols) * 8
+        tile = data[t * 32:(t + 1) * 32]
         for y in range(8):
-            b = data[t * 32 + y * 4: t * 32 + y * 4 + 4]
+            b = tile[y * 4: y * 4 + 4]
             for x in range(8):
                 v = (b[x >> 1] >> 4) if x % 2 == 0 else (b[x >> 1] & 15)
-                img[ty + y][tx + x] = pal[v]
+                idx[ty + y][tx + x] = v
+    if cut:
+        seen = flood_background(idx, w, h, cut)
+        blank = (0, 0, 0, 0)
+        img = [[blank if seen[y * w + x] else pal[idx[y][x]] + (255,)
+                for x in range(w)] for y in range(h)]
+    else:
+        img = [[pal[idx[y][x]] for x in range(w)] for y in range(h)]
     if scale > 1:
         big = []
         for r in img:
-            rr = [p for p in r for _ in range(scale)]
+            rr = [q for q in r for _ in range(scale)]
             big.extend([rr] * scale)
         img, w, h = big, w * scale, h * scale
-    png(path, w, h, img)
+    png(path, w, h, img, alpha=bool(cut))
     return n
 
 
@@ -132,7 +200,8 @@ def columnwise(frame, side=4):
     return b"".join(t[x * side + y] for y in range(side) for x in range(side))
 
 
-def render_frames(frames, path, per_row=8, side=4, pal=None, scale=2):
+def render_frames(frames, path, per_row=8, side=4, pal=None, scale=2,
+                  cut=None):
     """Кадры 4x4 сеткой: рядом их видно, а лентой в 4 тайла — нет."""
     blank = bytes(32 * side)
     tiles = []
@@ -144,7 +213,7 @@ def render_frames(frames, path, per_row=8, side=4, pal=None, scale=2):
                 tiles.append(fr[y * side * 32:(y * side + side) * 32])
             tiles.extend([blank] * (per_row - len(band)))
     return render(b"".join(tiles), path, cols=per_row * side,
-                  pal=pal, scale=scale)
+                  pal=pal, scale=scale, cut=cut)
 
 
 def out_dir():
@@ -244,7 +313,7 @@ def do_sprites(d, pal, only=None):
             print("  %2d  $%06X  записей %4d, кадров %4d" % (i, sub, k, len(frames)))
             continue
         path = os.path.join(d, "sprites_%02d.png" % i)
-        render_frames(frames, path, pal=pal)
+        render_frames(frames, path, pal=pal, cut=SPRITE_CUT)
         print("  %2d  $%06X  кадров %d -> %s"
               % (i, sub, len(frames), os.path.relpath(path, HERE)))
     if only is None:
@@ -274,7 +343,8 @@ def do_all(d):
     alt = read_palette(PAL_ARRAY + 32)   # слот 1: вторая палитра юнитов
 
     lines += ["## Тайлы местности", "",
-              "| этап | набор | тайлов | файл |", "|---|---|---|---|"]
+              "| этап | набор | тайлов | фон | файлы |",
+              "|---|---|---|---|---|"]
     used = set()
     seen = {}
     for k, (pals, assets) in enumerate(recs):
@@ -287,13 +357,19 @@ def do_all(d):
                 continue
             key = (a, tuple(pals[0]))
             if key in seen:
-                lines.append("| %d | %d | — | то же, что у этапа %d |"
+                lines.append("| %d | %d | — | — | то же, что у этапа %d |"
                              % (k, a, seen[key]))
                 continue
             seen[key] = k
             name = "terrain_stage%02d_asset%02d.png" % (k, a)
             t = render(data, os.path.join(d, name), pal=pals[0])
-            lines.append("| %d | %d | %d | `%s` |" % (k, a, t, name))
+            g = ground_colours(data)
+            cutname = name[:-4] + "_cut.png"
+            render(data, os.path.join(d, cutname), pal=pals[0], cut=g)
+            lines.append("| %d | %d | %d | %s | `%s`, `%s` |"
+                         % (k, a, t,
+                            ", ".join(str(c) for c in sorted(g)),
+                            name, cutname))
 
     rest = [i for i in range(table_len(ASSETS)) if i not in used]
     if rest:
@@ -325,7 +401,8 @@ def do_all(d):
             frames.append(columnwise(bytes(data)))
         for tag, pl in (("pal1", alt), ("pal3", unit)):
             name = "sprites_%02d_%s.png" % (i, tag)
-            render_frames(frames, os.path.join(d, name), pal=pl)
+            render_frames(frames, os.path.join(d, name), pal=pl,
+                          cut=SPRITE_CUT)
         lines.append("| %d | %d | `sprites_%02d_pal1.png`, `sprites_%02d_pal3.png` |"
                      % (i, len(frames), i, i))
 
@@ -387,7 +464,10 @@ def main():
     a = int(args[0], 16)
     m, size, data, _e = unpack(rom, a)
     path = os.path.join(d, "block_%06X.png" % a)
-    t = render(data, path, pal=pal)
+    cut = ground_colours(bytes(data)) if "--cut" in args else None
+    if cut:
+        path = path[:-4] + "_cut.png"
+    t = render(data, path, pal=pal, cut=cut)
     print("$%06X: метод %d, %d байт, %d тайлов -> %s"
           % (a, m, size, t, os.path.relpath(path, HERE)))
     return 0
