@@ -31,7 +31,11 @@
 #define PER_PSG     240
 #define PER_SAMPLE  1008
 #define Z80_HZ      (MASTER / PER_Z80)
-#define FRAME_CYC   (Z80_HZ / 60)
+/* Кадр NTSC — не ровно шестидесятая: 3420 мастер-тактов на строку и 262
+ * строки дают 59,9227 Гц, то есть 59 736 тактов Z80. Темп музыки привязан
+ * к кадровому прерыванию, поэтому округление до 60 Гц уводило бы её на
+ * 0,13 процента вперёд. */
+#define FRAME_CYC   (3420 * 262 / PER_Z80)
 
 /* ─── SN76489 ──────────────────────────────────────────────────────────
  * Три тональных канала и шум. Счётчик тикает раз в 16 тактов чипа, на
@@ -46,13 +50,20 @@ typedef struct {
 	unsigned lfsr;
 } Psg;
 
-/* Шаг аттенюатора 2 дБ, уровень 15 — тишина. Полная громкость взята
- * равной полной громкости одного канала FM: у Nuked каждый из шести
- * каналов попадает в накопление четыре раза за 24 шага, а размах его
- * ЦАП — девять бит, отсюда 4 * 256 = 1024. */
+/* Шаг аттенюатора 2 дБ, уровень 15 — тишина.
+ *
+ * Абсолютный уровень взят не с потолка, а из Gens (psg.c и ym2612.cpp):
+ * там канал PSG на полной громкости даёт размах MAX_OUTPUT/3 = 6826 при
+ * однополярном выходе, то есть амплитуду 3413, а канал FM — 1 <<
+ * OUT_BITS = 16384. Отношение 0,208. Полная громкость канала FM здесь
+ * равна 768 (в режиме YM2612 значение канала выходит раз за 24 шага и
+ * умножается на три, размах ЦАП девять бит), значит канал PSG — 160.
+ *
+ * Прежде тут стояло 768: я приравнял канал PSG к каналу FM, и PSG был
+ * громче FM на 3–7 дБ во всех песнях. */
 static const int PSG_VOL[16] = {
-	1024,  813,  646,  513,  408,  324,  257,  204,
-	 162,  129,  102,   81,   65,   51,   41,    0
+	 160,  127,  101,   80,   64,   51,   40,   32,
+	  25,   20,   16,   13,   10,    8,    6,    0
 };
 
 static void psg_reset(Psg *p)
@@ -91,9 +102,16 @@ static void psg_tick(Psg *p)
 		}
 	}
 	if (--p->counter[3] <= 0) {
-		static const int rate[4] = { 0x10, 0x20, 0x40, 0 };
+		/* Регистр сдвига тикает на clock/512, /1024, /2048 — при тике
+		 * счётчика clock/16 это перезарядка на 32, 64, 128. Режим 3
+		 * берёт ТОНОВУЮ частоту канала 2, clock/(32*период), то есть
+		 * удвоенный период его счётчика. Раньше здесь стояли 16, 32,
+		 * 64 и период канала 2 как есть — шум выходил на октаву выше
+		 * настоящего. Сверено с psg.c из Gens. */
+		static const int rate[4] = { 0x20, 0x40, 0x80, 0 };
 		int r = p->reg[6] & 3;
-		p->counter[3] = rate[r] ? rate[r] : (p->reg[4] ? p->reg[4] : 1);
+		p->counter[3] = rate[r] ? rate[r]
+		                        : (p->reg[4] ? p->reg[4] * 2 : 2);
 		{
 			unsigned bit = (p->reg[6] & 4)
 				? ((p->lfsr ^ (p->lfsr >> 3)) & 1)   /* белый */
@@ -123,7 +141,8 @@ typedef struct {
 	/* Учёт записей в регистр $2A: это и есть отсчёты DAC. По ним
 	 * меряется настоящая частота воспроизведения — расчётная её
 	 * завышает, потому что кадровое прерывание ворует такты. */
-	unsigned last_addr;
+	unsigned last_addr, last_addr1;   /* у каждого порта YM свой */
+	int solo;    /* -1 всё, 0..5 канал FM, 6 только PSG */
 	long dac_writes;
 	long dac_first, dac_last;
 	const long *now;
@@ -153,6 +172,23 @@ static void bus_write(void *ud, cc_u16f a, cc_u16f v)
 	if (a < 0x4000) {
 		b->ram[a & 0x1FFF] = (unsigned char)v;
 	} else if (a < 0x6000) {
+		if ((a & 3) == 2)
+			b->last_addr1 = v;
+		if (b->solo >= 0 && (a & 3) & 1) {
+			/* Регистры $30–$B6 принадлежат каналу (reg & 3) своего
+			 * порта; $28 называет канал в данных; всё ниже $30 —
+			 * общее и пропускается всегда. */
+			unsigned r = (a & 2) ? b->last_addr1 : b->last_addr;
+			int port = (a & 2) ? 1 : 0;
+			if (r == 0x28) {
+				int c = v & 7;
+				if ((c & 4 ? 3 + (c & 3) : (c & 3)) != b->solo)
+					return;
+			} else if (r >= 0x30 && r <= 0xB6) {
+				if ((int)(r & 3) + 3 * port != b->solo)
+					return;
+			}
+		}
 		if ((a & 3) == 0) {
 			b->last_addr = v;
 		} else if ((a & 3) == 1 && b->last_addr == 0x2A) {
@@ -165,7 +201,7 @@ static void bus_write(void *ud, cc_u16f a, cc_u16f v)
 	} else if (a < 0x6100) {
 		b->bank = ((b->bank >> 1) | ((v & 1) << 8)) & 0x1FF;
 	} else if (a >= 0x7F00 && a < 0x8000) {
-		if ((a & 0xFF) == 0x11)
+		if ((a & 0xFF) == 0x11 && (b->solo < 0 || b->solo == 6))
 			psg_write(b->psg, v);
 	}
 }
@@ -245,15 +281,18 @@ int main(int argc, char **argv)
 	int cmd, max_frames, main_bank, music_bank, stop_when_done;
 	int gain = 256;
 	double hp_xl = 0.0, hp_yl = 0.0, hp_xr = 0.0, hp_yr = 0.0;
-	int frame, quiet = 0;
-	long long acc_opn2 = 0, acc_psg = 0, acc_sample = 0;
+	int frame, quiet = 0, after_done = 0;
+	long frame_peak = 0, run_peak = 1, floor_peak = 0;
+	int recording = 0;
+	long long acc_opn2 = 0, acc_psg = 0;
 	long samples = 0, peak = 0;
 	int opn2_cycle = 0;
 	long fm_l = 0, fm_r = 0, psg_sum = 0, psg_n = 0;
 
 	if (argc < 9) {
 		fprintf(stderr, "render <rom> <z80.img> <out.wav> <cmd> <frames> "
-		                "<main> <music> <stop> [усиление/256]\n");
+		                "<main> <music> <stop> [усиление/256] [соло]\n");
+		fprintf(stderr, "  соло: 0..5 — один канал FM, 6 — только PSG\n");
 		return 2;
 	}
 	if (argc > 9)
@@ -276,6 +315,8 @@ int main(int argc, char **argv)
 	bus.dac_writes = 0;
 	bus.dac_first = bus.dac_last = 0;
 	bus.now = &samples;
+	bus.last_addr1 = 0;
+	bus.solo = argc > 10 ? atoi(argv[10]) : -1;
 
 	OPN2_SetChipType(ym3438_mode_ym2612);
 	OPN2_Reset(&ym);
@@ -305,6 +346,8 @@ int main(int argc, char **argv)
 		}
 		if (frame == 3)
 			bus.ram[0x1C0A] = (unsigned char)cmd;
+		if (frame >= 3)
+			recording = 1;
 
 		ClownZ80_Interrupt(&cpu, cc_true);
 
@@ -313,15 +356,6 @@ int main(int argc, char **argv)
 			long long step = (long long)cycles * PER_Z80;
 			budget += step;
 
-			acc_opn2 += step;
-			while (acc_opn2 >= PER_OPN2) {
-				Bit16s s[2];
-				acc_opn2 -= PER_OPN2;
-				OPN2_Clock(&ym, s);
-				fm_l += s[0];
-				fm_r += s[1];
-				opn2_cycle++;
-			}
 			acc_psg += step;
 			while (acc_psg >= PER_PSG) {
 				acc_psg -= PER_PSG;
@@ -329,43 +363,80 @@ int main(int argc, char **argv)
 				psg_sum += psg_out(&psg);
 				psg_n++;
 			}
-			acc_sample += step;
-			while (acc_sample >= PER_SAMPLE) {
-				long p, l, r;
-				acc_sample -= PER_SAMPLE;
-				p = psg_n ? psg_sum / psg_n : 0;
-				/* FM накоплен за 24 шага — это и есть полный отсчёт.
-				 * PSG усреднён, чтобы не ловить наложение частот. */
-				l = fm_l + p;
-				r = fm_r + p;
-				/* У YM2612 на выходе есть постоянная составляющая; на
-				 * плате её снимает разделительный конденсатор, здесь —
-				 * однополюсный фильтр на 10 Гц, свой на каждый канал,
-				 * иначе файл начинается и кончается щелчком. */
-				hp_yl = (double)l - hp_xl + 0.99882 * hp_yl;
-				hp_xl = (double)l;
-				hp_yr = (double)r - hp_xr + 0.99882 * hp_yr;
-				hp_xr = (double)r;
-				l = (long)(hp_yl * gain / 256.0);
-				r = (long)(hp_yr * gain / 256.0);
-				if (l > 32767) l = 32767;
-				if (l < -32768) l = -32768;
-				if (r > 32767) r = 32767;
-				if (r < -32768) r = -32768;
-				put16(out, (unsigned)(l & 0xFFFF));
-				put16(out, (unsigned)(r & 0xFFFF));
-				if (l > peak) peak = l;
-				if (-l > peak) peak = -l;
-				samples++;
-				fm_l = fm_r = 0; psg_sum = 0; psg_n = 0; opn2_cycle = 0;
+			acc_opn2 += step;
+			while (acc_opn2 >= PER_OPN2) {
+				Bit16s s[2];
+				acc_opn2 -= PER_OPN2;
+				OPN2_Clock(&ym, s);
+				fm_l += s[0];
+				fm_r += s[1];
+				/* Полный отсчёт чипа — ровно 24 шага: за них он по
+				 * очереди выдаёт все шесть каналов. Считать их
+				 * отдельным накопителем времени нельзя: получалось то
+				 * 23, то 25, и сумма дрожала на несколько процентов. */
+				if (++opn2_cycle < 24)
+					continue;
+				opn2_cycle = 0;
+				{
+					long p, l, r;
+					/* PSG усреднён по своим тикам, чтобы не ловить
+					 * наложение частот; FM уже полный отсчёт. */
+					p = psg_n ? psg_sum / psg_n : 0;
+					l = fm_l + p;
+					r = fm_r + p;
+					/* У YM2612 на выходе есть постоянная составляющая;
+					 * на плате её снимает разделительный конденсатор,
+					 * здесь — однополюсный фильтр на 10 Гц, свой на
+					 * каждый канал, иначе файл начинается щелчком. */
+					hp_yl = (double)l - hp_xl + 0.99882 * hp_yl;
+					hp_xl = (double)l;
+					hp_yr = (double)r - hp_xr + 0.99882 * hp_yr;
+					hp_xr = (double)r;
+					l = (long)(hp_yl * gain / 256.0);
+					r = (long)(hp_yr * gain / 256.0);
+					if (l > 32767) l = 32767;
+					if (l < -32768) l = -32768;
+					if (r > 32767) r = 32767;
+					if (r < -32768) r = -32768;
+					if (l > frame_peak) frame_peak = l;
+					if (-l > frame_peak) frame_peak = -l;
+					if (recording) {
+						put16(out, (unsigned)(l & 0xFFFF));
+						put16(out, (unsigned)(r & 0xFFFF));
+						if (l > peak) peak = l;
+						if (-l > peak) peak = -l;
+						samples++;
+					}
+					fm_l = fm_r = 0;
+					psg_sum = 0;
+					psg_n = 0;
+				}
 			}
 		}
 
+		if (frame_peak > run_peak)
+			run_peak = frame_peak;
+		/* Первые кадры идут до команды: там слышен только собственный
+		 * шум покоя YM2612 («лесенка»). Его уровень и берётся за порог
+		 * тишины — сравнивать с долей от пика нельзя, этот шум никуда
+		 * не девается и порог никогда бы не сработал. */
+		if (frame < 3 && frame_peak > floor_peak)
+			floor_peak = frame_peak;
 		if (stop_when_done && frame > 8 && sfx_done(bus.ram)) {
-			if (++quiet > 12) break;
+			/* Драйвер отчитался, но FM ещё может затухать. Ждём, пока
+			 * сигнал не сравняется с шумом покоя — и не дольше
+			 * секунды, чтобы не зависнуть на гудящем канале. */
+			if (frame_peak <= floor_peak + floor_peak / 2 + 8)
+				quiet++;
+			else
+				quiet = 0;
+			if (quiet >= 3 || ++after_done > 60)
+				break;
 		} else {
 			quiet = 0;
+			after_done = 0;
 		}
+		frame_peak = 0;
 	}
 
 	fseek(out, 0, SEEK_SET);
