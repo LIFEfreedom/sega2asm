@@ -511,50 +511,54 @@
 
 ## Список музыки
 
-Записи вида «номер, три байта, строка». Это названия дорожек, они же
-видны в звуковом тесте.
+Записи вида «номер, период анимации, номер анимации, ноль, строка».
+Это названия дорожек на экране выбора музыки. Первый байт ведёт
+через `table_bgmids` к номеру музыки, а тот через `table_music` —
+к банку и песне драйвера Z80 (docs/game-sound.md).
 
-| № | название |
-|---|---|
-| 00 | no music |
-| 01 | too many happies |
-| 02 | far,far away,    take me! |
-| 03 | a girl's wish |
-| 04 | may be tommorrow |
-| 05 | early operation |
-| 06 | on the rainy               street |
-| 07 | slow movement |
-| 08 | rain rain train |
-| 09 | look up the sky |
-| 0A | last letter              to you |
-| 0B | reign of terror |
-| 0C | only your               fightin' |
-| 0D | dance with              blindness |
-| 0E | Stand-up!            and Go! |
-| 0F | ﾜﾀｼｶﾞ ｱｲｼﾀ          ﾌﾞﾗﾎﾞｰｽﾞ... |
-| 10 | the end of         modern century |
-| 11 | several years              after |
-| 12 | too late,to stop |
-| 13 | the star,jura |
-| 14 | temptation |
-| 15 | dash! |
-| 16 | ﾙｰｼﾞｭｲﾛﾉ ｱﾏｶﾞｻ |
-| 17 | season,we are               happy |
-| 18 | diamonds on           home-planet |
-| 19 | hello happiness |
-| 1A | last tears |
-| 1B | nightmare |
-| 1C | get crazy             - more rave |
-| 1D | your tv             no-more talkin' |
-| 1E | oh! ki ra ku |
-| 1F | wa ru da ku mi |
-| 20 | eternally |
-| 21 | i'm the might |
+| № | название | № музыки | банк | песня |
+|---|---|---|---|---|
+| 00 | no music | 0 | — | `$E1` |
+| 01 | too many happies | 47 | 2 | `$82` |
+| 02 | far,far away,    take me! | 49 | 4 | `$82` |
+| 03 | a girl's wish | 51 | 3 | `$83` |
+| 04 | may be tommorrow | 53 | 4 | `$83` |
+| 05 | early operation | 55 | 3 | `$82` |
+| 06 | on the rainy               street | 57 | 4 | `$88` |
+| 07 | slow movement | 59 | 3 | `$86` |
+| 08 | rain rain train | 61 | 2 | `$8E` |
+| 09 | look up the sky | 63 | 3 | `$8C` |
+| 0A | last letter              to you | 65 | 2 | `$86` |
+| 0B | reign of terror | 67 | 3 | `$85` |
+| 0C | only your               fightin' | 69 | 4 | `$8B` |
+| 0D | dance with              blindness | 71 | 2 | `$8D` |
+| 0E | Stand-up!            and Go! | 73 | 2 | `$8A` |
+| 0F | ﾜﾀｼｶﾞ ｱｲｼﾀ          ﾌﾞﾗﾎﾞｰｽﾞ... | 75 | 4 | `$87` |
+| 10 | the end of         modern century | 77 | 2 | `$8B` |
+| 11 | several years              after | 79 | 2 | `$83` |
+| 12 | too late,to stop | 81 | 2 | `$84` |
+| 13 | the star,jura | 83 | 2 | `$85` |
+| 14 | temptation | 87 | 4 | `$84` |
+| 15 | dash! | 89 | 3 | `$84` |
+| 16 | ﾙｰｼﾞｭｲﾛﾉ ｱﾏｶﾞｻ | 91 | 4 | `$86` |
+| 17 | season,we are               happy | 93 | 3 | `$8A` |
+| 18 | diamonds on           home-planet | 95 | 3 | `$88` |
+| 19 | hello happiness | 97 | 3 | `$8B` |
+| 1A | last tears | 99 | 3 | `$87` |
+| 1B | nightmare | 101 | 4 | `$8D` |
+| 1C | get crazy             - more rave | 103 | 4 | `$8A` |
+| 1D | your tv             no-more talkin' | 105 | 4 | `$85` |
+| 1E | oh! ki ra ku | 107 | 4 | `$8C` |
+| 1F | wa ru da ku mi | 109 | 2 | `$8F` |
+| 20 | eternally | 111 | 4 | `$8F` |
+| 21 | i'm the might | 113 | 3 | `$8D` |
 
 ## Список звуков
 
 Таблица самоотносительных слов `$04C2F6`, 41 запись вида
-«номер, строка» — звукоподражания.
+«номер, строка» — звукоподражания. Номер здесь — это прямо индекс
+в `table_sfx`, то есть банк и команда драйверу берутся из него без
+пересчёта; тринадцать из этих звуков сэмплированы (docs/game-sound.md).
 
 | № | звук |
 |---|---|

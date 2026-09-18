@@ -3079,16 +3079,36 @@ segments:
     end:   0x04B256
     subdir: code_data
 
+  # Экран выбора музыки. Анализатор не дошёл сюда: вход только через
+  # самоотносительную таблицу $04B2CE по строке меню $FF0552. Внутри две
+  # таблицы данных, из-за которых сегмент целиком в m68k не собирается.
   - name: code_276
     type: m68k
     start: 0x04B256
     end:   0x04B2CE
 
-  - name: data_276
+  - name: table_bgmrows
     type: bin
     start: 0x04B2CE
-    end:   0x04B3F8
+    end:   0x04B2D8
     subdir: code_data
+
+  - name: code_276b
+    type: m68k
+    start: 0x04B2D8
+    end:   0x04B314
+
+  # 34 слова: номер записи в списке названий -> номер музыки для $FF30
+  - name: table_bgmids
+    type: bin
+    start: 0x04B314
+    end:   0x04B358
+    subdir: code_data
+
+  - name: code_276c
+    type: m68k
+    start: 0x04B358
+    end:   0x04B3F8
 
   - name: code_277
     type: m68k
