@@ -171,6 +171,24 @@ SoundRequest     = $FF0282
 Z80SoundCommand  = $A01C0A   ; почтовый ящик в ОЗУ Z80: команда драйверу
 Z80SoundStatus   = $A01C08   ; ответ драйвера, читается в VBlank
 
+; Разбор драйвера Z80 (docs/game-sound.md) закрыл остальную часть ящика.
+; Драйвер лежит сжатым по z80_driver, при старте ($00093C) раскладывается
+; в ОЗУ Z80 двумя кусками, а $000AA8 задаёт начальное содержимое ящика.
+; Прочитать сам драйвер:  python tools/z80dis.py
+Z80MailboxInit   = $000AA8   ; 13 байт, копируются в ОЗУ Z80 по $1C00
+Z80SendCommand   = $00038E   ; вектор trap #0: d0 -> SoundRequest либо $A01C10
+Z80BankMain      = $A01C04   ; банк для главного цикла (сэмплы DAC), трап $FF2D
+Z80BankMusic     = $A01C06   ; банк для прерывания (музыка), трап $FF35
+Z80CommandTaken  = $A01C09   ; принятая команда; $80 — драйвер свободен
+Z80FadeCounter   = $A01C0D   ; счётчик затухания, ставится командой $E0
+Z80PauseRequest  = $A01C10   ; 1 — пауза, $80 — снятие; ставится через trap #0
+; Пара байт банка — это биты 23..12 адреса 68000 в виде (адрес>>4, адрес<<4).
+; Драйвер вдвигает их в регистр $6000 и получает окно $1C0000 + номер*$8000.
+SoundBankBase    = $1C0000   ; банк 0; реально заняты 2..7 ($1D0000..$200000)
+MusicBankCache   = $FF027F   ; последний номер, отданный в $A01C06
+SoundBankCache   = $FF0280   ; последний номер, отданный в $A01C04
+MusicId          = $FF0281   ; аргумент BiosPlayMusic, для перезапуска
+
 ; ── Ещё точки входа BIOS ──────────────────────────────────────────────
 ; $FF01 — тот же копировщик, что $FF04, но принимает ГОТОВЫЙ командный лонг
 ; VDP: $0(a6) команда, $4(a6) источник, $8(a6) длина. Общее тело $000B28.
@@ -1228,7 +1246,6 @@ SpriteListRam    = $FF2748   ; = GameState + $21E4
 ; По категориям: Player 142, Ai 128, Sub 120, Map 94, Core 81, GfxDraw 76, Unit 68, UnitLoop 39, SubLoop 28, AiRand 26, Combat 25, PlayerLoop 24, CoreLoop 24, MapLoop 22, Gfx 21, Sound 18, MapRand 17, GfxClear 15, GfxUnpack 15, GfxLoop 14, UnitRand 14, GfxPalette 13, GfxScroll 11, Input 11, GfxLoad 10, UnitDraw 9, GfxText 8, CoreSfx 8, BiosLoop 7, CorePalette 7, AiLoop 7, CombatLoop 6, CoreLoad 6, CoreDraw 6, PlayerRand 6, SubRand 6, CoreUnpack 5, SubArgs 5, Bios 4, InputLoop 4, CoreTable 4, SubPalette 4, Z80Unpack 4, BiosDraw 3, SubTable 3, CombatTable 3, SoundLoop 3, UnitTable 3, MapTable 3, PlayerTable 3, SubUnpack 3, UnitUnpack 3, PlayerUnpack 2, SoundSfx 2, GfxRand 2, CombatRand 2, CoreRand 2, UnitArgs 2, CoreArgs 2, SubDraw 2, UnitPalette 2, GfxArgs 2, SubText 1, Z80 1, Z80Loop 1, BiosScroll 1, BiosPalette 1, CoreScroll 1, UnitClear 1, UnitLoad 1, Z80Draw 1, AiTable 1, GfxTable 1, SubLoad 1, AiUnpack 1, CoreText 1, GfxSfx 1, SoundDraw 1, InputSfx 1, UnitText 1, AiArgs 1
 
 SubText_000328                 = $000328   ; 23 инстр, 1 ссылок
-Z80_00038E                     = $00038E   ; 38 инстр, 0 ссылок
 VBlankTimerTick                = $000430   ; 150 инстр, 0 ссылок
                                  ; обработчик таймеров: FrameCounter и FrameWait +1 безусло
                                  ; вно, ElapsedFrames только при сброшенном бите 7 GlobalFl
@@ -1249,7 +1266,8 @@ BiosLoop_001B9E                = $001B9E   ; 30 инстр, 2 ссылок
 BiosLoop_001BF2                = $001BF2   ; 12 инстр, 1 ссылок
 BiosLoop_001C54                = $001C54   ; 35 инстр, 0 ссылок
 BiosSelectSoundBank      = $001D06   ; трап $FF35: в $A01C06 кладётся номер*8 + $1C0,
-                             ; двенадцать бит двумя байтами; банк выбирает драйвер Z80
+                             ; двенадцать бит двумя байтами. Драйвер вдвигает их
+                             ; в регистр $6000, что даёт адрес $1C0000 + номер*$8000
 BiosPalette_001DA8             = $001DA8   ; 165 инстр, 7 ссылок
 CoreScroll_003846              = $003846   ; 460 инстр, 4 ссылок
 GfxLoad_0040C4                 = $0040C4   ; 59 инстр, 2 ссылок

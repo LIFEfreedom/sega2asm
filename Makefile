@@ -55,7 +55,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext unpack missions z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -140,6 +140,14 @@ missions:
 ADDR ?= 060424
 unpack:
 	@$(PYTHON) $(TOOLS_DIR)/unpack.py $(ADDR)
+
+# ── Звук ─────────────────────────────────────────────────────────────────
+# Дизассемблер Z80: сам достаёт звуковой драйвер из z80_driver, распаковывает
+# и раскладывает по адресам ОЗУ Z80. Диапазон:  make z80dis Z80FROM=0BB Z80LEN=200
+Z80FROM ?= 0
+Z80LEN  ?= 1AC0
+z80dis:
+	@$(PYTHON) $(TOOLS_DIR)/z80dis.py $(Z80FROM) $(Z80LEN)
 
 # ── Сборка ───────────────────────────────────────────────────────────────
 # asm68k разбирает командную строку как source,object,,listing — запятые

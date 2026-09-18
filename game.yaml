@@ -222,9 +222,31 @@ segments:
     start: 0x001C54
     end:   0x001F36
 
-  - name: data_18
+  # Бывший data_18 — свалка из четырёх несвязанных вещей. Разделено после
+  # разбора звука: BiosPlayMusic читает первую таблицу, loc_001E56 вторую,
+  # старт ($00093C) распаковывает третью в ОЗУ Z80, а $000A64 копирует
+  # четвёртую в ОЗУ и к звуку отношения не имеет.
+  - name: table_music
     type: bin
     start: 0x001F36
+    end:   0x00201C
+    subdir: code_data
+
+  - name: table_sfx
+    type: bin
+    start: 0x00201C
+    end:   0x00207E
+    subdir: code_data
+
+  - name: z80_driver
+    type: bin
+    start: 0x00207E
+    end:   0x0036AC
+    subdir: code_data
+
+  - name: table_bootptrs
+    type: bin
+    start: 0x0036AC
     end:   0x003734
     subdir: code_data
 
@@ -4112,9 +4134,58 @@ segments:
     end:   0x1D0000
     subdir: rom_data
 
-  - name: data_sound
+  # Шесть окон по 32 КБ, которые драйвер Z80 подключает регистром $6000.
+  # Номер банка v из таблиц $001F36 и $00201C даёт адрес $1C0000 + v*$8000
+  # (вывод — в docs/game-sound.md). Банки 2..4 держат музыку, 5..7 — DAC.
+  # Границы внутри банков 5..7 взяты не на глаз: таблица сэмплов в начале
+  # окна перечисляет длины, и они укладываются встык до последнего байта.
+  - name: data_music_b2
     type: bin
     start: 0x1D0000
+    end:   0x1D8000
+    subdir: rom_data
+
+  - name: data_music_b3
+    type: bin
+    start: 0x1D8000
+    end:   0x1E0000
+    subdir: rom_data
+
+  - name: data_music_b4
+    type: bin
+    start: 0x1E0000
+    end:   0x1E8000
+    subdir: rom_data
+
+  - name: data_pcm_b5
+    type: bin
+    start: 0x1E8000
+    end:   0x1EE300
+    subdir: rom_data
+
+  # Хвосты банков 5 и 6 звуку не принадлежат: одиннадцать и три сжатых
+  # блока, уложенных встык до последнего байта области.
+  - name: data_gfx_snd5
+    type: bin
+    start: 0x1EE300
+    end:   0x1F0000
+    subdir: rom_data
+
+  - name: data_pcm_b6
+    type: bin
+    start: 0x1F0000
+    end:   0x1F6800
+    subdir: rom_data
+
+  - name: data_gfx_snd6
+    type: bin
+    start: 0x1F6800
+    end:   0x1F8000
+    subdir: rom_data
+
+  - name: data_pcm_b7
+    type: bin
+    start: 0x1F8000
     end:   0x1FF800
     subdir: rom_data
 
