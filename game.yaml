@@ -4028,9 +4028,39 @@ segments:
     end:   0x177400
     subdir: rom_data
 
-  - name: data_177400
+  - name: data_gfx_ui1
     type: bin
     start: 0x177400
+    end:   0x185226
+    subdir: rom_data
+
+  - name: table_metatiles
+    type: bin
+    start: 0x185226
+    end:   0x185566
+    subdir: rom_data
+
+  - name: table_blocks
+    type: bin
+    start: 0x185566
+    end:   0x185966
+    subdir: rom_data
+
+  - name: map_world
+    type: bin
+    start: 0x185966
+    end:   0x185FA6
+    subdir: rom_data
+
+  - name: pal_world
+    type: bin
+    start: 0x185FA6
+    end:   0x185FC6
+    subdir: rom_data
+
+  - name: data_gfx_ui2
+    type: bin
+    start: 0x185FC6
     end:   0x197160
     subdir: rom_data
 
@@ -4043,6 +4073,18 @@ segments:
   - name: data_198790
     type: bin
     start: 0x198790
+    end:   0x1CF000
+    subdir: rom_data
+
+  - name: scripts_cutscene
+    type: bin
+    start: 0x1CF000
+    end:   0x1D0000
+    subdir: rom_data
+
+  - name: data_sound
+    type: bin
+    start: 0x1D0000
     end:   0x1FF800
     subdir: rom_data
 
