@@ -62,7 +62,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze symbols split check codemap findcode nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -167,6 +167,11 @@ stages: $(MAIN_ASM)
 # Таблица исключений 68000: точки входа, до которых по ссылкам не добраться
 vectors:
 	@$(PYTHON) $(TOOLS_DIR)/vectors.py
+
+# Сверка нашего дизассемблера с чужим (smd_recomp из MegaDriveRecomp).
+# Нужен их вывод в build/recomp/out — как получить, сказано в шапке tools/xcheck.py
+xcheck:
+	@$(PYTHON) $(TOOLS_DIR)/xcheck.py
 
 # Кто ведёт на адрес: скан сырых байт по всем формам перехода. Нужен там,
 # где анализатор не считает окрестность кодом:  make whocalls WHO=008392
