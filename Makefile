@@ -62,7 +62,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -191,6 +191,10 @@ aiscripts: $(MAIN_ASM)
 # Карта сжатых блоков внутри bin-сегментов банков кода
 packmap: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/packmap.py
+
+# Скорость и урон от местности по видам: три таблицы блока параметров
+terrain:
+	@$(PYTHON) $(TOOLS_DIR)/terrain.py
 
 # Кто ведёт на адрес: скан сырых байт по всем формам перехода. Нужен там,
 # где анализатор не считает окрестность кодом:  make whocalls WHO=008392
