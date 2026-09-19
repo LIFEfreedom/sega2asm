@@ -1296,7 +1296,7 @@ GfxVdpWrite_05DB60           = $05DB60   ; 180 инстр, 1 ссылок
 GfxMakeStruct_05DE42         = $05DE42   ; 21 инстр, 1 ссылок
 GfxDecompress_05DEA2         = $05DEA2   ; 43 инстр, 1 ссылок
 GfxTable_05DF3A              = $05DF3A   ; 16 инстр, 2 ссылок
-CountEnemyUnitsNear            = $05DF6E   ; окно 12x6 от курсора, слоты до 107
+CountEnemyUnitsNear            = $05DF6E   ; окно 6x6 клеток от курсора, слоты до 107
 GfxUnits_05DFF0              = $05DFF0   ; 38 инстр, 0 ссылок
 CountOwnUnitsNear              = $05E060   ; то же окно, слоты от 148
 GfxUnits_05E0E2              = $05E0E2   ; 38 инстр, 0 ссылок
@@ -2240,8 +2240,10 @@ MapLoop_02B600                 = $02B600   ; 32 инстр, 4 ссылок
 MapLoop_02B662                 = $02B662   ; 34 инстр, 8 ссылок
 AiCapacityRecheck              = $02B6C8   ; сбросить кэш вместимости гнезда
 AiNestOverCapacity             = $02B6DC   ; (видов 1+2 плюс один) x 7 > $22(a5)
-UnitLoop_02B720                = $02B720   ; 40 инстр, 8 ссылок
-UnitLoop_02B7A6                = $02B7A6   ; 40 инстр, 2 ссылок
+FindEnemyInWindow              = $02B720   ; окно 6x6 клеток от курсора ИИ: первый ЧУЖОЙ юнит
+;                             ; (слот < 148) вида из маски d7 и в действии из набора a5.
+;                             ; Возвращает 127 и оставляет запись в a2
+FindOwnInWindow                = $02B7A6   ; то же для СВОИХ (слот > 107)
 Player_02B82C                  = $02B82C   ; 17 инстр, 1 ссылок
 Player_02B88A                  = $02B88A   ; 13 инстр, 5 ссылок
 Player_02B8BC                  = $02B8BC   ; 13 инстр, 19 ссылок
