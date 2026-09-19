@@ -62,7 +62,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -199,6 +199,11 @@ terrain:
 # Карты этапов: местность 40x40 в PNG и сводка по расстановке
 maps:
 	@$(PYTHON) $(TOOLS_DIR)/maps.py
+
+# Карта мира целиком: таблица имён из блоков и метатайлов. Аргумент —
+# адрес набора тайлов, по умолчанию $183CB6.
+worldmap:
+	@$(PYTHON) $(TOOLS_DIR)/worldmap.py $(TILESET)
 
 # Кто ведёт на адрес: скан сырых байт по всем формам перехода. Нужен там,
 # где анализатор не считает окрестность кодом:  make whocalls WHO=008392
