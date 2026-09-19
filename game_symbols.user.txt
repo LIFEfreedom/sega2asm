@@ -2209,7 +2209,9 @@ AiQuakeNearEnemies3            = $02A7E6   ; то же, другая анима�
 AiUpgradeUnit                  = $02A854   ; переделка №d5 юниту по фильтру d4
 PlayerRand_02A8BE              = $02A8BE   ; 14 инстр, 12 ссылок
 AiOnCooldown                   = $02A8F2   ; молчать, пока тик меньше $46(a5)
-Player_02A922                  = $02A922   ; 10 инстр, 0 ссылок
+AiAimAtEnemyNest               = $02A922   ; поставить курсор ИИ (+$0/+$1 Player2State) на
+;                             ; первое гнездо игрока 1 (+$10/+$11 Player1State),
+;                             ; загнав координаты в границы карты
 AiPlantOnTerrain               = $02A94E   ; растение, если клеток типа набралось
 AiDroughtGrowth                = $02A9D8   ; засуха: >=8 клеток типов 1..7
 AiClampCursor                  = $02AA46   ; загнать курсор ИИ обратно в карту
