@@ -1,7 +1,17 @@
 /*
- * Гоняет звуковой драйвер Dyna Brothers 2 на эмуляторе и пишет WAV.
+ * Гоняет звуковой драйвер на эмуляторе и пишет WAV.
  *
  *   render <rom> <z80.img> <out.wav> <команда> <кадров> <банк-гл> <банк-муз> <стоп>
+ *
+ * Позиционные аргументы описывают почтовый ящик Dyna Brothers 2. У другой
+ * игры ящик другой, поэтому его можно задать ключами, и тогда позиционные
+ * <банк-гл>, <банк-муз> и <команда> не используются:
+ *
+ *   --ring КОЛЬЦО,ИНДЕКС   адреса кольца команд и индекса записи
+ *   --init БАЙТЫ           что положить в ящик на третьем кадре (hex)
+ *   --play БАЙТЫ           что положить на пятом кадре (hex)
+ *   --busy АДР,N,ШАГ,СМЕЩ,МАСКА   как понять, что звук ещё играет
+ *   --dump АДР,ДЛИНА       вывалить кусок ОЗУ Z80 в конце (для разбора)
  *
  * Здесь нет ни одной догадки о том, что играет: код Z80 исполняется как
  * есть, а звук берётся из того, что он сам пишет в YM2612 и PSG. Из
@@ -256,6 +266,43 @@ static int sfx_done(const unsigned char *ram)
 	return 1;
 }
 
+/* ─── ящик, заданный ключами ───────────────────────────────────────── */
+static int unhex(const char *s, unsigned char *out, int max)
+{
+	int n = 0;
+	while (s[0] && s[1] && n < max) {
+		char t[3];
+		t[0] = s[0]; t[1] = s[1]; t[2] = 0;
+		out[n++] = (unsigned char)strtol(t, NULL, 16);
+		s += 2;
+	}
+	return n;
+}
+
+/* Кладёт байты в кольцо ровно так, как это делает 68000: пишет их по
+ * индексу и двигает индекс записи. Кольцо здесь 64 байта — как у Maui
+ * Mallard; для другого размера достаточно поменять маску. */
+static void queue(unsigned char *ram, int ring, int ix,
+                  const unsigned char *b, int n)
+{
+	int i, at = ram[ix];
+	for (i = 0; i < n; i++) {
+		ram[ring + ((at + i) & 0x3F)] = b[i];
+	}
+	ram[ix] = (unsigned char)((at + n) & 0x3F);
+}
+
+/* Занят ли хоть один слот: маска по байту состояния каждой записи. */
+static int busy_slots(const unsigned char *ram, unsigned at, unsigned n,
+                      unsigned stride, unsigned off, unsigned mask)
+{
+	unsigned i;
+	for (i = 0; i < n; i++)
+		if (ram[at + i * stride + off] & mask)
+			return 1;
+	return 0;
+}
+
 static unsigned char *slurp(const char *path, long *len)
 {
 	FILE *f = fopen(path, "rb");
@@ -280,6 +327,13 @@ int main(int argc, char **argv)
 	unsigned char *img;
 	int cmd, max_frames, main_bank, music_bank, stop_when_done;
 	int gain = 256;
+	const char *pos[16];
+	int npos = 0, i;
+	int use_ring = 0, ring_at = 0, ring_ix = 0;
+	unsigned busy_at = 0, busy_n = 0, busy_stride = 0, busy_off = 0, busy_mask = 0;
+	unsigned dump_at = 0, dump_len = 0;
+	unsigned char init_bytes[64], play_bytes[64];
+	int init_len = 0, play_len = 0;
 	double hp_xl = 0.0, hp_yl = 0.0, hp_xr = 0.0, hp_yr = 0.0;
 	int frame, quiet = 0, after_done = 0;
 	long frame_peak = 0, run_peak = 1, floor_peak = 0;
@@ -289,22 +343,44 @@ int main(int argc, char **argv)
 	int opn2_cycle = 0;
 	long fm_l = 0, fm_r = 0, psg_sum = 0, psg_n = 0;
 
-	if (argc < 9) {
+	/* Ключи можно ставить где угодно: позиционные аргументы собираются
+	 * отдельно, иначе их номера поехали бы. */
+	for (i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "--ring") && i + 1 < argc) {
+			sscanf(argv[++i], "%x,%x", (unsigned *)&ring_at,
+			       (unsigned *)&ring_ix);
+			use_ring = 1;
+		} else if (!strcmp(argv[i], "--init") && i + 1 < argc) {
+			init_len = unhex(argv[++i], init_bytes, sizeof init_bytes);
+		} else if (!strcmp(argv[i], "--play") && i + 1 < argc) {
+			play_len = unhex(argv[++i], play_bytes, sizeof play_bytes);
+		} else if (!strcmp(argv[i], "--dump") && i + 1 < argc) {
+			sscanf(argv[++i], "%x,%x", &dump_at, &dump_len);
+		} else if (!strcmp(argv[i], "--busy") && i + 1 < argc) {
+			sscanf(argv[++i], "%x,%x,%x,%x,%x", &busy_at, &busy_n,
+			       &busy_stride, &busy_off, &busy_mask);
+		} else if (npos < 16) {
+			pos[npos++] = argv[i];
+		}
+	}
+	if (npos < 8) {
 		fprintf(stderr, "render <rom> <z80.img> <out.wav> <cmd> <frames> "
 		                "<main> <music> <stop> [усиление/256] [соло]\n");
 		fprintf(stderr, "  соло: 0..5 — один канал FM, 6 — только PSG\n");
+		fprintf(stderr, "  свой ящик: --ring КОЛЬЦО,ИНДЕКС --init HEX "
+		                "--play HEX --busy АДР,N,ШАГ,СМЕЩ,МАСКА\n");
 		return 2;
 	}
-	if (argc > 9)
-		gain = atoi(argv[9]);
-	bus.rom = slurp(argv[1], &rom_len);
+	if (npos > 8)
+		gain = atoi(pos[8]);
+	bus.rom = slurp(pos[0], &rom_len);
 	bus.rom_size = rom_len;
-	img = slurp(argv[2], &img_len);
-	cmd = (int)strtol(argv[4], NULL, 16);
-	max_frames = atoi(argv[5]);
-	main_bank = atoi(argv[6]);
-	music_bank = atoi(argv[7]);
-	stop_when_done = atoi(argv[8]);
+	img = slurp(pos[1], &img_len);
+	cmd = (int)strtol(pos[3], NULL, 16);
+	max_frames = atoi(pos[4]);
+	main_bank = atoi(pos[5]);
+	music_bank = atoi(pos[6]);
+	stop_when_done = atoi(pos[7]);
 
 	memset(bus.ram, 0, sizeof(bus.ram));
 	memcpy(bus.ram, img, img_len < 0x2000 ? (size_t)img_len : 0x2000);
@@ -316,7 +392,7 @@ int main(int argc, char **argv)
 	bus.dac_first = bus.dac_last = 0;
 	bus.now = &samples;
 	bus.last_addr1 = 0;
-	bus.solo = argc > 10 ? atoi(argv[10]) : -1;
+	bus.solo = npos > 9 ? atoi(pos[9]) : -1;
 
 	OPN2_SetChipType(ym3438_mode_ym2612);
 	OPN2_Reset(&ym);
@@ -331,8 +407,8 @@ int main(int argc, char **argv)
 	ClownZ80_State_Initialise(&cpu);
 	ClownZ80_Reset(&cpu);
 
-	out = fopen(argv[3], "wb");
-	if (!out) { fprintf(stderr, "не создать %s\n", argv[3]); return 1; }
+	out = fopen(pos[2], "wb");
+	if (!out) { fprintf(stderr, "не создать %s\n", pos[2]); return 1; }
 	wav_header(out, MASTER / PER_SAMPLE, 0);
 
 	for (frame = 0; frame < max_frames; frame++) {
@@ -341,12 +417,18 @@ int main(int argc, char **argv)
 		/* Кадр первый — драйвер только проснулся; на третьем 68000
 		 * выставляет банки и кладёт команду, как это делает VBlank. */
 		if (frame == 2) {
-			if (main_bank >= 0) set_bank(bus.ram, 0x1C04, main_bank);
-			if (music_bank >= 0) set_bank(bus.ram, 0x1C06, music_bank);
+			if (use_ring)
+				queue(bus.ram, ring_at, ring_ix, init_bytes, init_len);
+			else {
+				if (main_bank >= 0) set_bank(bus.ram, 0x1C04, main_bank);
+				if (music_bank >= 0) set_bank(bus.ram, 0x1C06, music_bank);
+			}
 		}
-		if (frame == 3)
+		if (frame == 3 && !use_ring)
 			bus.ram[0x1C0A] = (unsigned char)cmd;
-		if (frame >= 3)
+		if (frame == 4 && use_ring)
+			queue(bus.ram, ring_at, ring_ix, play_bytes, play_len);
+		if (frame >= (use_ring ? 4 : 3))
 			recording = 1;
 
 		ClownZ80_Interrupt(&cpu, cc_true);
@@ -420,9 +502,12 @@ int main(int argc, char **argv)
 		 * шум покоя YM2612 («лесенка»). Его уровень и берётся за порог
 		 * тишины — сравнивать с долей от пика нельзя, этот шум никуда
 		 * не девается и порог никогда бы не сработал. */
-		if (frame < 3 && frame_peak > floor_peak)
+		if (frame < (use_ring ? 4 : 3) && frame_peak > floor_peak)
 			floor_peak = frame_peak;
-		if (stop_when_done && frame > 8 && sfx_done(bus.ram)) {
+		if (stop_when_done && frame > 8 && (use_ring
+		    ? !busy_slots(bus.ram, busy_at, busy_n, busy_stride,
+		                  busy_off, busy_mask)
+		    : sfx_done(bus.ram))) {
 			/* Драйвер отчитался, но FM ещё может затухать. Ждём, пока
 			 * сигнал не сравняется с шумом покоя — и не дольше
 			 * секунды, чтобы не зависнуть на гудящем канале. */
@@ -439,11 +524,19 @@ int main(int argc, char **argv)
 		frame_peak = 0;
 	}
 
+	if (dump_len) {
+		unsigned k;
+		fprintf(stderr, "ОЗУ $%04X:", dump_at);
+		for (k = 0; k < dump_len; k++)
+			fprintf(stderr, "%s%02X", (k % 16) ? " " : "\n  ",
+			        bus.ram[(dump_at + k) & 0x1FFF]);
+		fprintf(stderr, "\n");
+	}
 	fseek(out, 0, SEEK_SET);
 	wav_header(out, MASTER / PER_SAMPLE, (unsigned)samples);
 	fclose(out);
 	printf("%s: кадров %d, отсчётов %ld, пик %ld\n",
-	       argv[3], frame, samples, peak);
+	       pos[2], frame, samples, peak);
 	if (bus.dac_writes > 1 && bus.dac_last > bus.dac_first)
 		fprintf(stderr, "DAC: %ld отсчётов, %.0f Гц, начало %ld\n",
 		        bus.dac_writes,

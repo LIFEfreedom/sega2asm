@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -257,6 +257,14 @@ SOUND ?=
 TRACK ?=
 z80seq:
 	@$(PYTHON) $(TOOLS_DIR)/z80seq.py $(SOUND) $(TRACK)
+
+# Мелодии Maui Mallard в WAV: драйвер Z80 исполняется на эмуляторе.
+# Нужен компилятор C (gcc, clang или MSVC — ищет tools/ccbuild.py) и `make deps`.
+#   make z80render                        все многодорожечные звуки
+#   make z80render RENDERARGS=--all       все 169
+#   make z80render RENDERARGS="--seconds 90 36"
+z80render:
+	@$(PYTHON) $(TOOLS_DIR)/z80render.py $(RENDERARGS)
 
 # Сэмплы DAC в WAV: четырёхбитная дельта, декодер повторяет главный цикл Z80
 pcm:
