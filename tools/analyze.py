@@ -33,6 +33,7 @@
 Декодер ниже считает только ДЛИНЫ инструкций и переходы — для обхода этого
 достаточно, полный дизассемблер не нужен.
 """
+import bisect
 import collections
 import hashlib
 import os
@@ -671,22 +672,39 @@ if "--drop-bin" in sys.argv:
     # Так ловится, например, `ori.b #$42` поверх таблицы: старший байт
     # непосредственного операнда в байтовой команде не хранится нигде, и
     # обратно печатается ноль.
+    # Снимаем ОДНУ команду, а не весь прогон. Прогон — это сотни настоящих
+    # команд, среди которых затесалась таблица; снятие целиком стоило здесь
+    # 10 КБ разобранного кода при двенадцати разошедшихся байтах. Границы
+    # команд берём из `starts` текущего обхода: карта покрытия из pickle им
+    # не противоречит, потому что обход тот же.
     built = open(sys.argv[sys.argv.index("--drop-bin") + 1], "rb").read()
     covered = bytearray(pickle.load(open(COV, "rb")))
     bad = {i for i in range(min(len(built), N)) if built[i] != ROM[i]}
-    n = 0
+    bounds = sorted(starts)
+    n, hit = 0, 0
     for a in bad:
-        s = a
-        while s > 0x200 and covered[s - 1]:
-            s -= 1
-        e = a
-        while e < N and covered[e]:
-            e += 1
+        if not covered[a]:
+            continue
+        i = bisect.bisect_right(bounds, a) - 1
+        if i >= 0 and bounds[i] <= a:
+            s = bounds[i]
+            e = bounds[i + 1] if i + 1 < len(bounds) else a + 1
+            # Команда не может тянуться дальше конца прогона покрытия.
+            while e > s and not covered[e - 1]:
+                e -= 1
+        else:                                  # границы нет — снимаем прогон
+            s = a
+            while s > 0x200 and covered[s - 1]:
+                s -= 1
+            e = a
+            while e < N and covered[e]:
+                e += 1
+        hit += 1
         for k in range(s, e):
             if covered[k]:
                 covered[k] = 0
                 n += 1
-    print("расхождений байт: %d, снято: %d байт" % (len(bad), n))
+    print("расхождений байт: %d, снято команд %d, байт %d" % (len(bad), hit, n))
 
 if "--drop" in sys.argv:
     log = open(sys.argv[sys.argv.index("--drop") + 1],
