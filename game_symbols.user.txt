@@ -1617,7 +1617,8 @@ PlotOwnedUnitOnMinimap         = $00A0C4   ; точка юнита на мини
 PlotNeutralUnitOnMinimap       = $00A134   ; то же для ничьих: цвет берёт вторая половина пары $00A280
 RepaintCellOnMinimap           = $00A164   ; вернуть точке клетки цвет её местности (data_73 по типу из
                              ; TerrainMap) — стереть с миникарты то, что там было нарисовано
-GfxDraw_00A588                 = $00A588   ; 37 инстр, 2 ссылок
+DrawTileRunsFromTable           = $00A588   ; четыре записи (x, y, длина, плитка) из data_76: каждая раскладывается
+                             ; в таблицу имён подряд
 SlideSpritesOut                = $00A608   ; уход экрана: нарисовать строку состояния, пересобрать список
                              ; юнитов, поставить InitAnimRecord крючком отрисовки, а затем
                              ; каждый кадр прибавлять всем спрайтам +$22E4 смещение по X,
@@ -1626,8 +1627,13 @@ ReleaseSpritesOutsideWindow    = $00A85A   ; пройти список спра�
                              ; вышли за окно 6x6 от точки ($FF2A4C)
 RefreshScreenAndSprites        = $00A8D0   ; перерисовать строку состояния, пересобрать список видимых
                              ; юнитов и выгрузить спрайты, вернув флаги +$251B на место
-CoreTable_00A91E               = $00A91E   ; 3 инстр, 3 ссылок
-GfxDraw_00A9A0                 = $00A9A0   ; 64 инстр, 3 ссылок
+ResetScreenThenRun             = $00A9AE   ; общий вход: RefreshScreenAndSprites, сброс спрайтов и флагов
+                             ; экрана, InitAnimRecord в $3D9C, потом jsr (a6)
+ClearPlayfieldForEffect         = $00A91E   ; ResetScreenThenRun с обработчиком $00A92A: тот забивает полосу имён
+                             ; словами $3333, гонит плитку $835F на десять строк вниз и заливает
+                             ; $19E0 байт VRAM с $5200 нулём через $FF03. Зовут погодные эффекты
+ResetScreenForPicture           = $00A9A0   ; то же, но обработчик $00A9AC — голый rts, так что дело только в сбросе.
+                             ; Зовут ShowSpreadEventIcon и ShowPoisonEventIcon перед распаковкой
 SetCameraQuiet                 = $00AA9A   ; та же SetCameraAndRefresh, но с d2 = 0 — без хвостовой ветки
 SetCameraAndRefresh            = $00AAA4   ; поставить камеру (d0,d1) в +$2692/+$2694 GameState,
                              ; пересобрать список спрайтов, дождаться кадра и записать
@@ -1646,7 +1652,9 @@ StartCellOverlay1               = $00AC3E   ; то же в слоте 1: бит 
 CycleOverlayTiles               = $00AE64   ; перегнать $100 байт VRAM из $64E0 в $63E0 и провернуть счётчик кадра
                              ; $5358 по модулю 4 — это анимация плиток накладки
 SubLoop_00B1BA                 = $00B1BA   ; 27 инстр, 1 ссылок
-GfxDraw_00B202                 = $00B202   ; 70 инстр, 2 ссылок
+MorphPaletteOneStep             = $00B202   ; 48 байт рабочей палитры (a4) подтягиваются на единицу к цели в +$30,
+                             ; потом 16 записей пакуются обратно. Зовут EruptionFlashAndShake
+                             ; и ветка DarkenPalette
 DrawEffectBanner                = $00B2DC   ; обновить экран, распаковать полосу в GameState, выгрузить $200 байт
                              ; в VRAM $5FE0, скопировать $5FA0 в $5FE0 и разложить 28 плиток
                              ; в таблицу имён по $E000 или $E01A — как решит GameState+$24F2
@@ -1675,15 +1683,18 @@ ShowPlayer2Alert               = $00C468   ; строка состояния, к
 PlayerViewsOverlap             = $00C4E0   ; окна двух игроков сходятся ближе чем на 6 клеток и по X, и по Y (d0=0)
 ApplyPaletteFadeStep           = $00C532   ; шаг затухания: PaletteFadeStep, сборка 16 слов из троек
                              ; составляющих в CramMirror и выгрузка трапом $FF20
-SubPalette_00C578              = $00C578   ; 35 инстр, 0 ссылок
+FadePaletteStepLocal            = $00C578   ; PaletteFadeStep и локальный буфер на 16 слов
 SplitPaletteNibbles            = $00C5D8   ; разложить две палитры (a0 и a1 по очереди через exg) в a2
                              ; тройками «байт, старшая тетрада, младшая»
 VramUploadBlocks               = $00C600   ; d1 блоков по $200 байт подряд трапом $FF04: источник a0
                              ; шагает на $200, адрес VRAM d0 — тоже
-GfxPalette_00C664              = $00C664   ; 142 инстр, 2 ссылок
-GfxLoop_00C874                 = $00C874   ; 6 инстр, 1 ссылок
-PlayerLoop_00C888              = $00C888   ; 33 инстр, 1 ссылок
-GfxDraw_00C8F8                 = $00C8F8   ; 23 инстр, 1 ссылок
+ScrollToUnitAndBeep             = $00C664   ; юнит по смещению d0: если он в окне 8x8 — звук $A1, иначе сперва
+                             ; подвести к нему окно. Зовут после SetUnitUpgraded
+SetAnimOnMarkedCellsBoth        = $00C874   ; SetAnimOnMarkedCells обоим игрокам
+SetAnimOnMarkedCells            = $00C888   ; три пары клеток с +$10 состояния игрока: юниту, который на клетке
+                             ; стоит, ставится анимация d0. ShowFullScreenScene зовёт это с 4
+ReadTilesFromVram               = $00C8F8   ; вычитать 256 слов из VRAM по адресу из таблицы $FF2848 (+$4, 11 бит
+                             ; номера плитки) в буфер (a0) — это 16 плиток обратно в ОЗУ
 Sub_00C950                     = $00C950   ; 7 инстр, 0 ссылок
 SetupPaletteBlend              = $00CA16   ; подготовить переход между двумя палитрами (a1 и a2): каждый
                              ; цвет разбирается на три составляющих по три бита, и на
@@ -1761,15 +1772,23 @@ ShakeScreen                    = $00E10C   ; тряска экрана с зат
                              ; HSCROLL поверх $FF2BEE. Всего 68 кадров
 DarkenPalette                  = $00E198   ; пересчитать текущую палитру +$3E06 трапом $FF2C с параметром
                              ; $FFFE и через GfxDraw_00B202, результат вернуть на место
-GfxDraw_00E1EE                 = $00E1EE   ; 76 инстр, 1 ссылок
-Core_00E328                    = $00E328   ; 10 инстр, 0 ссылок
-CorePalette_00E356             = $00E356   ; 16 инстр, 0 ссылок
-UnitDraw_00E4A2                = $00E4A2   ; 14 инстр, 0 ссылок
-Core_00E4F6                    = $00E4F6   ; 16 инстр, 0 ссылок
-CoreDraw_00F2B8                = $00F2B8   ; 41 инстр, 1 ссылок
-GfxScroll_00F35A               = $00F35A   ; 122 инстр, 1 ссылок
-GfxLoad_00F594                 = $00F594   ; 107 инстр, 1 ссылок
-GfxDraw_00F738                 = $00F738   ; 31 инстр, 0 ссылок
+WipePlayfieldRows               = $00E1EE   ; звук $2C, потом 28 строк по 13 длинных слов плиток $831F/$8320 в
+                             ; таблицу имён с $E002 или $E01A — как решит GameState+$24F2
+SetupFadeToPalette60            = $00E328   ; SetupPaletteBlend от текущей палитры +$3E06 к ряду $FF02E6+$60.
+                             ; Близнец FadePaletteRow3, который берёт +$40
+StepFadeAndUploadRow3           = $00E356   ; один шаг StepPaletteBlend и выгрузка ряда 3 трапом $FF20
+DrawRectFromCramMirror          = $00E4A2   ; трап $FF2B с четырьмя рядами CramMirror ($0, $20, $40, $60) и числами
+                             ; 7, 0, 5, $F0. Ссылок не найдено
+RunScriptFromE4D2               = $00E4F6   ; выбрать сценарий по байту $FF04C1 из таблицы $00E4D2 и уйти в него
+                             ; хвостовым вызовом: pea data_95, адрес из $FF0526, rts.
+                             ; Ссылок не найдено
+SceneSkipJumpBuf               = $FF5966   ; буфер пропуска сцены: в +$2 лежит сохранённый a7
+PlayIntroSceneSkippable         = $00F2B8   ; обнулить $EB98 байт GameState, сохранить a7 в SceneSkipJumpBuf+$2 и
+                             ; крутить сцену главы (LoadMissionState с 5 плюс $FF04C1)
+SkipSceneOnButton               = $00F35A   ; кадровый крюк: нажата кнопка — снять кадр со стека, восстановить a7 из
+                             ; SceneSkipJumpBuf+$2 и вернуть 1. Это setjmp/longjmp на пропуск сцены
+LoadStatusBarTiles              = $00F594   ; распаковать data_87 в $FFE28A и выгрузить $30 байт из $FFE30A в VRAM $5FA0
+DrawRowsAt2A52                  = $00F738   ; три строки в таблицу имён по адресу $0A88 плюс $FF2A52. Ссылок не найдено
 SubLoop_013806                 = $013806   ; 13 инстр, 0 ссылок
 CoreLoop_013846                = $013846   ; 14 инстр, 0 ссылок
 SubLoop_01387A                 = $01387A   ; 10 инстр, 0 ссылок
