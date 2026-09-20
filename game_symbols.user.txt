@@ -1055,7 +1055,10 @@ EndingDisplay    = $048276   ; 2508 инструкций, самая больш�
                              ; и адресом плана B
 PostEndingBranch = $047CF0   ;четыре раза ссылается на RunGame
 ScreenBank04A    = $040172   ; <- $03E682 и соседние, пять аргументов
-ScreenBank04B    = $046A1C   ; <- $05596E, загружает семь ассетов
+PasswordForChapterMission = $046A1C   ; ОБРАТНОЕ к ChapterMissionFromPassword: по главе d0
+                             ; и миссии d1 выдаёт в a0 строку пароля из PasswordTable.
+                             ; d0 = 0 удалось, 1 если номер миссии больше, чем есть
+                             ; в главе. Раньше звалась ScreenBank04B
 ScreenBank04C    = $04DD18   ; <- финал; копирует CharToTileSource в
                              ; CharToTileTable, то есть ставит шрифт
 ScreenPostGame   = $04F362   ; <- PostGameDispatch
@@ -3470,7 +3473,16 @@ MenuDrawListIfFlagE456          = $0466BC   ; список с $FFE458, если 
 MenuDrawGeneric                 = $046764   ; общий вывод меню, всё в регистрах
 MenuLoadByStateE448             = $046804   ; байт $FFE448 выбирает, что грузить
 MenuStepByStateE448             = $04694A   ; тот же байт ведёт шаг: 1 — своя ветка
-PasswordScanTable               = $0469C2   ; таблица $0470E6 и PasswordIndex
+ChapterMissionFromPassword      = $0469C2   ; номер пароля -> глава d0 и миссия d1.
+                             ; Идёт по PasswordChapterBounds, вычитает накопленное и
+                             ; правит номер главы: +1 при d0 >= 2 (пропуск главы 2)
+                             ; и 6 -> 8 (пропуск пустых 6 и 7). Раньше PasswordScanTable
+PasswordChapterBounds           = $0470E6   ; шесть накопительных границ: 8, 53, 63, 73, 83, 107 —
+                             ; то есть 8, 45, 10, 10, 10 и 24 миссии глав 0, 1, 3, 4, 5, 8.
+                             ; ГЛАВЫ 2 В ПАРОЛЯХ НЕТ ВОВСЕ: 123 - 107 = её 16 миссий
+PasswordSceneBound              = $0470EE   ; = 28. Делит хвост 124..147 на два ряда по 12
+PasswordRunTable                = $047F38   ; шестнадцать переходников особых паролей — ИСПОЛНЕНИЕ,
+                             ; в отличие от SpecialHandlers, которая работает при вводе
 DrawTile2x2                    = $046B28   ; четыре подряд идущих тайла начиная с +$8 в блок 2x2 по адресу
                              ; +$A таблицы имён; вторая строка через $80
 MenuClearFromArgs               = $046B7C   ; очистка по слову $8(a6) и длинному $A(a6)
