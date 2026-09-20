@@ -156,8 +156,19 @@ def terrain_ops(ins):
     return out
 
 
-def stage_to_missions():
-    """Номер этапа -> подписи миссий, которые его берут."""
+def stage_to_missions(shift=0):
+    """Байт `+$3` описания миссии -> подписи миссий, которые его ставят.
+
+    ВНИМАНИЕ, РАЗНАЯ НУМЕРАЦИЯ. Три таблицы индексируются байтом КАК ЕСТЬ:
+    `table_stageframe` (`$02D0A2`), `table_stagestart` (`$02CE7A`) и
+    `AiScriptTable` (`$0252BE`) — все три делают `move.b $3(a6),d7` и
+    сразу идут в таблицу. А вот **`StageTable` `$164400` индексируется
+    байтом МИНУС ОДИН**: `$006C5E` между чтением и сдвигом ставит
+    `subq.w #1,d0`.
+
+    Поэтому сценарий этапа N и КАРТА этапа N — разные этапы: карта на
+    единицу меньше. Для карт зовите `maptable_to_missions()`.
+    """
     from unpack import unpack
     out = {}
     for c in range(9):
@@ -167,8 +178,15 @@ def stage_to_missions():
         _m, size, d, _e = unpack(rom, p)
         for i in range(size // 92):
             r = d[i * 92:(i + 1) * 92]
-            out.setdefault(r[3], []).append("гл.%d м.%d" % (c, i + 1))
+            k = r[3] + shift
+            if k >= 0:
+                out.setdefault(k, []).append("гл.%d м.%d" % (c, i + 1))
     return out
+
+
+def maptable_to_missions():
+    """Номер записи в `StageTable` -> миссии. Это байт `+$3` минус один."""
+    return stage_to_missions(shift=-1)
 
 
 def music_target(mid):

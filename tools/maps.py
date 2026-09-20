@@ -109,7 +109,10 @@ def render(path, cells, units):
 
 def main():
     import stagescript
-    miss = stagescript.stage_to_missions()
+    # Карты индексируются байтом +$3 МИНУС ОДИН, в отличие от таблиц
+    # сценариев и ИИ. Раньше здесь стоял stage_to_missions(), и каждая
+    # карта подписывалась соседней миссией.
+    miss = stagescript.maptable_to_missions()
 
     outdir = out_path("maps")
     os.makedirs(outdir, exist_ok=True)
