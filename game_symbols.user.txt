@@ -1823,7 +1823,8 @@ RuleAvoidKin             = $0178B6   ; сородич ближе двух кле
 RuleTrampleThorn               = $0178F4   ; ﾃｨﾗﾉ (виды 4 и 9) топчет колючку: приказ НЕ
 ;                             ; «размножение», курс прямой, впереди тип 22 или 23 — пометить
 ;                             ; клетку и встать в позу $30. Зовётся из PickRandomBranch
-AiRand_017AA4                  = $017AA4   ; 51 инстр, 1 ссылок
+SteerGuidedUnit                = $017AA4   ; если a2 — ведомый юнит (SessionState+$4B), править его к клетке
+                             ; +$4C/+$4D того же блока
 RuleRandomChance         = $017B6A   ; предикат: бросок против +$A9
 RuleRandomWalk           = $017C12   ; с вероятностью +$A9 просто пойти
 RuleRareStop             = $017C48   ; 1/256 — встать (действие $00)
@@ -1867,19 +1868,27 @@ RuleChaseMovingFar       = $018642   ; дальний поиск идущего 
 RuleEngageOrApproach     = $018666   ; вступить в стычку с соседом, иначе шагнуть к нему
 FaceTargetThenStep             = $018704   ; развернуться на цель (DirectionToTarget в +$24) и шагнуть:
                              ; PickRandomBranch, если цель нашлась, иначе Ai_0189AC
-AiRand_01872A                  = $01872A   ; 17 инстр, 1 ссылок
-AiRand_0187A8                  = $0187A8   ; 75 инстр, 1 ссылок
-Sub_0188CC                     = $0188CC   ; 4 инстр, 0 ссылок
-Map_0188D8                     = $0188D8   ; 50 инстр, 2 ссылок
-Ai_0189AC                      = $0189AC   ; 46 инстр, 1 ссылок
-Ai_018A70                      = $018A70   ; 63 инстр, 1 ссылок
+PairOrStepToTarget             = $01872A   ; цель рядом и стоит на восток или запад — BeginPairPose, иначе
+                             ; PickRandomBranch
+AiJoinFightOnTarget            = $0187A8   ; цель в ActionSetCombat, во второй слот её клетки кто-то влез и у неё
+                             ; есть напарник: если мы встаём к ней лоб в лоб (наше направление
+                             ; плюс 4 равно её), идём по ветке ReadStageParam, иначе заходим сбоку
+AlwaysZ                        = $0188CC   ; не делает ничего: moveq #0,d0 и обратно. Всегда возвращает Z
+AiCellAllowedByStageMask       = $0188D8   ; клетка цели a3: не опасна, тип проходит маску ReadStageParamB,
+                             ; PlacementMap свободен
+BeginStepIntoTargetCell        = $0189AC   ; войти в клетку a3: действие $0D, анимация $18 по прямой и $19 по
+                             ; диагонали, +$1 = направление, дробные доли обнулены
+BeginPairPose                  = $018A70   ; встать парой: a2 получает действие $0B, a3 — $19, обоим анимация $1F
+                             ; и бит 5 в +$1C, a3 вдобавок HpSetFull. У одинаковых видов
+                             ; +$4 разводится в противоположные стороны. Зовётся только
+                             ; когда цель строго на восток или на запад
 IsOrderNamed             = $018BD2   ; приказ больше 8, то есть не наведение и не наступление
 GetSearchDirMask         = $018C02   ; маска допустимых направлений дальнего поиска: $FF для видов 7 и 8+, иначе дуга +-1 вокруг подсказки приказа
-Player_018CFE                  = $018CFE   ; 5 инстр, 2 ссылок
+CurrentPlayerParamE            = $018CFE   ; d0 = байт +$E состояния текущего игрока
 FindEngagedEnemy               = $018D24   ; ScanAllUnits с фильтром FilterEngagedEnemy
-Sub_018D36                     = $018D36   ; 5 инстр, 1 ссылок
-Sub_018D6C                     = $018D6C   ; 5 инстр, 1 ссылок
-Sub_018D7E                     = $018D7E   ; 5 инстр, 1 ссылок
+FindMovingEnemy                = $018D36   ; FindTargetWithFilter с FilterMovingEnemy
+FindMovingEnemyAnywhere        = $018D6C   ; ScanAllUnits с FilterMovingEnemy — по всей карте, а не рядом
+FindHuntableAnywhere           = $018D7E   ; ScanAllUnits с FilterHuntable
 DistanceToTarget         = $018E5C   ; d2 = max(|dx|,|dy|) до a3
 GetCellAhead             = $018E8A   ; d3 = клетка по текущему направлению
 FilterEngagedEnemy       = $018F3E   ; враг, уже занятый стычкой: +$20 не ноль, из +$1C взведён только бит 4
@@ -2221,10 +2230,11 @@ UnitRecordToA3                 = $01E160   ; a3 = запись юнита ном
 CellNearCurrentPlayerUnit      = $01E17E   ; клетка d3 или любая из восьми соседних занята живым
                              ; юнитом текущего игрока? Диапазон слотов 8..$6C, +$8C у второго
 CellNearPlayer2Unit            = $01E1D6   ; то же, но диапазон слотов жёстко второго игрока, $94..$F8
-Map_01E2A8                     = $01E2A8   ; 19 инстр, 1 ссылок
+CellIsOursAndUnplaced          = $01E2A8   ; как CellIsFreeOrOurs, но PlacementMap должен быть пуст, а не «наш»
 CellOccupied                   = $01E2EE   ; занята ли клетка d3: любой из двух слотов UnitMap
 ;                             ; или бронь PlacementMap
-Unit_01E364                    = $01E364   ; 27 инстр, 0 ссылок
+IsEnemyGrazerAt                = $01E364   ; юнит по номеру в (a1): владелец отрицательный, не яйцо, вид из маски
+                             ; $00100486 (1, 2, 7, 10, 20) и жив
 UnitIsEdible                   = $01E3BE   ; бит 7 байта +$C — условие ActionDevour. Взведён, пока
                              ; юнит яйцо или кокон
 AiBusyRoaming                  = $01E3D0   ; действие юнита в ActionSetRoaming
@@ -2390,10 +2400,10 @@ CallIfTypeInMask               = $020DDE   ; обратный вызов обх�
 RepaintIfTypeInMask            = $020DF8   ; обратный вызов обходов карты: если тип клетки (a2) есть
                              ; в маске d5 — PaintTerrainCell и ответ «да»
 PaintCellType31                = $020E14   ; клетку по индексу d3 — в тип $1F
-Map_020E2E                     = $020E2E   ; 7 инстр, 1 ссылок
-Map_020E48                     = $020E48   ; 7 инстр, 1 ссылок
-Unit_020E62                    = $020E62   ; 6 инстр, 1 ссылок
-Unit_020E7C                    = $020E7C   ; 6 инстр, 1 ссылок
+PaintCellType27                = $020E2E   ; клетку по индексу d3 — в тип $1B
+PaintCellType28                = $020E48   ; клетку по индексу d3 — в тип $1C
+PutMapTileC6                   = $020E62   ; байт $C6 прямо в буфер отрисовки карты $FF9FC6, поле +$1 клетки d3
+PutMapTileC7                   = $020E7C   ; то же с байтом $C7
 PaintCellBurnt                 = $020E96   ; клетку по индексу d3 — в тип $12 (выжженная земля)
 PaintCellBare                  = $020EB0   ; клетку по индексу d3 — в тип 0
 PaintCellFire                  = $020ECA   ; клетку по индексу d3 — в тип $0C (огонь)
@@ -2407,10 +2417,13 @@ MarkNeighboursForSpread        = $020FAE   ; пометить битом 2 в Ce
 MapRand_02104C                 = $02104C   ; 45 инстр, 0 ссылок
 RepaintLastCellOfType          = $021150   ; идти по 38x38 с конца, найти первую клетку типа d4, покрасить
                              ; её в d5 и выйти
-MapLoop_02130A                 = $02130A   ; 39 инстр, 1 ссылок
-Map_021378                     = $021378   ; 27 инстр, 1 ссылок
-MapLoop_0213D2                 = $0213D2   ; 39 инстр, 1 ссылок
-MapRand_021440                 = $021440   ; 39 инстр, 1 ссылок
+LavaFlowDown                   = $02130A   ; обойти карту 38x38 задом наперёд и у каждой клетки типа $14 залить
+                             ; клетку ПОД ней лавой (тип $0B) через LavaSpreadBelow
+LavaSpreadBelow                = $021378   ; клетка строкой ниже: если её тип в маске d4 ($07E7FFFF — всё, кроме
+                             ; 19, 20 и 27…31), перекрасить в d2
+LavaFlowWide                   = $0213D2   ; то же, но LavaSpreadBelowAndSides — лава расходится ещё и вбок
+LavaSpreadBelowAndSides        = $021440   ; клетку под источником заливает всегда, а по диагонали вниз-вправо и
+                             ; вниз-влево — с вероятностью $20/256 каждую
 PlayerRand_0214D2              = $0214D2   ; 73 инстр, 1 ссылок
 SubRand_0215DA                 = $0215DA   ; 137 инстр, 1 ссылок
 RebuildGrowthFlagMap           = $0217BC   ; пересчитать бит 4 по всей карте: 38x38 клеток начиная с
@@ -2494,7 +2507,7 @@ BuildConeShadow          = $02225E   ; построить тень конуса:
 AssertListRowsInView           = $0222FA   ; пройти список троек $FFB9BC и убедиться, что строка каждой записи
                              ; лежит в восьми строках окна; иначе DebugTrapStub. Больше ничего
                              ; не делает, а посчитанный угол по X (d6) не используется вовсе
-Player_0235F6                  = $0235F6   ; 11 инстр, 1 ссылок
+ChargeSpecialOrderBoth         = $0235F6   ; ChargeSpecialOrder обоим игрокам; второй только если $0167A0 разрешил
 ChargeSpecialOrder             = $023622   ; потиковая плата за приказы $0B (ﾄﾂｹﾞｷ, штурм) и $0C (ﾗﾝﾄｳ,
                              ; ярость): списать цену из data_174 и при нехватке денег
                              ; вернуть игрока к приказу $08 (ｼﾝｹﾞｷ). У штурма вдобавок
@@ -2502,20 +2515,25 @@ ChargeSpecialOrder             = $023622   ; потиковая плата за 
 ChargeGuidanceFee              = $023684   ; плата за ведение: если a2 — ведомый юнит игрока 1 или 2,
                              ; списать $022360 (это 50) и при нехватке денег снять ведение
                              ; через GuideUnitEnd
-Player_0236DC                  = $0236DC   ; 7 инстр, 1 ссылок
-Player_02391A                  = $02391A   ; 37 инстр, 1 ссылок
+StopGuidingP2                  = $0236DC   ; снять наведение у второго игрока за 80 ($022360) через PayCost2
+EggCommandP2                   = $02391A   ; яйцо вида d0 за второго игрока: цена из CostsEggs, CanAffordP2,
+                             ; гнездо выбирает $FFE11E — HatchAtNest0, 1 и дальше
 AiHatchNest1                   = $0239B0   ; ИИ выводит яйцо у гнезда 1; тип берётся из ростера
 ;                             ; миссии +$0E по номеру в d0, флаг $FFE0E0 гасит
 AiHatchNest2                   = $0239E8   ; то же для гнезда 2, гасит флаг $FFE0E1
-Player_023A20                  = $023A20   ; 19 инстр, 0 ссылок
-Player_023A66                  = $023A66   ; 21 инстр, 1 ссылок
+EggCommandOpponent             = $023A20   ; яйцо у гнезда ПРОТИВНИКА и из его кошелька: CanAffordOpponent,
+                             ; HatchAtNest0, PayCostOpponent
+CastWateringBlock              = $023A66   ; полив через WaterBlock6x6 и вести 04/06. Двойник CastWatering $023B72,
+                             ; который льёт через RainAreaFiltered и поднимает весть 05.
+                             ; Цена у обоих одна — CommandCosts, 52
 CastWateringP2                 = $023ABE   ; полив за второго игрока (им правит ИИ): цена CommandCosts,
                              ; фильтр CellNearPlayer2Unit
 WaterBlock6x6                  = $023B0C   ; обойти 6x6 клеток от курсора (a6), каждую проверить jsr (a4)
                              ; и подошедшую полить MapRand_021B6E; координаты в (a3), конец $FF
 CastWatering                   = $023B72   ; полив за текущего игрока: цена CommandCosts, ActiveEffectCode
                              ; = 1, фильтр CellNearCurrentPlayerUnit
-Player_023BBA                  = $023BBA   ; 19 инстр, 1 ссылок
+CastRainP2                     = $023BBA   ; дождь ｱﾒ за второго игрока: первое слово CostsWeather (206), CanAffordP2,
+                             ; PayCost2. Пропускается, если взведён бит 1 байта $FF4392
 RainAreaFiltered               = $023C08   ; окно 6x6 вокруг курсора (a6): клетка проходит фильтр (a4), и
                              ; тогда на неё RainOnCell, а координаты пишутся парами в (a3)
                              ; с концом $FF. Этим работает CastWatering
@@ -2745,7 +2763,8 @@ AiWaterBareNearOwn             = $029E3C   ; полить, если в окне 
                              ; CellNearP2AndNot347 — то есть рядом со своими и ещё не
                              ; заросших. Порог — d0
 AiWaterScorchedNearOwn         = $029E64   ; то же по CellNearP2Type1718 — выжженная земля рядом со своими
-Sub_029E8C                     = $029E8C   ; 11 инстр, 0 ссылок
+AiWaterNearOwnGrass            = $029E8C   ; правило ИИ: посчитать вокруг цели клетки CellNearP2Type125 и при
+                             ; достаточном числе позвать CastWateringP2
 CellNearP2AndNot347            = $029EB4   ; рядом живой юнит второго игрока И не типов 3, 4, 7
 ;                             ; (проверка $020BFE). "Free" в старом имени было ошибкой
 CellNearP2Type1718             = $029EDA   ; рядом живой юнит второго игрока И тип 17 или 18
@@ -2757,8 +2776,11 @@ AiWaterYoungPlantAround        = $029FA6   ; то же по CellType125 — мо
 AiExtinguishFire               = $029FE6   ; правило ИИ: если не взведён бит 1 в $FF4392, найти клетки
                              ; типа 12 (огонь) рядом и при достаточном числе позвать
                              ; CastWateringP2; +$2C состояния = $40
-Sub_02A02C                     = $02A02C   ; 17 инстр, 0 ссылок
-Sub_02A072                     = $02A072   ; 16 инстр, 0 ссылок
+AiRainOnFire                   = $02A02C   ; правило ИИ: не яйцо (UnitIsEdible), вокруг хватает клеток CellTile12 —
+                             ; позвать CastRainP2 и поставить +$2C = $40. Брат AiExtinguishFire,
+                             ; но льёт дождём, а не поливом
+AiWaterScorchedNearMeatEater   = $02A072   ; правило ИИ: юнит проходит FilterLiveMeatEater, в 3x3 хватает клеток
+                             ; CellType1718 — CastWateringP2
 AiWaterScorchedAroundB         = $02A0B2   ; то же, что AiWaterScorchedAround, но юнит фильтруется
                              ; FilterLiveSpeciesSet, а не просто «не яйцо»
 AiWaterGrass                   = $02A0F2   ; правило ИИ: не яйцо, вокруг достаточно клеток CellNot347 и
@@ -2773,14 +2795,16 @@ AiGuideUnitAt                  = $02A194   ; если в клетке (d2,d3) с
 AiPhase1To2OnSight             = $02A1FA   ; фаза 1 -> 2, если рядом нужный вид
 AiHeavyRainWet                 = $02A22C   ; ливень: >=18 клеток типов 3..7
 AiHeavyRainPair                = $02A2AA   ; ливень: >=2 клеток типов 8, 9
-Sub_02A330                     = $02A330   ; 27 инстр, 0 ссылок
+AiStormEnemyClusterSafe        = $02A330   ; буря: рядом >= d5 чужих, потом ещё считаются свои, чтобы не накрыть
+                             ; их же; цель ищет AiSelectUnitInWindow
 AiStormRuin                    = $02A39A   ; буря: >=18 клеток типов 19, 20
-Sub_02A418                     = $02A418   ; 23 инстр, 0 ссылок
+AiStormNoOwnNear               = $02A418   ; буря там, где своих рядом нет вовсе, а местности в окне хватает
 AiStormNearEnemies             = $02A478   ; буря, если рядом >= d5 чужих по a6
 AiDroughtNearEnemies           = $02A4EE   ; засуха, если рядом >= d5 чужих
 AiDroughtBare                  = $02A568   ; засуха: >=29 клеток типов 0..7
 AiDroughtType16                = $02A5EA   ; засуха: >=21 клетки типа 16
-Sub_02A64C                     = $02A64C   ; 20 инстр, 0 ссылок
+AiDroughtType16Anyway          = $02A64C   ; то же, что AiDroughtType16 (>=21 клетки типа 16), но БЕЗ проверки
+                             ; своих рядом и без AiSelectUnitInWindow
 AiDroughtType14                = $02A69C   ; засуха: >=18 клеток типа 14
 AiQuakeNearEnemies             = $02A708   ; землетрясение, тот же признак
 AiQuakeNearEnemies2            = $02A772   ; то же, своя проверка применимости
@@ -2797,9 +2821,10 @@ AiPlantOnTerrain               = $02A94E   ; растение, если клет
 AiDroughtGrowth                = $02A9D8   ; засуха: >=8 клеток типов 1..7
 AiClampCursor                  = $02AA46   ; загнать курсор ИИ обратно в карту
 AiDroughtTypes                 = $02AA6C   ; засуха по маскам типов местности
-Sub_02AAF6                     = $02AAF6   ; 28 инстр, 0 ссылок
-Sub_02AB6A                     = $02AB6A   ; 20 инстр, 0 ссылок
-Sub_02ABBE                     = $02ABBE   ; 20 инстр, 0 ссылок
+AiDroughtGrazerCluster         = $02AAF6   ; засуха по самому плотному скоплению травоядных игрока 1
+                             ; (FilterP1GrazerIdle): нужно >=3 чужих рядом и >=$12 клеток типа 1
+AiDroughtDoubleGrazerCluster   = $02AB6A   ; то же за двойную цену (CanAffordDroughtDoubleP2), без проверки клеток
+AiHeavyRainDoubleCluster       = $02ABBE   ; двойной ливень по плотному скоплению юнитов игрока 1 (AiUnitOfP1Idle)
 AiMeteorNearEnemies            = $02AC12   ; метеорит
 AiSelectAndMarkUnit            = $02AC62   ; то же, что AiSelectUnitInWindow, но без входного гейта и с
                              ; вызовом $02ADE8 после наведения
@@ -2960,7 +2985,9 @@ StageConvertWaveTick           = $02F4CC   ; сценарная волна по 
                              ; типом 8, растительность (маска $FE) — типом 9, горелое
                              ; (маска $60000) — нулём; каждое превращение по два прохода
                              ; SpreadTerrainRandom, затем перерисовка
-Core_02F55E                    = $02F55E   ; 18 инстр, 2 ссылок
+TickLavaEruption               = $02F55E   ; извержение по StageEventTimer: на первом срабатывании вспышка
+                             ; палитры и LavaFlowDown, дальше по кругу LavaFlowWide плюс
+                             ; RebuildGrowthFlagMap. Период перезаряжается из d6
 Core_02F5B2                    = $02F5B2   ; 18 инстр, 1 ссылок
 Core_02F604                    = $02F604   ; 18 инстр, 0 ссылок
 Core_02F656                    = $02F656   ; 17 инстр, 0 ссылок
