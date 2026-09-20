@@ -1633,15 +1633,30 @@ SetCameraAndRefresh            = $00AAA4   ; поставить камеру (d0
                              ; пересобрать список спрайтов, дождаться кадра и записать
                              ; HSCROLL ($D000) и VSCROLL с поправками +$268A/+$268C
                              ; и +$2696/+$2698
-CoreSfx_00AB3C                 = $00AB3C   ; 21 инстр, 1 ссылок
-CoreSfx_00AB80                 = $00AB80   ; 24 инстр, 1 ссылок
-CoreSfx_00ABCA                 = $00ABCA   ; 29 инстр, 2 ссылок
-GfxDraw_00AC3E                 = $00AC3E   ; 153 инстр, 2 ссылок
-GfxLoad_00AE64                 = $00AE64   ; 227 инстр, 3 ссылок
+ShakeCameraFrames              = $00AB5C   ; d2 кадров подряд: камера в случайную точку ±4 по обеим осям
+ShakeCameraShort                = $00AB3C   ; звук $97 и 75 кадров тряски, потом камера возвращается в ноль
+ShakeCameraLong                 = $00AB80   ; звук $96 и 75 кадров, следом $97 и ещё 90
+BuildCellMask6x6               = $00AE36   ; список пар (x, y) до $FF: те, что попали в окно 6x6 от d7/d6,
+                             ; взводят бит x в байте y шестибайтовой маски по a1
+StartCellOverlay0               = $00ABCA   ; накладка по клеткам, слот 0: бит 0 в $3E2E, счётчик $535A = $14,
+                             ; маска из списка $536E через BuildCellMask6x6; если что-то попало
+                             ; в окно, играет звук $AA. Зовут из интерфейса ($006D42, $006D7C)
+StartCellOverlay1               = $00AC3E   ; то же в слоте 1: бит 1 в $3E2E, счётчик $535B, список $53B8.
+                             ; Зовут CastWatering и CastWateringP2
+CycleOverlayTiles               = $00AE64   ; перегнать $100 байт VRAM из $64E0 в $63E0 и провернуть счётчик кадра
+                             ; $5358 по модулю 4 — это анимация плиток накладки
 SubLoop_00B1BA                 = $00B1BA   ; 27 инстр, 1 ссылок
 GfxDraw_00B202                 = $00B202   ; 70 инстр, 2 ссылок
-GfxPalette_00B2DC              = $00B2DC   ; 111 инстр, 1 ссылок
-CorePalette_00B46A             = $00B46A   ; 51 инстр, 0 ссылок
+DrawEffectBanner                = $00B2DC   ; обновить экран, распаковать полосу в GameState, выгрузить $200 байт
+                             ; в VRAM $5FE0, скопировать $5FA0 в $5FE0 и разложить 28 плиток
+                             ; в таблицу имён по $E000 или $E01A — как решит GameState+$24F2
+DroughtCurrentWithFlash        = $00B47C   ; DroughtAreaCurrent внутри FlashPaletteAroundEffect
+DroughtP2WithFlash             = $00B486   ; то же с DroughtAreaP2; сюда ходит ApplyDroughtHere
+FlashPaletteAroundEffect       = $00B490   ; отбелить экран, применить эффект a6, вернуть цвет:
+                             ; четыре уровня смешения строятся TrapLoop16, потом 4 шага вверх,
+                             ; jsr (a6) и BuildTerrainMapTiles, 4 кадра паузы и 4 шага обратно
+UploadPaletteToCram            = $00B4FA   ; 32 длинных слова из (a0) в CRAM с нуля, под запретом прерываний
+RefreshThenDroughtCurrent       = $00B46A   ; RefreshScreenAndSprites, потом DroughtCurrentWithFlash
 GfxDraw_00B742                 = $00B742   ; 60 инстр, 0 ссылок
 RedrawMapWindow                = $00B836   ; перерисовать видимый кусок карты вокруг курсора: индекс в
                              ; $FF9FC6 считается как столбец*2 + строка*$50, поправки
@@ -1697,8 +1712,10 @@ CorePalette_00CC98             = $00CC98   ; 202 инстр, 1 ссылок
 CoreDraw_00D178                = $00D178   ; 54 инстр, 0 ссылок
 CoreLoad_00D23A                = $00D23A   ; 105 инстр, 0 ссылок
 CoreLoop_00D3C2                = $00D3C2   ; 47 инстр, 1 ссылок
-CoreLoop_00D45E                = $00D45E   ; 18 инстр, 1 ссылок
-CoreUnpack_00D4A2              = $00D4A2   ; 55 инстр, 1 ссылок
+StompShake                      = $00D45E   ; звук $93 и 30 кадров, в которых камера мотается на ±2 по горизонтали.
+                             ; Зовут из TickSpecies18March — это поступь составного зверя
+ShowSpreadEventIcon             = $00D4A2   ; распаковать $012E36 в GameState и выложить блок 4x4 плитки в VRAM $5E80.
+                             ; Зовут из StageSpreadTerrainTick перед самим расползанием
 FadePaletteSlow                = $00D572   ; плавный переход палитры: SplitPaletteNibbles в рабочий
                              ; буфер, потом семь шагов ApplyPaletteFadeStep через восемь
                              ; кадров каждый — около 56 кадров
@@ -1707,21 +1724,26 @@ RunAnimatedBackdrop            = $00D5B4   ; анимированный фон: 
                              ; семью шагами ApplyPaletteFadeStep через каждые семь кадров,
                              ; а сами тайлы перезаливаются в VRAM $5E80 тремя кадрами по
                              ; кругу. Всего $8C проходов по два кадра
-GfxUnpack_00D6F6               = $00D6F6   ; 115 инстр, 1 ссылок
-CoreLoop_00D8F4                = $00D8F4   ; 18 инстр, 2 ссылок
+ShowPoisonEventIcon             = $00D6F6   ; то же с графикой $013096; зовут, когда взводится PoisonTerrainFlag
+RunEventAnimation60             = $00D8F4   ; звук $AA с обратным вызовом, потом 60 кадров крутится обработчик из
+                             ; $FF04B6+$2, и кадровый крюк $FF0064 снимается
 PlayWaveTransition             = $00D946   ; полноэкранный переход волной: залить всю таблицу HSCROLL
                              ; значением камеры, повесить $00DA2C построчным крючком в
                              ; $FF0064, прогнать три ступени по девять кадров, сменить
                              ; палитру этапа на седьмую, подождать 41 кадр и раскрутить
                              ; обратно. Зовут сценарные волны
-GfxDraw_00DA2C                 = $00DA2C   ; 25 инстр, 1 ссылок
-Core_00DAA0                    = $00DAA0   ; 5 инстр, 1 ссылок
+TickLineWobble                  = $00DA2C   ; кадровый крюк: через кадр (бит 1 счётчика +$6) заливает построчную
+                             ; таблицу прокрутки в VRAM $D000 с автоинкрементом 4 — волна по строкам
+LoadStagePalette10              = $00DAA0   ; LoadStagePalette с номером 10
 LoadStagePalette               = $00DAB0   ; палитра этапа номер d0: 32 байта с $FF02E6 + d0*32 через
                              ; GfxDraw_00B202, копия 16 слов в +$3E06 GameState
-GfxPalette_00DAF6              = $00DAF6   ; 89 инстр, 1 ссылок
+EruptionFlashAndShake           = $00DAF6   ; извержение: палитра заливается красным ($000E во все 16 слов), звук $96,
+                             ; потом 80 кадров камера дёргается на ±2 по обеим осям
+                             ; (SetCameraAndRefresh), через кадр зовётся обработчик из $FF04B6
 SoundLoop_00DC1C               = $00DC1C   ; 28 инстр, 1 ссылок
 Sub_00DC98                     = $00DC98   ; 7 инстр, 0 ссылок
-CorePalette_00DE46             = $00DE46   ; 26 инстр, 1 ссылок
+FadePaletteRow3                 = $00DE46   ; семь шагов StepPaletteBlend по 10 кадров: ряд 3 уходит в VRAM трапом
+                             ; $FF20 и дублируется в теневую палитру +$3E06
 SetShudderByte5                = $00DEA8   ; d0 в байт +$5 той же записи
 SetShudderAmplitude1           = $00DEBC   ; $FF5A4E = 1
 SetShudderAmplitude3           = $00DED2   ; $FF5A4E = 3 — трясёт втрое сильнее
