@@ -1416,7 +1416,7 @@ SpriteListRam    = $FF2748   ; = GameState + $21E4
 ;
 ; По категориям: Player 142, Ai 128, Sub 120, Map 94, Core 81, GfxDraw 76, Unit 68, UnitLoop 39, SubLoop 28, AiRand 26, Combat 25, PlayerLoop 24, CoreLoop 24, MapLoop 22, Gfx 21, Sound 18, MapRand 17, GfxClear 15, GfxUnpack 15, GfxLoop 14, UnitRand 14, GfxPalette 13, GfxScroll 11, Input 11, GfxLoad 10, UnitDraw 9, GfxText 8, CoreSfx 8, BiosLoop 7, CorePalette 7, AiLoop 7, CombatLoop 6, CoreLoad 6, CoreDraw 6, PlayerRand 6, SubRand 6, CoreUnpack 5, SubArgs 5, Bios 4, InputLoop 4, CoreTable 4, SubPalette 4, Z80Unpack 4, BiosDraw 3, SubTable 3, CombatTable 3, SoundLoop 3, UnitTable 3, MapTable 3, PlayerTable 3, SubUnpack 3, UnitUnpack 3, PlayerUnpack 2, SoundSfx 2, GfxRand 2, CombatRand 2, CoreRand 2, UnitArgs 2, CoreArgs 2, SubDraw 2, UnitPalette 2, GfxArgs 2, SubText 1, Z80 1, Z80Loop 1, BiosScroll 1, BiosPalette 1, CoreScroll 1, UnitClear 1, UnitLoad 1, Z80Draw 1, AiTable 1, GfxTable 1, SubLoad 1, AiUnpack 1, CoreText 1, GfxSfx 1, SoundDraw 1, InputSfx 1, UnitText 1, AiArgs 1
 
-SubText_000328                 = $000328   ; 23 инстр, 1 ссылок
+DrawBiosMessage                 = $000328   ; строки трапом $FF25 по трём позициям таблицы имён
 VBlankTimerTick                = $000430   ; 150 инстр, 0 ссылок
                                  ; обработчик таймеров: FrameCounter и FrameWait +1 безусло
                                  ; вно, ElapsedFrames только при сброшенном бите 7 GlobalFl
@@ -1480,7 +1480,8 @@ EnterStageScreen               = $0043DE   ; вход в экран этапа: 
                              ; спрайтов и палитр ($FF32, $FF29, $FF21, $FF22),
                              ; LoadStageGraphics и три подготовки
 ClearSelectionStateCopy         = $00459C   ; второй экземпляр того же кода; уходит на rts ClearSelectionState
-Sub_00478A                     = $00478A   ; 13 инстр, 0 ссылок
+TrySelectCursorTarget           = $00478A   ; позвать проверку из $2508(a5) для клетки a3+d0: не прошла —
+                             ; ResetCursorSelection, прошла — d1/d2 в $25B8/$25BA, адрес в $25B4
 ResetCursorSelection           = $0047BC   ; сбросить выбор: +$25B8 в ноль, +$25B4 взведён, +$20 курсора
                              ; обнулён
 ClearSelectionState             = $0047E6   ; снять выбор: $25B8 = 0, $25B4 = $FF и +$20 у записи $24E8
@@ -1585,19 +1586,25 @@ ClearPlayerSelection           = $008218   ; снять выбор у игрок
 ClearSelectionAndScreen        = $008284   ; ClearSelectionState плюс ResetScreenState
 GuideUnitStart                 = $008392   ; вход в режим наведения ﾕｳﾄﾞｳ:
                              ; запоминает трек, играет свой по виду, ставит $251A=7
-CoreLoop_0084F8                = $0084F8   ; 112 инстр, 2 ссылок
+FocusUnit                       = $0084F8   ; юнит по смещению d0 владельца d1: свой — подвести курсор, чужой —
+                             ; только если он в окне 8x8
 ClearUnitFlagBitRaw            = $0086AA   ; погасить бит d1 (без сдвига) в байте флагов +$28 юнита d0
 GuideUnitEnd                   = $0086C2   ; выход из режима 7: возвращает трек
-Sub_008A7A                     = $008A7A   ; 8 инстр, 0 ссылок
-CombatTable_008B6C             = $008B6C   ; 27 инстр, 0 ссылок
+ClearSelectionAndScreen3        = $008A7A   ; четвёртый экземпляр пары ClearSelectionState плюс ResetScreenState
+SelectUnitAndEnterMode8         = $008B6C   ; снять прежнюю пометку, записать смещение юнита a1 в +$A и +$1C,
+                             ; пометить его, поставить режим $251A = 8, подвести курсор
+                             ; и загрузить рамку меню
 MarkUnitSelected               = $008C16   ; взвести бит d1+2 в байте флагов +$28 юнита по смещению d0 —
                              ; «выбран игроком d1». Гасит его ClearUnitFlagBit (бит d1+4)
-Unit_008C2C                    = $008C2C   ; 6 инстр, 2 ссылок
+ClearUnitMarkBit                = $008C2C   ; погасить бит d1+2 в байте флагов +$28 юнита по смещению d0;
+                             ; у ClearUnitFlagBit смещение бита +4
 UnmarkUnitSelected             = $008C42   ; снять отметку выбора и, если это текущий игрок и меню в
                              ; состоянии 8, вернуть экран в исходное через ResetScreenState
-Sub_009AAC                     = $009AAC   ; 18 инстр, 0 ссылок
+OpenCommandMenuWithSlot         = $009AAC   ; OpenCommandMenu по d1, номер слота d0 запоминается в $2590 и служит
+                             ; индексом (шаг 10) в таблицу $2534
 EffectStorm                    = $009AEA   ; ﾎﾞｳﾌｳ — буря. Команда $03, крутит EventAnim1
-Sub_009B8C                     = $009B8C   ; 30 инстр, 0 ссылок
+RunSceneSilently                = $009B8C   ; поднять бит 7 GlobalFlags, заглушить MusicId и прокрутить обработчик
+                             ; со стека ($40(a7)), потом вернуть музыку
 EffectMeteor                   = $009C06   ; ｲﾝｾｷ — метеорит. Команда $07, крутит EventAnim7
 EffectDrought                  = $009C48   ; ﾋﾃﾞﾘ — засуха. Команда $04, самая частая у ИИ
 ApplyDroughtHere               = $009C7A   ; общая часть обеих засух: при PlayerViewsOverlap хватает
@@ -1705,7 +1712,7 @@ SetAnimOnMarkedCells            = $00C888   ; три пары клеток с +$
                              ; стоит, ставится анимация d0. ShowFullScreenScene зовёт это с 4
 ReadTilesFromVram               = $00C8F8   ; вычитать 256 слов из VRAM по адресу из таблицы $FF2848 (+$4, 11 бит
                              ; номера плитки) в буфер (a0) — это 16 плиток обратно в ОЗУ
-Sub_00C950                     = $00C950   ; 7 инстр, 0 ссылок
+RunOverlayState                 = $00C950   ; ветвление по байту +$4 записи $54EA — состояние накладки
 SetupPaletteBlend              = $00CA16   ; подготовить переход между двумя палитрами (a1 и a2): каждый
                              ; цвет разбирается на три составляющих по три бита, и на
                              ; каждую заводится четвёрка «текущее, расстояние, шаг,
@@ -1713,7 +1720,7 @@ SetupPaletteBlend              = $00CA16   ; подготовить перехо
 StepPaletteBlend               = $00CAA8   ; один шаг перехода: по накопителю +$3 двигает текущее
                              ; значение +$0 на шаг +$2, затем собирает 16 цветов обратно
                              ; в слова CRAM
-Z80Draw_00CB02                 = $00CB02   ; 36 инстр, 0 ссылок
+LoadSceneAndPalettes            = $00CB02   ; трап $FF33 и четыре ряда CramMirror ($0, $20, $40, $60) наружу
 ShowFullScreenScene            = $00CBBE   ; загрузить сцену d0 трапом $FF33, перерисовать строку
                              ; состояния, спрайты и список видимых юнитов
 ShowWinScene                   = $00CB96   ; ShowFullScreenScene с номером из $FF5A4C. Зовут из ветви 0 (победа)
@@ -1729,10 +1736,11 @@ ShowMissionLostScreen          = $00CC32   ; то же с ветвью 8 — п�
 ShowResultScreenVariant12      = $00CC42   ; ветвь 12 ($00D0C8). Ссылок не найдено
 ShowResultScreenVariant4       = $00CC52   ; ветвь 4 ($00CFF6) с временно взведёнными битами 0, 2, 4 и 5 в $FF2A7F;
                              ; прежнее значение возвращается. Зовут из ветки вида 18
-CorePalette_00CC98             = $00CC98   ; 202 инстр, 1 ссылок
-CoreDraw_00D178                = $00D178   ; 54 инстр, 0 ссылок
-CoreLoad_00D23A                = $00D23A   ; 105 инстр, 0 ссылок
-CoreLoop_00D3C2                = $00D3C2   ; 47 инстр, 1 ссылок
+RebuildStagePalettesAndScreen   = $00CC98   ; BuildStagePalettes и полная перерисовка экрана
+ShowWinSceneWithPanel           = $00D178   ; ShowWinScene, трап $FF37 и панель из записи $54EA
+ShowWinSceneAndRefresh          = $00D23A   ; ShowWinScene и перестройка списка видимых юнитов
+BuildResultPicture              = $00D3C2   ; обнулить 512 байт по $8(a6) и собрать картинку вложенными циклами
+                             ; 4x4x8x4 по данным с шагом $183. Зовут из ветви экрана итога
 StompShake                      = $00D45E   ; звук $93 и 30 кадров, в которых камера мотается на ±2 по горизонтали.
                              ; Зовут из TickSpecies18March — это поступь составного зверя
 ShowSpreadEventIcon             = $00D4A2   ; распаковать $012E36 в GameState и выложить блок 4x4 плитки в VRAM $5E80.
@@ -1761,14 +1769,17 @@ LoadStagePalette               = $00DAB0   ; палитра этапа номе�
 EruptionFlashAndShake           = $00DAF6   ; извержение: палитра заливается красным ($000E во все 16 слов), звук $96,
                              ; потом 80 кадров камера дёргается на ±2 по обеим осям
                              ; (SetCameraAndRefresh), через кадр зовётся обработчик из $FF04B6
-SoundLoop_00DC1C               = $00DC1C   ; 28 инстр, 1 ссылок
-Sub_00DC98                     = $00DC98   ; 7 инстр, 0 ссылок
+RefreshScreenKeepFlags          = $00DC1C   ; перерисовать экран, сохранив и вернув байт флагов $251B
+RunSceneMode                    = $00DC98   ; ветвление по байту $FF5A4E: 0 — $00DCC0, 1 — $00DD86,
+                             ; 2 — FadePaletteRow3, 3 — $00DE1E
 FadePaletteRow3                 = $00DE46   ; семь шагов StepPaletteBlend по 10 кадров: ряд 3 уходит в VRAM трапом
                              ; $FF20 и дублируется в теневую палитру +$3E06
-SetShudderByte5                = $00DEA8   ; d0 в байт +$5 той же записи
-SetShudderAmplitude1           = $00DEBC   ; $FF5A4E = 1
-SetShudderAmplitude3           = $00DED2   ; $FF5A4E = 3 — трясёт втрое сильнее
-CoreLoad_00DEE8                = $00DEE8   ; 76 инстр, 1 ссылок
+SetSceneByte5                   = $00DEA8   ; d0 в байт +$5 той же записи
+SetSceneMode1                   = $00DEBC   ; $FF5A4E = 1. Тот же байт RunSceneMode читает как номер ветки, а
+                             ; TickScreenShudder — как амплитуду качания: запись одна, смыслов два
+SetSceneMode3                   = $00DED2   ; $FF5A4E = 3
+DrawMarkAtCell                  = $00DEE8   ; клетка d0 (x в старшем слове, y в младшем) внутри окна 8x8: посчитать
+                             ; точку на экране от угла Player1State и вывести значок в VRAM $5FA0
 StartScreenShudder             = $00E036   ; затрясти экран вбок: амплитуда 1 в $FF5A4E, отсчёт до повтора звука 12
                              ; в +$2, звук $99, TickScreenShudder в кадровый крюк $FF0064 —
                              ; и 60 кадров ожидания
