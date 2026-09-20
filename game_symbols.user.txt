@@ -2106,14 +2106,19 @@ Unit_01DA66                    = $01DA66   ; 20 инстр, 1 ссылок
 Sub_01DAE6                     = $01DAE6   ; 58 инстр, 1 ссылок
 AllocateSpritesInView          = $01DBC6   ; занять спрайты всем юнитам окна 8x8 вокруг курсора: оба
                              ; слота UnitMap плюс запись PlacementMap
-MapTable_01DC8A                = $01DC8A   ; 13 инстр, 0 ссылок
-Map_01DCC0                     = $01DCC0   ; 13 инстр, 0 ссылок
-Map_01DCF6                     = $01DCF6   ; 13 инстр, 0 ссылок
-Map_01DD2C                     = $01DD2C   ; 13 инстр, 0 ссылок
-Map_01DD62                     = $01DD62   ; 13 инстр, 0 ссылок
-Map_01DD98                     = $01DD98   ; 13 инстр, 0 ссылок
-Map_01DDCE                     = $01DDCE   ; 13 инстр, 0 ссылок
-Map_01DE04                     = $01DE04   ; 13 инстр, 0 ссылок
+RefreshSpritesScrollUp8        = $01DC8A   ; восемь процедур на четыре стороны прокрутки. Каждая берёт
+                             ; CursorWindowOrigin, отпускает спрайты по списку клеток
+                             ; уходящего края (ReleaseSpritesInCells) и занимает их по списку
+                             ; приходящего (AllocateSpritesInCells). Списки — смещения в
+                             ; байтах от начала окна, ряд равен $50. ВВЕРХ: уходит нижний
+                             ; ряд (+$23E), приходит верхний (-$4E). Восемь клеток
+RefreshSpritesScrollUp15       = $001DCC0   ; то же вверх, но пятнадцать клеток
+RefreshSpritesScrollRight8     = $001DCF6   ; ВПРАВО: уходит левый столбец (+$230), приходит правый (+$10)
+RefreshSpritesScrollRight15    = $001DD2C   ; то же вправо, пятнадцать клеток
+RefreshSpritesScrollDown8      = $001DD62   ; ВНИЗ: уходит верхний ряд (0), приходит нижний (+$28E)
+RefreshSpritesScrollDown15     = $001DD98   ; то же вниз, пятнадцать клеток
+RefreshSpritesScrollLeft8      = $001DDCE   ; ВЛЕВО: уходит правый столбец (+$E), приходит левый (кончается на -2)
+RefreshSpritesScrollLeft15     = $001DE04   ; то же влево, пятнадцать клеток
 ReleaseSpritesInCells          = $01DEDA   ; пройти список индексов клеток из (a6) и отпустить спрайты
                              ; у обоих слотов UnitMap плюс у третьей карты
 AllocateSpritesInCells         = $01DF4C   ; тот же обход, но занимает спрайты
@@ -2144,15 +2149,18 @@ FilterP1GrazerIdle             = $01E470   ; фильтр: владелец ро
                              ; (1, 2, 7, 10, 20 — те же, кому разрешён выпас) и действие
                              ; в наборе ActionSetIdle
 AiUnitOfP1Idle                 = $01E4A6   ; юнит первого игрока в ActionSetIdle
-Ai_01E4C6                      = $01E4C6   ; 14 инстр, 2 ссылок
+FilterP1NestIdle               = $01E4C6   ; фильтр: владелец ровно 1, действие в ActionSetIdle и вид 0
+                             ; (гнездо)
 IsSpecies20              = $01E4FA   ; вид равен 20
 FilterOwnIdle                  = $01E510   ; юнит второго игрока (+$9 = $FF), не в коконе (бит 7 +$C),
 ;                             ; действие из ActionSetIdle
 FilterOwnHerbivore             = $01E53C   ; то же, но вместо действия — вид из маски $00100486
 ;                             ; (1, 2, 7, 10, 20), то есть травоядный
-Ai_01E57A                      = $01E57A   ; 15 инстр, 0 ссылок
-Ai_01E5B6                      = $01E5B6   ; 14 инстр, 0 ссылок
-Ai_01E5EE                      = $01E5EE   ; 14 инстр, 0 ссылок
+FilterP2HunterIdle             = $01E57A   ; владелец $FF (игрок 2), не яйцо (бит 7 +$C снят), вид вне
+                             ; маски $FFFFF8E7 — остаются 3, 4, 8, 9 и 10, — и действие в
+                             ; ActionSetIdle
+FilterP2Species5Idle           = $01E5B6   ; то же, но ровно вид 5
+FilterP2Species6Idle           = $01E5EE   ; то же, но ровно вид 6
 Sub_01E62E                     = $01E62E   ; 8 инстр, 0 ссылок
 CanGuideUnit                   = $01E64E   ; ПРЕДИКАТ: Z=1 — юнит можно вести.
                              ; Свой по владельцу и вид в маске $FFEFF801,
@@ -2172,16 +2180,19 @@ UnitAtCell                     = $01E8A8   ; a2 = запись юнита из �
 UnitLoop_01E968                = $01E968   ; 18 инстр, 1 ссылок
 UnitLoop_01E9A6                = $01E9A6   ; 15 инстр, 1 ссылок
 UnitLoop_01E9DC                = $01E9DC   ; 15 инстр, 1 ссылок
-Sub_01F0B0                     = $01F0B0   ; 5 инстр, 0 ссылок
-Sub_01F0C2                     = $01F0C2   ; 7 инстр, 1 ссылок
-Sub_01F0DA                     = $01F0DA   ; 5 инстр, 0 ссылок
-Sub_01F0EC                     = $01F0EC   ; 11 инстр, 1 ссылок
-Sub_01F114                     = $01F114   ; 5 инстр, 0 ссылок
-Sub_01F126                     = $01F126   ; 11 инстр, 1 ссылок
-Sub_01F14E                     = $01F14E   ; 5 инстр, 0 ссылок
-Sub_01F160                     = $01F160   ; 11 инстр, 1 ссылок
-Sub_01F188                     = $01F188   ; 5 инстр, 0 ссылок
-Sub_01F19A                     = $01F19A   ; 11 инстр, 1 ссылок
+FindEnemyNearCursor            = $001F0B0   ; FindUnitNearCursor с фильтром FilterEnemy
+FilterEnemy                    = $01F0C2   ; чужой ли юнит: d2 = 2 * CurrentPlayer - 1 сравнивается с +$9.
+                             ; Совпало — значит владелец противоположный. Родственные фильтры
+                             ; ниже отличаются только видом и знаком сравнения (cmp — чужой,
+                             ; add — свой)
+FindEnemySpecies4NearCursor    = $001F0DA   ; то же с FilterEnemySpecies4
+FilterEnemySpecies4            = $001F0EC   ; чужой и вид 4 (ﾃｨﾗﾉ)
+FindEnemySpecies6NearCursor    = $001F114   ; то же с FilterEnemySpecies6
+FilterEnemySpecies6            = $001F126   ; чужой и вид 6 (ﾋﾟｰﾁｬﾝ)
+FindOwnSpecies4NearCursor      = $001F14E   ; то же с FilterOwnSpecies4
+FilterOwnSpecies4              = $001F160   ; свой и вид 4
+FindOwnSpecies6NearCursor      = $001F188   ; то же с FilterOwnSpecies6
+FilterOwnSpecies6              = $001F19A   ; свой и вид 6
 FindUnitNearCursor             = $01F1C2   ; найти юнита около (курсор+2, курсор+2) тремя поисками
                              ; подряд и вернуть его клетку в d0/d1
 UnitLoop_01F204                = $01F204   ; 36 инстр, 1 ссылок
@@ -2466,12 +2477,13 @@ BuildSubmenuForCommand         = $024B1E   ; подменю команды d0: �
 Player_024B64                  = $024B64   ; 16 инстр, 1 ссылок
 Sub_024BAE                     = $024BAE   ; 7 инстр, 0 ссылок
 Sub_024BC4                     = $024BC4   ; 23 инстр, 0 ссылок
-Player_024C1A                  = $024C1A   ; 5 инстр, 1 ссылок
-Player_024C2E                  = $024C2E   ; 10 инстр, 1 ссылок
-Player_024C5A                  = $024C5A   ; 10 инстр, 1 ссылок
-Player_024C86                  = $024C86   ; 10 инстр, 1 ссылок
-Player_024CB2                  = $024CB2   ; 10 инстр, 1 ссылок
-Player_024CDE                  = $024CDE   ; 19 инстр, 1 ссылок
+HasSelectedUnit                = $024C1A   ; занят ли выбор: слово +$A состояния текущего игрока
+HasOwnSpecies4                 = $024C2E   ; перепись в SessionState: блок +$0 или +$10 по CurrentPlayer,
+                             ; байт +$3 — это вид 4. Ноль означает «таких нет»
+HasEnemySpecies4               = $024C5A   ; то же по блоку противника
+HasOwnSpecies6                 = $024C86   ; байт +$5 своего блока — вид 6
+HasEnemySpecies6               = $024CB2   ; байт +$5 блока противника
+CountOwnUnitsTotal             = $024CDE   ; сумма пяти байт переписи своего блока — сколько всего юнитов
 Sub_024D1A                     = $024D1A   ; 25 инстр, 0 ссылок
 Sub_024D78                     = $024D78   ; 22 инстр, 0 ссылок
 Sub_024DCA                     = $024DCA   ; 16 инстр, 0 ссылок
