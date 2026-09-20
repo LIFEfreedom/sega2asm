@@ -5,6 +5,7 @@
     make z80render RENDERARGS=--all      все 169 звуков
     make z80render RENDERARGS="12 34"    только эти номера
     make z80render RENDERARGS="--seconds 90 --all"
+    make z80render RENDERARGS="--seconds 120 --gain 5900 7 9 22"
 
 Разбор данных сказал, ЧТО драйвер сыграет ([z80.md]). Здесь он играет:
 код Z80 исполняется как есть, звук берётся из того, что этот код пишет в
@@ -123,6 +124,11 @@ def main():
         i = args.index("--seconds")
         seconds = int(args[i + 1])
         del args[i:i + 2]
+    fixed_gain = 0
+    if "--gain" in args:
+        i = args.index("--gain")
+        fixed_gain = int(args[i + 1])
+        del args[i:i + 2]
     every = "--all" in args
     args = [a for a in args if not a.startswith("--")]
 
@@ -164,23 +170,27 @@ def main():
         os.makedirs(out, exist_ok=True)
         print("\n── %s: %d звуков ──" % (out, len(nums)))
 
-        # Проход первый: узнать, кто в ГРУППЕ громче всех. Считать общий
-        # множитель на музыку и эффекты сразу нельзя: громкий эффект
-        # утянул бы за собой все мелодии.
-        tmp = os.path.join(out, "_probe.wav")
-        peaks = {}
-        for n in nums:
-            cnt = z80seq.tracks(n)[1]
-            peaks[n] = render(exe, img, tmp, n, frames, 256, init, cnt == 1)
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if fixed_gain:
+            gain = fixed_gain
+            print("множитель %d/256 (задан)" % gain)
+        else:
+            # Проход первый: узнать, кто в ГРУППЕ громче всех. Считать общий
+            # множитель на музыку и эффекты сразу нельзя: громкий эффект
+            # утянул бы за собой все мелодии.
+            tmp = os.path.join(out, "_probe.wav")
+            peaks = {}
+            for n in nums:
+                cnt = z80seq.tracks(n)[1]
+                peaks[n] = render(exe, img, tmp, n, frames, 256, init, cnt == 1)
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
-        top = max(peaks.values()) or 1
-        # Потолок высокий нарочно: у этого драйвера канал даёт около 768, и
-        # даже полный микс редко выходит за тысячу — без множителя в
-        # десятки раз файл получился бы тихим.
-        gain = max(1, min(65536, int(256 * 29500 / top)))
-        print("множитель %d/256 (самый громкий пик %d)" % (gain, top))
+            top = max(peaks.values()) or 1
+            # Потолок высокий нарочно: у этого драйвера канал даёт около
+            # 768, и даже полный микс редко выходит за тысячу — без
+            # множителя в десятки раз файл получился бы тихим.
+            gain = max(1, min(65536, int(256 * 29500 / top)))
+            print("множитель %d/256 (самый громкий пик %d)" % (gain, top))
 
         # Проход второй: с общим уровнем и в постоянные файлы.
         quiet = []
@@ -192,6 +202,8 @@ def main():
             secs = (size - 44) / 4 / 53267.0
             if pk < 64:
                 quiet.append(n)
+            if pk >= 32767:
+                print("    ВНИМАНИЕ: упёрлось в предел, множитель великоват")
             print("  %s: дорожек %2d, пик %5d, %.1f с"
                   % (os.path.basename(wav), cnt, pk, secs))
         if quiet:
