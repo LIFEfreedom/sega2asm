@@ -17,17 +17,27 @@
 # -> сверка SHA-1 с оригиналом. Цель — побайтовая пересборка.
 # ─────────────────────────────────────────────────────────────────────────
 
+# Разбираемый ROM. Второй задаётся из командной строки целиком:
+#     make rebuild NAME=mauimallard ROM=platformer.gen CONFIG=platformer.yaml
 NAME        := dynabrothers2
 ROM         := game.gen
 CONFIG      := game.yaml
+
+# Питоновские инструменты берут отсюда, какой проект разбирается: пути и
+# имена файлов у них считаются в tools/paths.py, а не зашиты.
+export SEGA2ASM_CONFIG := $(CONFIG)
+export SEGA2ASM_ROM    := $(ROM)
 
 # Символы разведены: свои имена переживают смену ROM и пересборку.
 #   .user.txt — ваш, под git
 #   .gen.txt  — генерируется анализатором, перезаписывается
 #   .txt      — склейка для сборки (артефакт, в .gitignore)
-USER_SYMBOLS := game_symbols.user.txt
-GEN_SYMBOLS  := game_symbols.gen.txt
-SYMBOLS      := game_symbols.txt
+# Имена идут от YAML, а не от NAME: символы привязаны к ROM, а не к проекту
+# вывода. game.yaml -> game_symbols.*, platformer.yaml -> platformer_symbols.*
+SYM_BASE     := $(basename $(CONFIG))_symbols
+USER_SYMBOLS := $(SYM_BASE).user.txt
+GEN_SYMBOLS  := $(SYM_BASE).gen.txt
+SYMBOLS      := $(SYM_BASE).txt
 
 # Каталоги (должны совпадать с options.* в $(CONFIG))
 # Вывод разведён по проектам: out/<NAME>/. Второй ROM в том же дереве
@@ -68,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -90,7 +100,7 @@ $(SEGA2ASM): main.go go.mod $(wildcard */*.go) $(wildcard */*/*.go)
 # дальше в нём руками режут сегменты и переводят их в m68k. Полная
 # перегенерация — `make analyze ANALYZEARGS=--write`, и она стирает эту работу.
 analyze:
-	$(PYTHON) $(TOOLS_DIR)/analyze.py $(ANALYZEARGS)
+	$(PYTHON) $(TOOLS_DIR)/analyze.py --name $(NAME) $(ANALYZEARGS)
 
 # Что из bin-сегментов game.yaml обход считает кодом. Переводить по одному,
 # арбитр — `make rebuild`.
@@ -100,7 +110,7 @@ codegaps:
 # game_symbols.gen.txt в .gitignore, поэтому в свежем клоне его нет —
 # восстанавливаем анализатором, иначе сборка не стартует.
 $(GEN_SYMBOLS): $(ROM) $(TOOLS_DIR)/analyze.py
-	$(PYTHON) $(TOOLS_DIR)/analyze.py
+	$(PYTHON) $(TOOLS_DIR)/analyze.py --name $(NAME)
 
 # ── Символы ──────────────────────────────────────────────────────────────
 symbols: $(SYMBOLS)
@@ -132,6 +142,12 @@ codemap: $(MAIN_ASM)
 # в game.yaml вручную и обязательно сверяются побайтовой пересборкой.
 findcode:
 	@$(PYTHON) $(TOOLS_DIR)/findcode.py
+
+# Показать кусок ROM как тайлы 4bpp серой шкалой: лежит там графика или нет.
+#   make tileprobe ADDR=020000 TILES=256
+TILES ?= 256
+tileprobe:
+	@$(PYTHON) $(TOOLS_DIR)/tileprobe.py $(ADDR) $(TILES)
 
 # Предлагает имена безымянным процедурам по механическим признакам тела.
 # Диапазон задаётся аргументами:  make nameprocs FROM=050000 TO=060000

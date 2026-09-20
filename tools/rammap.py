@@ -23,6 +23,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT as out_path
+from paths import docs_dir, merged_symbols, user_symbols
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASM = out_path("asm", "m68k")
@@ -35,9 +36,9 @@ except Exception:
 ADDR_CMT = re.compile(r"^; \$([0-9A-F]{6})$")
 ADDR_LBL = re.compile(r"^\S.*;\s*\$([0-9A-F]{6})$")
 ADDR_ORG = re.compile(r"^\torg\t\$([0-9A-F]{6})$")
-RAM = re.compile(r"\$(FF[0-9A-F]{4})")
+RAM = re.compile(r"\$(?:FF)?(FF[0-9A-F]{4})")
 # lea ($FFxxxx).l,aN   /   lea (Имя).l,aN
-LEA = re.compile(r"^lea\s+\((?:\$(FF[0-9A-F]{4})|(\w+))\)\.l,a(\d)$")
+LEA = re.compile(r"^lea\s+\((?:\$(?:FF)?(FF[0-9A-F]{4})|(\w+))\)\.[lw],a(\d)$")
 SYMLINE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*\$?([0-9A-Fa-f]+)\s*(?:;.*)?$")
 
 
@@ -50,8 +51,7 @@ def load_ram_symbols():
     от нужного. Поэтому известные имена распознаём наравне с литералами.
     """
     out = {}
-    for name in ("game_symbols.txt", "game_symbols.user.txt"):
-        path = os.path.join(HERE, name)
+    for path in (merged_symbols(), user_symbols()):
         if not os.path.exists(path):
             continue
         for raw in open(path, encoding="utf-8", errors="replace"):
@@ -241,7 +241,8 @@ def main():
         """Подпись адреса: с вашим именем, если оно уже есть."""
         return ("`%s` (`$%06X`)" % (addr2name[a], a)) if a in addr2name else "`$%06X`" % a
 
-    out_path = os.path.join(HERE, "docs", "ram-map.md")
+    out_path = os.path.join(docs_dir(), "ram-map.md")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     if "--out" in sys.argv:
         out_path = os.path.join(HERE, sys.argv[sys.argv.index("--out") + 1])
     os.makedirs(os.path.dirname(out_path), exist_ok=True)

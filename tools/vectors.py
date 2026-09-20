@@ -18,7 +18,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import rom_bytes
+from paths import rom_bytes, user_symbols
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -42,7 +42,7 @@ for i in range(16):
 
 def symbols():
     out = {}
-    path = os.path.join(HERE, "game_symbols.user.txt")
+    path = user_symbols()
     for ln in open(path, encoding="utf-8"):
         m = re.match(r"(\S+)\s*=\s*\$([0-9A-F]{6})", ln)
         if m:

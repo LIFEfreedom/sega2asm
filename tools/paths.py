@@ -86,3 +86,53 @@ def rom_bytes(config=None):
     """Содержимое ROM целиком — самый ходовой вход в инструментах."""
     with open(rom_path(config), "rb") as f:
         return f.read()
+
+
+def config_path(config=None):
+    """Разбираемый YAML: аргумент, SEGA2ASM_CONFIG или game.yaml."""
+    return config or os.environ.get("SEGA2ASM_CONFIG") or DEFAULT_CONFIG
+
+
+def sym_base(config=None):
+    """Префикс файлов символов: `game.yaml` -> `game_symbols`.
+
+    Имена символов привязаны к ROM, а не к проекту вывода, поэтому берутся
+    от имени YAML, а не от `name:` внутри него.
+    """
+    stem = os.path.splitext(os.path.basename(config_path(config)))[0]
+    return os.path.join(HERE, stem + "_symbols")
+
+
+def user_symbols(config=None):
+    """Ваши имена, под git. Переживают смену ROM и пересборку."""
+    return sym_base(config) + ".user.txt"
+
+
+def gen_symbols(config=None):
+    """Имена от анализатора. Перезаписываются каждым прогоном."""
+    return sym_base(config) + ".gen.txt"
+
+
+def merged_symbols(config=None):
+    """Склейка для сборки — артефакт, в .gitignore."""
+    return sym_base(config) + ".txt"
+
+
+def coverage_path(config=None):
+    """Карта покрытия анализатора. Своя на каждый ROM, иначе второй затрёт."""
+    stem = os.path.splitext(os.path.basename(config_path(config)))[0]
+    return os.path.join(HERE, "tools", ".coverage-%s.pkl" % stem)
+
+
+def docs_dir(config=None):
+    """Каталог документов проекта.
+
+    У первого разбора (Dyna Brothers 2) документы лежат плоско в `docs/` с
+    префиксом `game-`; заводить ему подкаталог задним числом значило бы
+    переписать полсотни ссылок. Все остальные проекты пишут в `docs/<имя>/`,
+    иначе второй ROM затирает документы первого — так уже случалось.
+    """
+    name = project_name(config)
+    if name == "dynabrothers2":
+        return os.path.join(HERE, "docs")
+    return os.path.join(HERE, "docs", name)

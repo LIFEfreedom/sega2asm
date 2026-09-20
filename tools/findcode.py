@@ -30,7 +30,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import rom_path
+from paths import config_path, rom_path
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -74,7 +74,7 @@ def main():
     rom = open(rom, "rb").read()
 
     found = []
-    for sg in segments(os.path.join(HERE, "game.yaml")):
+    for sg in segments(config_path()):
         if sg.get("type") != "bin":
             continue
         s, e = sg["start"], sg["end"]

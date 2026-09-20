@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка, что сплит по game.yaml покрывает ROM без дыр и пересечений,
+"""Проверка, что сплит по YAML покрывает ROM без дыр и пересечений,
 а извлечённые .bin совпадают с исходными байтами.
 
 Это проверяет конфиг и вывод sega2asm независимо от ассемблера: если здесь
@@ -12,6 +12,9 @@ import os
 import sys
 
 import yaml
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import config_path
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,7 +30,7 @@ def fail(msg):
 
 
 def main():
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "game.yaml")
+    cfg_path = sys.argv[1] if len(sys.argv) > 1 else config_path()
     cfg = yaml.safe_load(open(cfg_path, encoding="utf-8"))
     opts = cfg["options"]
 

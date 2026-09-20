@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Анализ ROM Mega Drive -> game.yaml + game_symbols.gen.txt.
+"""Анализ ROM Mega Drive -> <проект>.yaml + <проект>_symbols.gen.txt.
 
-    python tools/analyze.py [--drop <лог сборки>]
+    python tools/analyze.py [--drop <лог сборки>] [--drop-bin <собранный ROM>]
     python tools/analyze.py --report
+    SEGA2ASM_CONFIG=platformer.yaml python tools/analyze.py --name mauimallard
+
+Разбираемый ROM и имена файлов берутся из YAML (`SEGA2ASM_CONFIG`, по
+умолчанию `game.yaml`), а не зашиты: второй ROM в том же дереве ничего не
+затирает. Имя проекта для ПЕРВОГО прогона, когда YAML ещё нет, задаётся
+ключом `--name`; дальше оно читается из `name:` самого YAML.
 
 Всё выводится из самой ROM, ничего не зашито: таблица векторов, таблица
 диспетчера line-F, граница кода. Обход по потоку управления (семена: векторы,
@@ -13,7 +19,9 @@
 сегмента.
 
 --drop снимает с кода прогоны, в которых ассемблер нашёл нелегальные для 68000
-кодировки: это следы ложных срабатываний засева по прологам.
+кодировки: это следы ложных срабатываний засева по прологам. --drop-bin делает
+то же по РАСХОЖДЕНИЮ БАЙТ с оригиналом: данные, случайно читающиеся как законная
+команда, ассемблер пропускает молча, и видно их только после пересборки.
 
 --report ничего не перезаписывает, а печатает, внутри каких bin-сегментов
 ТЕКУЩЕГО game.yaml обход нашёл код. Так и надо пользоваться находками третьего
@@ -34,7 +42,8 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import rom_bytes
+from paths import (config_path, coverage_path, gen_symbols, merged_symbols,
+                   project_name, rom_bytes, rom_path)
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,6 +54,17 @@ except Exception:
 
 ROM = rom_bytes()
 N = len(ROM)
+
+# Имя проекта: из `name:` YAML, а на первом прогоне (файла ещё нет) — из
+# `--name`, иначе из имени самого YAML.
+YAML = config_path()
+STEM = os.path.splitext(os.path.basename(YAML))[0]
+if "--name" in sys.argv:
+    NAME = sys.argv[sys.argv.index("--name") + 1]
+else:
+    NAME = project_name()
+gen_syms = gen_symbols()
+merged_syms = merged_symbols()
 
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
 S16 = lambda o: struct.unpack_from(">h", ROM, o)[0]
@@ -254,10 +274,14 @@ def decode(a):
             return 2 + e, [a + 2 + e], False
         return 2, [a + 2], False
 
-    if hi == 0xA:                                  # line-A: в этой ROM ошибка
-        raise Bad()
+    if hi == 0xA:                                  # line-A
+        if not LINEA_TRAP:
+            raise Bad()
+        return 2, [a + 2], False
 
-    if hi == 0xF:                                  # line-F: трап BIOS, +2
+    if hi == 0xF:                                  # line-F
+        if not LINEF_TRAP:
+            raise Bad()
         return 2, [a + 2], False
 
     raise Bad()
@@ -268,35 +292,99 @@ SHA1 = hashlib.sha1(ROM).hexdigest().upper()
 print("ROM  : %d байт, SHA-1 %s" % (N, SHA1))
 
 ENTRY = U32(4)
+ILLEGAL = U32(4 * 4)
+
+
+def trap_vector(n):
+    """Ловушка это или ошибка.
+
+    Через line-A и line-F процессор уходит по вектору, и по самому слову
+    команды не понять, звали ли его нарочно. Признак берём из ROM: вектор
+    ведёт в ROM по чётному адресу И не на обработчик недопустимой команды.
+    У Dyna Brothers 2 так устроен весь BIOS (line-F), а line-A сведён на
+    тот же адрес, что и illegal, то есть ошибка. У Maui Mallard оба
+    вектора — мусор, и слово $Axxx/$Fxxx в потоке значит, что разбор ушёл
+    не туда.
+    """
+    v = U32(n * 4)
+    return 0x200 <= v < N and not (v & 1) and v != ILLEGAL
+
+
+LINEA_TRAP = trap_vector(10)
+LINEF_TRAP = trap_vector(11)
+print("трапы: line-A %s, line-F %s"
+      % ("да" if LINEA_TRAP else "нет", "да" if LINEF_TRAP else "нет"))
+
 linef_handler = U32(11 * 4)
 tbl, tbl_n = None, 0
-for off in range(linef_handler, linef_handler + 0x40, 2):
-    if U16(off) == 0x303B:                 # move.w (d16,pc,d0.w),d0
-        tbl = off + 2 + (U16(off + 2) & 0xFF)
-        tbl_n = (ENTRY - tbl) // 2
-        break
-if tbl is None:
-    print("!! диспетчер line-F не найден — продолжаю без его таблицы")
-else:
-    print("line-F: обработчик $%06X, таблица $%06X, записей %d"
-          % (linef_handler, tbl, tbl_n))
+if LINEF_TRAP:
+    for off in range(linef_handler, min(linef_handler + 0x40, N - 3), 2):
+        if U16(off) == 0x303B:             # move.w (d16,pc,d0.w),d0
+            tbl = off + 2 + (U16(off + 2) & 0xFF)
+            tbl_n = (ENTRY - tbl) // 2
+            break
+    if tbl is None:
+        print("!! диспетчер line-F не найден — продолжаю без его таблицы")
+    else:
+        print("line-F: обработчик $%06X, таблица $%06X, записей %d"
+              % (linef_handler, tbl, tbl_n))
 
 
-def first_big_fill(lo, min_len=0x1000):
-    i = lo
-    while i < N:
-        j = i + 1
-        while j < N and ROM[j] == ROM[i]:
-            j += 1
-        if j - i >= min_len:
-            return i, j
-        i = j
-    return N, N
+# Слова, которые в коде встречаются постоянно, а в графике и таблицах —
+# случайно: возвраты, сохранение регистров, вызовы по длинному адресу.
+MARKERS = frozenset((0x4E75, 0x4E71, 0x4E73, 0x4E77,     # rts nop rte rtr
+                     0x48E7, 0x4CDF,                     # movem -(a7) / (a7)+
+                     0x4E56, 0x4E5E,                     # link / unlk
+                     0x4EB9, 0x4EF9))                    # jsr.l / jmp.l
 
 
-CODE_HI, PAD_HI = first_big_fill(0x200)
-print("код кончается не позже $%06X (далее %d байт 0x%02X до $%06X)"
-      % (CODE_HI, PAD_HI - CODE_HI, ROM[CODE_HI], PAD_HI))
+def code_windows(blk=0x1000, thr=6, gap=0x4000):
+    """Где в ROM вообще лежит код — по плотности маркеров.
+
+    Раньше граница бралась как первая большая заливка одним байтом: у Dyna
+    Brothers 2 код идёт с $000200 подряд, и заливка $FF за ним честно его
+    закрывала. У Maui Mallard код лежит В КОНЦЕ картриджа ($28D000) двумя
+    кусками, а перед ним 2,6 МБ графики — заливки там нет, и приём даёт
+    границу на первой же случайной строке одинаковых байт.
+
+    Порог 6 маркеров на 4 КБ разделяет оба ROM'а: у Dyna Brothers он даёт
+    ровно один кусок $000200-$05F000, у Maui Mallard — $28D000-$2AC000 и
+    $2F8000-$2F9000 (второй — помощники, которых зовут больше 300 раз).
+
+    Окна нужны не для красоты: засев по прологам и поиск таблиц идут
+    сплошным перебором, и без окон 2,6 МБ графики превратились бы в тысячи
+    ложных «процедур».
+    """
+    hot = []
+    for base in range(0, N, blk):
+        end = min(base + blk, N) - 1
+        if sum(1 for o in range(base, end, 2) if U16(o) in MARKERS) >= thr:
+            hot.append([base, min(base + blk, N)])
+    if not hot:
+        return [(0x200, N)]
+    out = [hot[0]]
+    for lo, hi in hot[1:]:
+        if lo - out[-1][1] <= gap:
+            out[-1][1] = hi
+        else:
+            out.append([lo, hi])
+    return [(max(lo, 0x200), hi) for lo, hi in out]
+
+
+WINDOWS = code_windows()
+CODE_LO = WINDOWS[0][0]
+CODE_HI = WINDOWS[-1][1]
+print("окна кода: %s (всего %d байт из %d)"
+      % (" ".join("$%06X-$%06X" % w for w in WINDOWS),
+         sum(hi - lo for lo, hi in WINDOWS), N))
+
+
+def in_code(a):
+    """Внутри ли адрес какого-нибудь окна кода."""
+    for lo, hi in WINDOWS:
+        if lo <= a < hi:
+            return True
+    return False
 
 covered = bytearray(N)
 starts, targets = set(), set()
@@ -348,12 +436,13 @@ walk(seeds)
 print("проход 1: %d инструкций, %d байт" % (len(starts), sum(covered)))
 
 prologues = []
-for a in range(0x200, CODE_HI, 2):
-    op = U16(a)
-    if op == 0x48E7 and U16(a + 2) not in (0x0000, 0xFFFF):
-        prologues.append(a)
-    elif op == 0x4E56 and -0x2000 <= S16(a + 2) <= 0:
-        prologues.append(a)
+for lo, hi in WINDOWS:
+    for a in range(lo, hi - 3, 2):
+        op = U16(a)
+        if op == 0x48E7 and U16(a + 2) not in (0x0000, 0xFFFF):
+            prologues.append(a)
+        elif op == 0x4E56 and -0x2000 <= S16(a + 2) <= 0:
+            prologues.append(a)
 walk([a for a in prologues if a not in starts])
 for a in prologues:
     if a in starts:
@@ -393,7 +482,7 @@ def code_start_ok(v):
     Попадать оно обязано на ГРАНИЦУ команды: адрес внутри уже разобранной
     команды — верный признак, что это не указатель, а совпадение.
     """
-    if v & 1 or not (0x200 <= v < CODE_HI):
+    if v & 1 or not in_code(v):
         return False
     if covered[v] and v not in starts:
         return False
@@ -443,23 +532,54 @@ def long_tables(min_run=4):
     Четыре подряд — уже не совпадение: случайное длинное слово попадает в
     диапазон кода примерно раз на четыре тысячи.
     """
-    found, a = {}, 0x200
-    while a + 4 * min_run <= CODE_HI:
-        run, b = [], a
-        while b + 4 <= CODE_HI and not (covered[b] or covered[b + 1]
-                                        or covered[b + 2] or covered[b + 3]):
-            v = U32(b)
-            if v & 1 or not (0x200 <= v < CODE_HI):
-                break
-            run.append(v)
-            b += 4
-        if len(run) >= min_run and all(code_start_ok(v) for v in run):
-            found[a] = run
-            a = b
-        else:
-            a += 2
+    found = {}
+    for lo, hi in WINDOWS:
+        a = lo
+        while a + 4 * min_run <= hi:
+            run, b = [], a
+            while b + 4 <= hi and not (covered[b] or covered[b + 1]
+                                       or covered[b + 2] or covered[b + 3]):
+                v = U32(b)
+                if v & 1 or not in_code(v):
+                    break
+                run.append(v)
+                b += 4
+            if len(run) >= min_run and all(code_start_ok(v) for v in run):
+                found[a] = run
+                a = b
+            else:
+                a += 2
     return found
 
+
+# ─────────────── проход 3: одиночные указатели из всей ROM ───────────────
+# Прогон из четырёх подряд (выше) ловит только таблицы. У Maui Mallard код
+# зовут из СТРУКТУР: в записи объекта лежит один указатель на обработчик, и
+# соседние длинные слова — координаты и номера кадров, а не адреса. Прогона
+# нет, и таблица не находится.
+#
+# Почему одиночному указателю здесь можно верить. Окно кода узкое: 131 КБ
+# из 3 МБ. Случайное длинное слово попадает в него примерно раз на тридцать
+# тысяч, то есть на полтора миллиона чётных смещений ждём десятки ложных, а
+# не тысячи — и каждое ещё обязано разобраться в связный кусок кода
+# (`code_start_ok`). У Dyna Brothers 2 окно занимает пятую часть картриджа,
+# и там этот проход почти ничего не даёт: указателей в код из данных мало.
+def stray_pointers():
+    found = []
+    for o in range(0, N - 3, 2):
+        v = U32(o)
+        if v & 1 or not in_code(v) or v in starts:
+            continue
+        if code_start_ok(v):
+            found.append(v)
+    return sorted(set(found))
+
+
+fresh = stray_pointers()
+targets.update(fresh)
+walk(fresh)
+print("проход 3 (+%d указателей из данных): %d инструкций, %d байт"
+      % (len(fresh), len(starts), sum(covered)))
 
 for rnd in range(1, 9):
     tabs = {}
@@ -470,7 +590,7 @@ for rnd in range(1, 9):
         break
     targets.update(fresh)
     walk(fresh)
-    print("проход 3.%d (+%d таблиц, %d новых адресов): %d инструкций, %d байт"
+    print("проход 4.%d (+%d таблиц, %d новых адресов): %d инструкций, %d байт"
           % (rnd, len(tabs), len(fresh), len(starts), sum(covered)))
 
 # Таблица переходов диспетчера — данные, но лежит вплотную за его концом, и
@@ -511,7 +631,7 @@ if "--report" in sys.argv:
     # или графики. Прогон в два-шесть байт обязательно смотреть глазами.
     MIN_RUN = 2
     rows, total = [], 0
-    for sg in yaml_segments(os.path.join(HERE, "game.yaml")):
+    for sg in yaml_segments(YAML):
         if sg.get("type") != "bin":
             continue
         runs, run = [], None
@@ -543,11 +663,36 @@ if "--report" in sys.argv:
     print("\nсегментов %d, байт %d" % (len(rows), total))
     sys.exit(0)
 
-COV = os.path.join(HERE, "tools", ".coverage.pkl")
+COV = coverage_path()
+if "--drop-bin" in sys.argv:
+    # Второй арбитр, после ассемблера: собранный ROM. Ассемблер ругается
+    # только на невозможные кодировки, а данные, которые СЛУЧАЙНО читаются
+    # как законная команда, проходят молча и всплывают расхождением байт.
+    # Так ловится, например, `ori.b #$42` поверх таблицы: старший байт
+    # непосредственного операнда в байтовой команде не хранится нигде, и
+    # обратно печатается ноль.
+    built = open(sys.argv[sys.argv.index("--drop-bin") + 1], "rb").read()
+    covered = bytearray(pickle.load(open(COV, "rb")))
+    bad = {i for i in range(min(len(built), N)) if built[i] != ROM[i]}
+    n = 0
+    for a in bad:
+        s = a
+        while s > 0x200 and covered[s - 1]:
+            s -= 1
+        e = a
+        while e < N and covered[e]:
+            e += 1
+        for k in range(s, e):
+            if covered[k]:
+                covered[k] = 0
+                n += 1
+    print("расхождений байт: %d, снято: %d байт" % (len(bad), n))
+
 if "--drop" in sys.argv:
     log = open(sys.argv[sys.argv.index("--drop") + 1],
                encoding="utf-8", errors="replace").read()
-    covered = bytearray(pickle.load(open(COV, "rb")))
+    if "--drop-bin" not in sys.argv:      # иначе затёрли бы его работу
+        covered = bytearray(pickle.load(open(COV, "rb")))
     bad = set()
     # Между "Error:" и "On line" ассемблер иногда печатает многострочное
     # пояснение, поэтому пропускаем произвольные строки до первой ссылки.
@@ -581,26 +726,18 @@ if "--drop" in sys.argv:
 pickle.dump(bytes(covered), open(COV, "wb"))
 
 # ─────────────────────────── game.yaml ───────────────────────────────────
-holes, run = [], None
-for i in range(0x200, CODE_HI):
-    if not covered[i]:
-        if run is None:
-            run = i
-    elif run is not None:
-        holes.append((run, i))
-        run = None
-if run is not None:
-    holes.append((run, CODE_HI))
-sel = [(s + (s & 1), e + (e & 1)) for s, e in holes if e > s]
-
-body, cur, ci, di = [], 0x200, 0, 0
+body, ci, di, bi = [], 0, 0, 0
 
 
-def emit(kind, s, e):
-    global ci, di
+def emit(kind, s, e, blob=False):
+    """Один сегмент конфига. `blob` — данные ВНЕ окон кода (графика, звук)."""
+    global ci, di, bi
     if kind == "m68k":
         ci += 1
         nm, sub = "code_%02d" % ci, ""
+    elif blob:
+        bi += 1
+        nm, sub = "blob_%02d" % bi, ""
     else:
         di += 1
         nm, sub = "data_%02d" % di, "\n    subdir: code_data"
@@ -608,35 +745,53 @@ def emit(kind, s, e):
                 % (nm, kind, s, e, sub))
 
 
-for s, e in sel:
-    if s > cur:
-        emit("m68k", cur, s)
-    emit("bin", s, e)
-    cur = e
-if cur < CODE_HI:
-    emit("m68k", cur, CODE_HI)
+cur = 0x200
+for lo, hi in WINDOWS:
+    if cur < lo:
+        emit("bin", cur, lo, blob=True)
+    holes, run = [], None
+    for i in range(lo, hi):
+        if not covered[i]:
+            if run is None:
+                run = i
+        elif run is not None:
+            holes.append((run, i))
+            run = None
+    if run is not None:
+        holes.append((run, hi))
+    cur = lo
+    for a, b in [(a + (a & 1), b + (b & 1)) for a, b in holes if b > a]:
+        if a > cur:
+            emit("m68k", cur, a)
+        emit("bin", a, b)
+        cur = b
+    if cur < hi:
+        emit("m68k", cur, hi)
+    cur = hi
+if cur < N:
+    emit("bin", cur, N, blob=True)
 
-head = """# Dyna Brothers 2 (Japan) — CRI
+charmap = os.path.join(HERE, "%s_charmap.tbl" % STEM)
+head = """# %s — %s
 # СГЕНЕРИРОВАНО tools/analyze.py — правки затираются, меняйте анализатор.
-# Границы кода получены обходом по потоку управления (векторы + таблица
-# line-F $%06X + прологи функций), а не разметкой на глаз. В m68k попадает
-# только подтверждённый код, всё непокрытое вынесено в bin: только начало
-# нового сегмента возвращает дизассемблеру выравнивание.
-name: dynabrothers2
+# Границы кода получены обходом по потоку управления (векторы%s + прологи
+# функций) внутри окон %s, а не разметкой на глаз. В m68k попадает только
+# подтверждённый код, всё непокрытое вынесено в bin: только начало нового
+# сегмента возвращает дизассемблеру выравнивание.
+name: %s
 sha1: "%s"
 
 options:
   platform: megadrive
   region: ntsc
-  basename: dynabrothers2
-  base_path: ./out/dynabrothers2
-  target_path: ./game.gen
+  basename: %s
+  base_path: ./out/%s
+  target_path: ./%s
   asm_path: asm
   asset_path: assets
   build_path: build
-  symbols_path: ./game_symbols.txt
-  charmap_path: ./game_charmap.tbl
-  header_output: true
+  symbols_path: ./%s
+%s  header_output: true
   incbin: true
 
 segments:
@@ -648,19 +803,23 @@ segments:
     start: 0x000000
     end:   0x000200
 
-""" % (tbl or 0, SHA1)
+""" % (NAME, ROM[0x120:0x150].decode("latin1").strip() or NAME,
+       " + таблица line-F $%06X" % tbl if tbl else "",
+       " ".join("$%06X-$%06X" % w for w in WINDOWS),
+       NAME, SHA1, NAME, NAME, os.path.basename(rom_path()),
+       os.path.basename(merged_syms),
+       ("  charmap_path: ./%s\n" % os.path.basename(charmap)
+        if os.path.exists(charmap) else ""))
 
-tail = ("\n\n  - name: rest\n    type: bin\n    start: 0x%06X\n    end:   0x%06X\n"
-        % (CODE_HI, N))
+tail = "\n"
 # ОСТОРОЖНО: game.yaml давно не чисто производный файл. Поверх первого
 # прогона в нём руками переведены десятки сегментов, разрезаны свалки и
 # расставлены имена, на которые ссылаются документы. Перезапись стирает всё
 # это, поэтому существующий файл трогаем только по явному --write, а находки
 # смотрим через --report.
-YAML = os.path.join(HERE, "game.yaml")
 if os.path.exists(YAML) and "--write" not in sys.argv:
-    print("game.yaml оставлен как есть (перезапись — только с --write);"
-          " находки: --report")
+    print("%s оставлен как есть (перезапись — только с --write);"
+          " находки: --report" % os.path.basename(YAML))
 else:
     open(YAML, "w", encoding="utf-8").write(head + "\n\n".join(body) + tail)
 
@@ -670,7 +829,8 @@ named = {ENTRY: "EntryPoint", U32(2 * 4): "BusError", U32(3 * 4): "AddressError"
          U32(30 * 4): "VBlankHandler", U32(28 * 4): "HBlankHandler"}
 good = sorted(t for t in targets if t in starts and covered[t])
 out = ["; СГЕНЕРИРОВАНО tools/analyze.py — правки затираются.",
-       "; Свои имена держите в game_symbols.user.txt: они идут первыми при",
+       "; Свои имена держите в %s: они идут первыми при"
+       % os.path.basename(gen_syms).replace(".gen.txt", ".user.txt"),
        "; склейке и побеждают, потому что types/symbol.go запоминает первое",
        "; вхождение адреса.", ""]
 seen_names = set()
@@ -680,10 +840,9 @@ for a in good:
         nm = "loc_%06X" % a
     seen_names.add(nm)
     out.append("%s = $%06X" % (nm, a))
-open(os.path.join(HERE, "game_symbols.gen.txt"), "w", encoding="utf-8").write(
-    "\n".join(out) + "\n")
+open(gen_syms, "w", encoding="utf-8").write("\n".join(out) + "\n")
 
 m = sum(1 for l in body if "m68k" in l)
 print("\nразметка обходом: %d сегментов (m68k %d, bin %d), кода %d байт"
       % (len(body) + 2, m, len(body) - m + 2, sum(covered)))
-print("game_symbols.gen.txt: %d символов" % len(good))
+print("%s: %d символов" % (os.path.basename(gen_syms), len(good)))

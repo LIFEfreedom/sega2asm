@@ -28,6 +28,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT as out_path
+from paths import user_symbols
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -124,7 +125,7 @@ def main():
     code = dict(rows)
 
     named = set()
-    for line in open(os.path.join(HERE, "game_symbols.user.txt"),
+    for line in open(user_symbols(),
                      encoding="utf-8"):
         m = re.match(r"^\s*\w+\s*=\s*\$([0-9A-F]+)", line)
         if m:

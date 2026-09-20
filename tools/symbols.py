@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Развязка пользовательских и сгенерированных символов.
 
-    python tools/symbols.py --merge     # user + gen -> game_symbols.txt
+    python tools/symbols.py --merge     # user + gen -> <проект>_symbols.txt
     python tools/symbols.py --equates   # после split: дописать equ в ports.asm
 
 Зачем две части.
 
-1. --merge. `game_symbols.gen.txt` перезаписывается анализатором при каждой
-   смене ROM, поэтому вписывать туда найденные имена нельзя. Имена живут в
-   `game_symbols.user.txt` (под git), а сборочный `game_symbols.txt`
-   склеивается из обоих. Пользовательский идёт ПЕРВЫМ: в types/symbol.go
-   побеждает первое вхождение адреса, так что ваши имена перекрывают
-   автоматические loc_XXXXXX.
+1. --merge. `<проект>_symbols.gen.txt` перезаписывается анализатором при
+   каждой смене ROM, поэтому вписывать туда найденные имена нельзя. Имена
+   живут в `<проект>_symbols.user.txt` (под git), а сборочный
+   `<проект>_symbols.txt` склеивается из обоих. Пользовательский идёт
+   ПЕРВЫМ: в types/symbol.go побеждает первое вхождение адреса, так что
+   ваши имена перекрывают автоматические loc_XXXXXX.
 
 2. --equates. sega2asm определяет метку только там, где реально печатает её
    в сегменте кода. Если назвать адрес вне кода — переменную в ОЗУ, таблицу
@@ -26,11 +26,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT as out_path
+from paths import gen_symbols, merged_symbols, user_symbols
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-USER = os.path.join(HERE, "game_symbols.user.txt")
-GEN = os.path.join(HERE, "game_symbols.gen.txt")
-OUT = os.path.join(HERE, "game_symbols.txt")
+# Имена файлов идут от разбираемого YAML (`SEGA2ASM_CONFIG`): game.yaml даёт
+# game_symbols.*, platformer.yaml — platformer_symbols.*.
+USER = user_symbols()
+GEN = gen_symbols()
+OUT = merged_symbols()
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -72,8 +75,9 @@ def merge():
 
     with open(OUT, "w", encoding="utf-8") as f:
         f.write("; СГЕНЕРИРОВАННЫЙ ФАЙЛ — не редактировать.\n")
-        f.write("; Собран tools/symbols.py из game_symbols.user.txt (первым,\n")
-        f.write("; поэтому побеждает) и game_symbols.gen.txt.\n\n")
+        f.write("; Собран tools/symbols.py из %s (первым,\n"
+                % os.path.basename(USER))
+        f.write("; поэтому побеждает) и %s.\n\n" % os.path.basename(GEN))
         f.write("; ── ваши имена ──────────────────────────────────────────\n")
         for name, addr in user:
             f.write("%s = $%06X\n" % (name, addr))
