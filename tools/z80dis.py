@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Дизассемблер Z80 для звукового драйвера Dyna Brothers 2.
+"""Дизассемблер Z80 для звукового драйвера.
 
     python tools/z80dis.py            # весь драйвер
     python tools/z80dis.py 0BB 200    # $200 байт с адреса $00BB
+    python tools/z80dis.py --rom 2ABADA:1862 0 1862   # образ прямо из ROM
 
-Драйвер лежит в ROM по `$00207E` сжатым (метод 3, $1AC0 байт) и при
-старте ($00093C) раскладывается в ОЗУ Z80 двумя кусками:
-`$0000..$0FD1` и `$1100..$1BED`. Ещё тринадцать байт почтового ящика
-копируются из `$000AA8` в `$1C00`.
+Откуда берётся образ ОЗУ Z80, зависит от игры, поэтому есть два пути.
+
+* **Dyna Brothers 2** (по умолчанию): драйвер лежит в ROM по `$00207E`
+  сжатым (метод 3, $1AC0 байт) и при старте ($00093C) раскладывается двумя
+  кусками — `$0000..$0FD1` и `$1100..$1BED`; ещё тринадцать байт почтового
+  ящика копируются из `$000AA8` в `$1C00`.
+* **Любая другая ROM:** ключ `--rom НАЧАЛО:ДЛИНА[@АДРЕС]` кладёт кусок ROM
+  в образ как есть. У Maui Mallard драйвер несжатый, `$2ABADA` длиной
+  `$1862`, и грузится с нуля (`$2F8C6C` в 68000).
 """
 import os
 import sys
@@ -191,6 +197,14 @@ class Dis:
             if x != 1 and z != 6:
                 s += ",%s" % R8[z]
             return 4, s, None, False
+        if op == 0x36:
+            # `ld (ix+d),n` — единственная команда, где после смещения идёт
+            # ЕЩЁ и непосредственное значение. Через one_plain её разбирать
+            # нельзя: там `ld (hl),n` берёт за n байт смещения, и в листинге
+            # вместо значения печатается смещение (ловилось на `ld (ix+0),$FF`,
+            # которое выглядело как `ld (ix+0),$00`).
+            dd = (self.b(a + 2) ^ 0x80) - 0x80
+            return 4, "ld (%s%+d),%s" % (ix, dd, hx(self.b(a + 3))), None, False
         sub = self.one_plain(a + 1)
         if sub is None:
             return 1, "db %s" % hx(self.b(a)), None, False
@@ -211,6 +225,21 @@ class Dis:
         return self._main(a)
 
 
+def load_rom_chunks(specs):
+    """--rom НАЧАЛО:ДЛИНА[@АДРЕС], можно несколько раз."""
+    rom = rom_bytes()
+    img = bytearray(0x2000)
+    for spec in specs:
+        at = 0
+        if "@" in spec:
+            spec, tail = spec.split("@", 1)
+            at = int(tail, 16)
+        src, ln = spec.split(":")
+        src, ln = int(src, 16), int(ln, 16)
+        img[at:at + ln] = rom[src:src + ln]
+    return img
+
+
 def load():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     from unpack import unpack
@@ -224,10 +253,13 @@ def load():
 
 
 def main():
-    img = load()
+    specs = [sys.argv[i + 1] for i, v in enumerate(sys.argv) if v == "--rom"]
+    img = load_rom_chunks(specs) if specs else load()
     dis = Dis(img)
-    a = int(sys.argv[1], 16) if len(sys.argv) > 1 else 0
-    n = int(sys.argv[2], 16) if len(sys.argv) > 2 else 0x1AC0
+    args = [v for i, v in enumerate(sys.argv[1:], 1)
+            if v != "--rom" and sys.argv[i - 1] != "--rom"]
+    a = int(args[0], 16) if args else 0
+    n = int(args[1], 16) if len(args) > 1 else 0x1AC0
     end = a + n
     while a < end:
         ln, txt, _t, _e = dis.one(a)
