@@ -50,6 +50,11 @@ ROM даёт 383 функции и 13 507 команд, и сверка (`make x
 | [game-missions.md](game-missions.md) | все 92 байта описания миссии: деньги, музыка, состав войск, разрешённые команды |
 | [game-species.md](game-species.md) | номера видов и привязка к именам |
 | [game-species-trikera.md](game-species-trikera.md) | один вид целиком: ﾄﾘｹﾗ — числа, поведение, возможности |
+| [game-species-allo.md](game-species-allo.md) | один вид целиком: ｱﾛ — охота, взросление в вид 8, лёд |
+| [game-species-tyranno.md](game-species-tyranno.md) | один вид целиком: ﾃｨﾗﾉ — удар, колючки, взросление в вид 9 |
+| [game-species-ptera.md](game-species-ptera.md) | один вид целиком: ﾌﾟﾃﾗ — полёт, зрение сквозь преграды, рыба |
+| [game-species-stego.md](game-species-stego.md) | один вид целиком: ｽﾃｺﾞ — доход, стадо, превращение у игрока 2 |
+| [game-species-peachan.md](game-species-peachan.md) | один вид целиком: ﾋﾟｰﾁｬﾝ — лотерейный удар, питание яйцами, мёртвое правило |
 | [game-actions.md](game-actions.md) | словарь действий `+$15`, развязка стычки |
 | [game-damage.md](game-damage.md) | формула урона, сила и защита, урон от местности |
 | [game-movement.md](game-movement.md) | стоимость шага по местности, механика скорости |
