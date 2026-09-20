@@ -34,6 +34,7 @@ Dyna Brothers 2 — проект дизассемблирования
   z80dis    — дизассемблер звукового драйвера
   z80seq    — скрипты дорожек (Maui Mallard):  make z80seq SOUND=0
   z80render — мелодии Maui Mallard в WAV (нужен компилятор C и make deps)
+  z80voice  — записи тембров (Maui Mallard):  make z80voice VOICE=0
   unpack    — распаковщик блока:  make unpack ADDR=060424
   vectors   — таблица исключений 68000 с нашими именами
   xcheck    — сверка дизассемблера с чужим декодером

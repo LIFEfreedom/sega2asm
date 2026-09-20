@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Разбор записей тембра звукового драйвера (Maui Mallard).
+
+    python tools/z80voice.py           сводка по всем тембрам
+    python tools/z80voice.py 0         один тембр по-человечески
+    make z80voice VOICE=0
+
+Запись — 39 байт, и раскладка снята не на глаз, а из самого драйвера:
+таблица `$15F5` — это пары «регистр YM2612, смещение в записи», по ней
+процедура `$15A9` и заливает тембр в микросхему. Оттуда же видно, что
+поле с взведённым битом 7 (`40 85`) — уровень несущей: он не пишется
+напрямую, а масштабируется громкостью ноты.
+
+Проверка раскладки на данных: во всех 149 тембрах FM (596 операторов) ни
+один неиспользуемый бит отображённых регистров не взведён — ни бит 7 в
+DT/MUL, ни бит 5 в RS/AR, ни биты 5-6 в AM/D1R, а TL нигде не выходит за
+127.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+ROM = rom_bytes()
+# Первая из четырёх таблиц, которые 68000 отдаёт драйверу (`$2F8D7C`).
+TABLE = int(os.environ.get("MM_VOICE_TABLE", "2AD33C"), 16)
+SIZE = 39
+
+KIND = {0: "FM", 1: "ударные", 2: "PSG", 3: "PSG-2"}
+# Порядок такой же, как в таблице драйвера: смещения регистров $30+0, +4,
+# +8, +$C — это операторы 1, 3, 2, 4.
+OPS = [("оп.1", 5), ("оп.3", 11), ("оп.2", 17), ("оп.4", 23)]
+
+
+def u16le(o):
+    return ROM[o] | (ROM[o + 1] << 8)
+
+
+def count():
+    return u16le(TABLE) // 2
+
+
+def record(n):
+    d = TABLE + u16le(TABLE + n * 2)
+    return d, ROM[d:d + SIZE]
+
+
+def show(n):
+    at, r = record(n)
+    print("тембр $%02X: запись $%06X, тип %d (%s)"
+          % (n, at, r[0], KIND.get(r[0], "?")))
+    print("  байты: %s" % " ".join("%02X" % b for b in r))
+    if r[0] != 0:
+        print("  раскладка разобрана только для FM; у этого типа те же 39 байт"
+              " значат другое")
+        if r[0] == 1:
+            print("  +1 = $%02X — правка скорости сэмпла (драйвер сверяет с 4)"
+                  % r[1])
+        return
+    print("  LFO ($22): $%02X%s" % (r[1], "" if r[1] & 8 else " — не включён"))
+    print("  режим канала 3: %s (байт +2 = $%02X)"
+          % ("да" if r[2] & 0x40 else "нет", r[2]))
+    print("  алгоритм %d, обратная связь %d (регистр $B0 = $%02X)"
+          % (r[3] & 7, (r[3] >> 3) & 7, r[3]))
+    pan = {0: "тишина", 1: "справа", 2: "слева", 3: "обе стороны"}[r[4] >> 6]
+    print("  панорама: %s, AMS %d, FMS %d (регистр $B4 = $%02X)"
+          % (pan, (r[4] >> 4) & 3, r[4] & 7, r[4]))
+    print("  оператор   DT MUL   TL   RS  AR   AM D1R   D2R   D1L  RR")
+    for name, b in OPS:
+        dt, mul = (r[b] >> 4) & 7, r[b] & 15
+        tl = r[b + 1]
+        rs, ar = r[b + 2] >> 6, r[b + 2] & 0x1F
+        am, d1r = r[b + 3] >> 7, r[b + 3] & 0x1F
+        d2r = r[b + 4] & 0x1F
+        d1l, rr = r[b + 5] >> 4, r[b + 5] & 15
+        print("  %-9s %2d %3d %4d %4d %3d %4d %3d %5d %5d %3d"
+              % (name, dt, mul, tl, rs, ar, am, d1r, d2r, d1l, rr))
+    if r[2] & 0x40:
+        print("  частоты операторов (особый режим канала 3): %s"
+              % " ".join("$%02X" % b for b in r[29:37]))
+    print("  key-on: операторы $%X (байт +37)" % r[37])
+    if r[38]:
+        print("  байт +38 = $%02X — назначение неизвестно" % r[38])
+
+
+def summary():
+    n = count()
+    print("таблица тембров $%06X, записей %d, по %d байт\n"
+          % (TABLE, n, SIZE))
+    print("| тембр | тип | алгоритм | ОС | панорама | LFO | канал 3 |")
+    print("|---|---|---|---|---|---|---|")
+    for i in range(n):
+        _at, r = record(i)
+        if r[0] != 0:
+            print("| $%02X | %s | | | | | |" % (i, KIND.get(r[0], "?")))
+            continue
+        pan = {0: "—", 1: "П", 2: "Л", 3: "обе"}[r[4] >> 6]
+        print("| $%02X | FM | %d | %d | %s | %s | %s |"
+              % (i, r[3] & 7, (r[3] >> 3) & 7, pan,
+                 "да" if r[1] & 8 else "", "да" if r[2] & 0x40 else ""))
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if not args:
+        summary()
+        return 0
+    for a in args:
+        show(int(a, 0))
+        print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
