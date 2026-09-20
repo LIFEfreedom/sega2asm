@@ -81,14 +81,14 @@ sys.path.insert(0, os.path.join(HERE, "tools"))
 import notestring  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+rom = rom_bytes()
 
 SFX_TABLE = 0x00201C      # пары (банк, команда) по номеру звука
 SFX_NAMES = 0x04C2F6      # звукоподражания, тот же номер

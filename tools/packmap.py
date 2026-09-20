@@ -37,9 +37,9 @@ except Exception:
 from unpack import unpack
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
-ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
+ROM = rom_bytes()
 CODE_HI = 0x05E244
 OK_METHOD = {1, 2, 3, 6, 7}
 

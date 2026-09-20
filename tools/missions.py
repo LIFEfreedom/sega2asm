@@ -17,12 +17,15 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unpack import unpack                                    # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+rom = rom_bytes()
 REC = 0x5C
 
 COMMANDS = ["ｼｾﾞﾝ природа", "ﾀﾏｺﾞ яйцо", "ｼｮｸﾌﾞﾂ растения", "ｼﾚｲ приказы",
@@ -93,6 +96,8 @@ def main():
 
     p("# Описание миссии: все 92 байта\n\n")
     p("Собрано `tools/missions.py`. Записи лежат сжатыми в главах, на\n")
+    p("СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
+      "Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
     p("которые указывает `ChapterTable` `$060400`; распаковщик разобран в\n")
     p("[game-compression.md](game-compression.md). `LoadMissionState`\n")
     p("`$006C06` копирует `$5C` байт выбранной записи в `MainState`\n")

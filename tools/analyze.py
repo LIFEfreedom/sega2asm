@@ -33,6 +33,9 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -40,7 +43,7 @@ try:
 except Exception:
     pass
 
-ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
+ROM = rom_bytes()
 N = len(ROM)
 
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]

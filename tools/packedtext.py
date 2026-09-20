@@ -38,7 +38,10 @@ except Exception:
 from unpack import unpack  # noqa: E402
 import dumptext  # noqa: E402
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
+rom = rom_bytes()
 L = lambda a: struct.unpack(">I", rom[a:a + 4])[0]
 W = lambda a: (rom[a] << 8) | rom[a + 1]
 

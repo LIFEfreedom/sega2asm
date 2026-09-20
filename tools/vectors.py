@@ -17,6 +17,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -48,7 +51,7 @@ def symbols():
 
 
 def main():
-    rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+    rom = rom_bytes()
     sym = symbols()
     seen = {}
     for v in range(64):

@@ -2,6 +2,9 @@
 
 Собрано `tools/aiscript.py` (`make aiscripts`) по листингам.
 
+СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.
+Вывод, который надо сохранить, пишите в соседний, ручной файл.
+
 `AiLoop` `$025282` каждый кадр уменьшает такт `$21(a5)`, и когда тот
 дошёл до нуля, берёт номер этапа из байта `+$3` описания миссии и
 прыгает по самоотносительной таблице `AiScriptTable` `$0252EE` —
@@ -84,8 +87,8 @@
 | `AiPlanForPhase` — взять план текущей фазы | 1 | 1 | любая |
 | `AiQuakeNearEnemies3` — ЗЕМЛЕТРЯСЕНИЕ, вариант с другой анимацией | 1 | 1 | 3, 4, 5 |
 | `AiUnbanOnMoney` — снять запрет, когда денег больше порога | 1 | 1 | любая |
+| `DroughtP2` — не разобрано | 1 | 1 | любая |
 | `EffectDrought` — ЗАСУХА: экранная процедура погоды ﾋﾃﾞﾘ | 1 | 1 | любая |
-| `Player_0248CE` — оплатить ЗАСУХУ из кошелька второго | 1 | 1 | любая |
 | `Random` — бросок кубика | 1 | 1 | любая |
 
 ## Что противнику открыто в какой фазе
@@ -132,8 +135,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -240,11 +243,11 @@
 | `AiOnCooldown` | пауза: молчать, пока тик меньше $46(a5) | — |
 | `ClampMapCoords` | загнать координаты в границы карты | — |
 | `AiPhase1To2OnSight` | фаза 1 -> 2, если рядом виден юнит нужного вида | — |
-| `AiDroughtNearEnemies` | ЗАСУХА, если рядом не меньше d5 чужих по a6 | a6=Ai_01E470, d5=$6, фаза 2 |
+| `AiDroughtNearEnemies` | ЗАСУХА, если рядом не меньше d5 чужих по a6 | a6=FilterP1GrazerIdle, d5=$6, фаза 2 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фазы 3, 4, 5 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фазы 3, 4, 5 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фазы 3, 4, 5 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 3, 4, 5 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фазы 4, 5, 6 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фазы 4, 5, 6 |
 
 ### `$025754` — этап 8
 
@@ -259,7 +262,7 @@
 | `AiOnCooldown` | пауза: молчать, пока тик меньше $46(a5) | — |
 | `ClampMapCoords` | загнать координаты в границы карты | — |
 | `AiPhase1To2OnSight` | фаза 1 -> 2, если рядом виден юнит нужного вида | — |
-| `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 
 ### `$02583A` — этап 27
 
@@ -270,7 +273,7 @@
 | `AiClampCursor` | загнать курсор ИИ обратно в карту | — |
 | `AiPickChain` | выбрать цепочку правил по соотношению сил (a6) | — |
 | `EffectDrought` | ЗАСУХА: экранная процедура погоды ﾋﾃﾞﾘ | — |
-| `Player_0248CE` | оплатить ЗАСУХУ из кошелька второго | — |
+| `DroughtP2` | — | — |
 
 ### `$02597E` — этап 34
 
@@ -292,7 +295,7 @@
 | `AiPhase1To2OnSight` | фаза 1 -> 2, если рядом виден юнит нужного вида | — |
 | `AiOrderNearUnits` | раздать юнитам действие из набора $016854 | — |
 | `AiUpdateBanMask` | пересчитать маску запрещённых команд $FFE0DD | — |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фазы 2, 3, 4, 5 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фазы 2, 3, 4, 5 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
 
 ### `$025AEE` — этап 11
@@ -306,7 +309,7 @@
 | `AiMeteorNearEnemies` | МЕТЕОРИТ | фаза 5 |
 | `ClampMapCoords` | загнать координаты в границы карты | — |
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoaming, d5=$6, фазы 1, 2 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фазы 3, 4, 5 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фазы 3, 4, 5 |
 | `AiRunCommand` | выполнить команду d0 | d0=$4, фазы 4, 5 |
 
 ### `$025C1C` — этап 13
@@ -352,8 +355,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -386,8 +389,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -416,8 +419,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 4 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -448,8 +451,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -481,8 +484,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -502,13 +505,13 @@
 | `AiMeteorNearEnemies` | МЕТЕОРИТ | фазы 4, 5 |
 | `AiOnCooldown` | пауза: молчать, пока тик меньше $46(a5) | — |
 | `AiAimAtEnemyNest` | навести курсор ИИ на первое гнездо игрока 1 | — |
-| `AiQuakeNearEnemies3` | ЗЕМЛЕТРЯСЕНИЕ, вариант с другой анимацией | a6=Ai_0287B8, d5=$3, фазы 3, 4, 5 |
+| `AiQuakeNearEnemies3` | ЗЕМЛЕТРЯСЕНИЕ, вариант с другой анимацией | a6=FilterIdlePredator, d5=$3, фазы 3, 4, 5 |
 | `ClampMapCoords` | загнать координаты в границы карты | — |
 | `AiPhase1To2OnSight` | фаза 1 -> 2, если рядом виден юнит нужного вида | — |
 | `AiOrderNearUnits` | раздать юнитам действие из набора $016854 | — |
 | `AiUpdateBanMask` | пересчитать маску запрещённых команд $FFE0DD | — |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фазы 3, 4, 5 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фазы 3, 4, 5 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фазы 3, 4, 5 |
 
 ### `$025F9E` — этап 41
 
@@ -608,15 +611,15 @@
 | `AiPhase1To2OnSight` | фаза 1 -> 2, если рядом виден юнит нужного вида | — |
 | `AiOrderNearUnits` | раздать юнитам действие из набора $016854 | — |
 | `AiUpdateBanMask` | пересчитать маску запрещённых команд $FFE0DD | — |
-| `AiDroughtNearEnemies` | ЗАСУХА, если рядом не меньше d5 чужих по a6 | a6=Ai_01E470, d5=$6, фаза 2 |
+| `AiDroughtNearEnemies` | ЗАСУХА, если рядом не меньше d5 чужих по a6 | a6=FilterP1GrazerIdle, d5=$6, фаза 2 |
 | `AiQuakeNearEnemies2` | ЗЕМЛЕТРЯСЕНИЕ, вариант со своей проверкой применимости | a6=AiBusyRoamingNotSpecies, d5=$3, фазы 3, 4, 5 |
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoaming, d5=$6, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=AiBusyIdle, d5=$6, фаза 3 |
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 4 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -646,8 +649,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 4 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -679,8 +682,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -712,8 +715,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 4 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
@@ -742,7 +745,7 @@
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$6, фазы 4, 5 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$4, фазы 4, 5 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фазы 4, 5 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фазы 4, 5 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фазы 4, 5 |
 | `AiQuakeNearEnemies2` | ЗЕМЛЕТРЯСЕНИЕ, вариант со своей проверкой применимости | a6=AiBusyRoamingNotSpecies, d5=$4, фазы 4, 5 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |
 | `FindEnemyInWindow` | есть ли в окне 6x6 чужой юнит вида из маски d7 и в действии из a5 | — |
@@ -776,8 +779,8 @@
 | `AiHeavyRainWet` | ЛИВЕНЬ по сырым клеткам | a6=AiBusyRoamingNotSpecies, d5=$3, фаза 3 |
 | `AiStormNearEnemies` | БУРЯ, если рядом не меньше d5 чужих по предикату a6 | a6=TestSpeciesAndAction, d5=$3, фаза 3 |
 | `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=AiBusyBroad, d5=$6, фаза 3 |
-| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=Ai_028764, d5=$3, фаза 3 |
-| `AiDroughtBare` | ЗАСУХА по голой земле | a6=Ai_01E470, d5=$8, фаза 3 |
+| `AiQuakeNearEnemies` | ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6 | a6=FilterCarnivoreBroad, d5=$3, фаза 3 |
+| `AiDroughtBare` | ЗАСУХА по голой земле | a6=FilterP1GrazerIdle, d5=$8, фаза 3 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=AiBusyIdle, d5=$8, фаза 4 |
 | `AiHeavyRainPair` | ЛИВЕНЬ, две проверки подряд | a6=TestSpeciesAndAction, d5=$3, фаза 4 |
 | `AiLightningAtUnit` | МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2 | d0=$40, d1=$38, d2=$80, фазы 2, 3, 4, 5 |

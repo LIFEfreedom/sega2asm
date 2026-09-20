@@ -24,6 +24,9 @@
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -302,7 +305,7 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return 1
-    rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+    rom = rom_bytes()
     a = int(sys.argv[1], 16)
     method, size, data, end = unpack(rom, a)
     print("$%06X: метод %d, длина %d, распаковано %d, сжатых байт %d"

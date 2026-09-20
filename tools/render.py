@@ -33,17 +33,17 @@ import sfx as sfxmod  # noqa: E402
 import z80dis  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, build_dir, toolbin, rom_bytes, rom_path
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+rom = rom_bytes()
 
-EXE = os.path.join(HERE, "build", "render.exe")
-IMG = os.path.join(HERE, "build", "z80.img")
+EXE = toolbin("render.exe")          # общий: от ROM не зависит
+IMG = os.path.join(build_dir(), "z80.img")   # свой: снят с этой ROM
 OUT = out_path("sound", "render")
 SFX_TABLE = 0x00201C
 MUSIC_TABLE = 0x001F36
@@ -105,7 +105,7 @@ def run(job, gain):
     завышает: кадровое прерывание ворует такты у цикла воспроизведения,
     и настоящая частота ниже на несколько процентов.
     """
-    args = [EXE, os.path.join(HERE, "game.gen"), IMG, job["path"],
+    args = [EXE, rom_path(), IMG, job["path"],
             "%02X" % job["cmd"], str(job["frames"]), str(job["main"]),
             str(job["music"]), "1" if job["stop"] else "0", str(gain)]
     r = subprocess.run(args, capture_output=True, text=True,

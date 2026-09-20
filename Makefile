@@ -35,7 +35,11 @@ SYMBOLS      := game_symbols.txt
 OUT_DIR     := out/$(NAME)
 ASM_DIR     := $(OUT_DIR)/asm
 ASSET_DIR   := $(OUT_DIR)/assets
-BUILD_DIR   := build
+# Собранное тоже разведено по проектам. Исключение — скомпилированные
+# помощники: render.exe от ROM не зависит, собирать его на каждый проект
+# незачем.
+BUILD_DIR   := build/$(NAME)
+TOOLBIN_DIR := build/tools
 TOOLS_DIR   := tools
 
 MAIN_ASM    := $(ASM_DIR)/$(NAME).asm
@@ -64,7 +68,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -240,11 +244,11 @@ deps:
 # Звук с эмулятора: драйвер исполняется, а не пересказывается.
 # Нужен компилятор C (CC) и `make deps`.  make render RENDERARGS=--music
 CC        ?= gcc
-RENDER    := $(BUILD_DIR)/render.exe
+RENDER    := $(TOOLBIN_DIR)/render.exe
 RENDERARGS ?=
 
 $(RENDER): $(TOOLS_DIR)/render/render.c third_party/clownz80/unity.c third_party/Nuked-OPN2/ym3438.c
-	@$(PYTHON) -c "import os,sys; os.makedirs(sys.argv[1], exist_ok=True)" $(BUILD_DIR)
+	@$(PYTHON) -c "import os,sys; os.makedirs(sys.argv[1], exist_ok=True)" $(TOOLBIN_DIR)
 	$(CC) -O2 -o $@ $^ -lm
 
 render: $(RENDER)
@@ -272,8 +276,14 @@ rebuild: split build verify
 # ── Уборка ───────────────────────────────────────────────────────────────
 RMTREE := $(PYTHON) -c "import shutil,sys; [shutil.rmtree(p, ignore_errors=True) for p in sys.argv[1:]]"
 
+# clean сносит собранное ЭТОГО проекта. build/tools остаётся: render.exe
+# компилируется из C и к ROM отношения не имеет — пересобирать его на
+# каждую уборку незачем. Снести и его: make cleantools
 clean:
 	$(RMTREE) $(BUILD_DIR)
+
+cleantools:
+	$(RMTREE) $(TOOLBIN_DIR)
 
 distclean: clean
 	$(RMTREE) $(OUT_DIR)

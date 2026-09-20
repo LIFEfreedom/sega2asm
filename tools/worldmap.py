@@ -68,9 +68,9 @@ from unpack import unpack                                    # noqa: E402
 from gfx import png, read_palette                            # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
-ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
+ROM = rom_bytes()
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
 
 TILES = 0x183CB6

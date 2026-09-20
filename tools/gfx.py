@@ -51,9 +51,9 @@ except Exception:
 from unpack import unpack  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+rom = rom_bytes()
 ASSETS = 0x061800
 SPRITES = 0x078818
 PAL_ARRAY = 0x00F784      # data_99: девять палитр по 32 байта подряд

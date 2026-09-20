@@ -36,14 +36,14 @@ sys.path.insert(0, os.path.join(HERE, "tools"))
 import notestring  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+rom = rom_bytes()
 
 STEPS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 

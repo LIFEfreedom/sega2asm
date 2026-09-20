@@ -52,3 +52,37 @@ def OUT(*parts):
 def asm_dir():
     """Каталог с дизассемблированным кодом — самый ходовой вход."""
     return OUT("asm", "m68k")
+
+
+def build_dir():
+    """Собранное этого проекта: build/<имя>. render.exe туда НЕ кладут."""
+    return os.path.join(HERE, "build", project_name())
+
+
+def toolbin(*parts):
+    """Скомпилированные помощники, общие на все проекты: build/tools."""
+    return os.path.join(HERE, "build", "tools", *parts)
+
+
+def rom_path(config=None):
+    """Разбираемая ROM: `target_path:` из YAML. Переопределяется SEGA2ASM_ROM."""
+    forced = os.environ.get("SEGA2ASM_ROM")
+    if forced:
+        return forced if os.path.isabs(forced) else os.path.normpath(os.path.join(HERE, forced))
+    path = config or os.environ.get("SEGA2ASM_CONFIG") or DEFAULT_CONFIG
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^\s+target_path:\s*(\S+)", line)
+                if m:
+                    v = m.group(1).strip("\"'")
+                    return v if os.path.isabs(v) else os.path.normpath(os.path.join(HERE, v))
+    except OSError:
+        pass
+    return os.path.join(HERE, "game.gen")
+
+
+def rom_bytes(config=None):
+    """Содержимое ROM целиком — самый ходовой вход в инструментах."""
+    with open(rom_path(config), "rb") as f:
+        return f.read()

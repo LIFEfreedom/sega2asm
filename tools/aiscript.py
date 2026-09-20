@@ -36,7 +36,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
@@ -46,7 +46,7 @@ try:
 except Exception:
     pass
 
-ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
+ROM = rom_bytes()
 S16 = lambda o: struct.unpack_from(">h", ROM, o)[0]
 
 TABLE = 0x0252EE           # AiScriptTable
@@ -302,6 +302,8 @@ def main():
     p = f.write
     p("# Скрипты ИИ миссий\n\n")
     p("Собрано `tools/aiscript.py` (`make aiscripts`) по листингам.\n\n")
+    p("СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
+      "Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
     p(__doc__[__doc__.index("`AiLoop`"):].strip() + "\n\n")
     p("## Чем меряется «рядом»\n\n")
     p("`CountEnemyUnitsNear` `$05DF6E` и `CountOwnUnitsNear` `$05E060` —\n"

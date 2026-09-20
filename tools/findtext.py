@@ -19,6 +19,9 @@ $20 — пробел, $5F — заполнитель в надписях инт�
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -63,7 +66,7 @@ def decode(b):
 
 
 def main():
-    rom_path = os.path.join(HERE, "game.gen")
+    rom_path = rom_path()
     if not os.path.exists(rom_path):
         print("[--] нет game.gen")
         return 1

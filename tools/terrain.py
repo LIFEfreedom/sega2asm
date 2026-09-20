@@ -61,6 +61,9 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -68,7 +71,7 @@ try:
 except Exception:
     pass
 
-ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
+ROM = rom_bytes()
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
 U32 = lambda o: struct.unpack_from(">I", ROM, o)[0]
 
@@ -115,6 +118,8 @@ def main():
     p = f.write
     p("# Чего стоит шаг: скорость и урон от местности\n\n")
     p("Собрано `tools/terrain.py` (`make terrain`).\n\n")
+    p("СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
+      "Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
     p(__doc__[__doc__.index("В блоке параметров"):].strip() + "\n\n")
 
     p("## Обычные\n\n")

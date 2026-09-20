@@ -21,6 +21,9 @@
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -82,7 +85,7 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return 1
-    rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+    rom = rom_bytes()
     for arg in sys.argv[1:]:
         if "-" in arg:
             a, b = arg.split("-")

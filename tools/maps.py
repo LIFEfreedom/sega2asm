@@ -34,9 +34,9 @@ from unpack import unpack                                    # noqa: E402
 from gfx import png                                          # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
-ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
+ROM = rom_bytes()
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
 S16 = lambda o: struct.unpack_from(">h", ROM, o)[0]
 U32 = lambda o: struct.unpack_from(">I", ROM, o)[0]
@@ -138,6 +138,8 @@ def main():
     p = f.write
     p("# Карты этапов\n\n")
     p("Собрано `tools/maps.py` (`make maps`). Картинки — в `out/<имя>/maps/`.\n\n")
+    p("СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
+      "Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
     p(__doc__[__doc__.index("`StageTable`"):].strip() + "\n\n")
 
     p("## Сколько их\n\n")

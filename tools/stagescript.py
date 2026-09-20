@@ -22,7 +22,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, rom_bytes
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
@@ -32,7 +32,7 @@ try:
 except Exception:
     pass
 
-rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+rom = rom_bytes()
 w = lambda a: (rom[a] << 8) | rom[a + 1]
 
 TABLE = 0x02D0B8          # table_stageframe

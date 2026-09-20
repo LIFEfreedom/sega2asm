@@ -38,10 +38,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path
+from paths import OUT as out_path, build_dir
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-THEIRS = os.path.join(HERE, "build", "recomp", "out")
+THEIRS = os.path.join(build_dir(), "recomp", "out")
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

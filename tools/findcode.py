@@ -29,6 +29,9 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -64,11 +67,11 @@ def segments(path):
 
 
 def main():
-    rom_path = os.path.join(HERE, "game.gen")
-    if not os.path.exists(rom_path):
-        print("[--] нет game.gen")
+    rom = rom_path()
+    if not os.path.exists(rom):
+        print("[--] нет ROM: %s" % rom)
         return 1
-    rom = open(rom_path, "rb").read()
+    rom = open(rom, "rb").read()
 
     found = []
     for sg in segments(os.path.join(HERE, "game.yaml")):

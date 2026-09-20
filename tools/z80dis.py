@@ -12,6 +12,9 @@
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import rom_bytes
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -211,7 +214,7 @@ class Dis:
 def load():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     from unpack import unpack
-    rom = open(os.path.join(HERE, "game.gen"), "rb").read()
+    rom = rom_bytes()
     _m, _size, d, _e = unpack(rom, 0x207E)
     img = bytearray(0x2000)
     img[0x0000:0x0FD2] = d[0:0x0FD2]
