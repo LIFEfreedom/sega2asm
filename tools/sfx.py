@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Разбирает звуковые эффекты: 50 записей драйвера Z80.
 
-    make sfx        docs/game-sfx.md и out/sound/sfx/*.txt
+    make sfx        docs/game-sfx.md и out/<имя>/sound/sfx/*.txt
 
 Сэмплы DAC вынуты отдельно (`make pcm`), но они — меньшая часть: из
 пятидесяти команд `$90`–`$C1` сэмпл заводят семнадцать, а остальные
@@ -79,6 +79,9 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 
 import notestring  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -240,7 +243,7 @@ def coverage(img):
 
 def main():
     img = image()
-    d = os.path.join(HERE, "out", "sound", "sfx")
+    d = out_path("sound", "sfx")
     os.makedirs(d, exist_ok=True)
     nm, cl = names(), callers()
 
@@ -306,7 +309,7 @@ def main():
                       else "`$%04X`" % a for a, b in holes))
     else:
         p("Дыр нет.\n")
-    p("\nПолные строки — в `out/sound/sfx/cmd_<XX>.txt`.\n")
+    p("\nПолные строки — в `out/<имя>/sound/sfx/cmd_<XX>.txt`.\n")
     f.close()
     print("записано: docs/game-sfx.md и %d файлов в %s"
           % (len(seen), os.path.relpath(d, HERE)))

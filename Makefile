@@ -30,7 +30,9 @@ GEN_SYMBOLS  := game_symbols.gen.txt
 SYMBOLS      := game_symbols.txt
 
 # Каталоги (должны совпадать с options.* в $(CONFIG))
-OUT_DIR     := out
+# Вывод разведён по проектам: out/<NAME>/. Второй ROM в том же дереве
+# не затирает первый, и `make clean` сносит только свой.
+OUT_DIR     := out/$(NAME)
 ASM_DIR     := $(OUT_DIR)/asm
 ASSET_DIR   := $(OUT_DIR)/assets
 BUILD_DIR   := build
@@ -160,7 +162,7 @@ unpack:
 	@$(PYTHON) $(TOOLS_DIR)/unpack.py $(ADDR)
 
 # ── Графика ──────────────────────────────────────────────────────────────
-# Распаковывает блоки и рисует их в out/gfx/*.png. Без палитры — серым,
+# Распаковывает блоки и рисует их в out/<имя>/gfx/*.png. Без палитры — серым,
 # с палитрой:  make gfx GFXARGS="--sprites 43 --pal 031D3C"
 GFXARGS ?=
 gfx:

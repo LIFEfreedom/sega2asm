@@ -35,6 +35,9 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 
@@ -110,7 +113,7 @@ COMMANDS = {
 def listing_index():
     """Адрес -> текст команды и имя метки -> адрес, из всех листингов."""
     code, lab, rlab = {}, {}, {}
-    for f in glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm")):
+    for f in glob.glob(out_path("asm", "m68k", "*.asm")):
         cur = None
         for ln in open(f, encoding="utf-8", errors="replace"):
             ln = ln.rstrip("\n")

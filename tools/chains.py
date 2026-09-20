@@ -26,6 +26,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -75,7 +78,7 @@ def scan(path):
 
 def main():
     rows = []
-    for p in sorted(glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm"))):
+    for p in sorted(glob.glob(out_path("asm", "m68k", "*.asm"))):
         for start, _exit, rules in scan(p):
             rows.append((os.path.basename(p), start, rules))
     rows.sort(key=lambda r: (-len(r[2]), r[1]))

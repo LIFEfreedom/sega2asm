@@ -3,7 +3,7 @@
 СГЕНЕРИРОВАНО `tools/music.py` (`make music`) — правки затираются,
 меняйте инструмент.
 
-make music                 docs/game-music.md и out/sound/music/*.txt
+make music                 docs/game-music.md и out/<имя>/sound/music/*.txt
 
 Формат вычитан из драйвера Z80 (docs/game-sound.md). Запись песни лежит
 в музыкальном банке по таблице `$8004`, и из неё берутся указатели на
@@ -79,4 +79,4 @@ make music                 docs/game-music.md и out/sound/music/*.txt
 
 Событий разобрано всего: 73139.
 
-Полные строки — в `out/sound/music/bank<N>_song<XX>.txt`.
+Полные строки — в `out/<имя>/sound/music/bank<N>_song<XX>.txt`.

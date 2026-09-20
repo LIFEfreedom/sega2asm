@@ -26,6 +26,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -88,7 +91,7 @@ def vdpkind(v):
 
 
 def load():
-    asm = os.path.join(HERE, "out", "asm", "m68k")
+    asm = out_path("asm", "m68k")
     rows = []
     for fn in sorted(os.listdir(asm)):
         addr = None
@@ -112,8 +115,8 @@ def load():
 def main():
     lo = int(sys.argv[1], 16) if len(sys.argv) > 1 else 0
     hi = int(sys.argv[2], 16) if len(sys.argv) > 2 else 0x200000
-    if not os.path.isdir(os.path.join(HERE, "out", "asm", "m68k")):
-        print("[--] нет out/asm/m68k — сначала `make split`")
+    if not os.path.isdir(out_path("asm", "m68k")):
+        print("[--] нет out/<имя>/asm/m68k — сначала `make split`")
         return 1
 
     rows = load()

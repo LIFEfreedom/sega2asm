@@ -19,6 +19,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -68,9 +71,9 @@ def instructions(asm_dir):
 
 
 def main():
-    asm_dir = os.path.join(HERE, "out", "asm", "m68k")
+    asm_dir = out_path("asm", "m68k")
     if not os.path.isdir(asm_dir):
-        print("[--] нет out/asm/m68k — сначала `make split`")
+        print("[--] нет out/<имя>/asm/m68k — сначала `make split`")
         return 1
 
     bank = collections.defaultdict(collections.Counter)

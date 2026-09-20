@@ -21,8 +21,11 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ASM = os.path.join(HERE, "out", "asm", "m68k")
+ASM = out_path("asm", "m68k")
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -152,7 +155,7 @@ def detect_stride(offsets):
 def main():
     code = load()
     if not code:
-        print("[--] нет out/asm/m68k — сначала make split")
+        print("[--] нет out/<имя>/asm/m68k — сначала make split")
         return 1
 
     refs = collections.defaultdict(lambda: {"read": 0, "write": 0, "test": 0,

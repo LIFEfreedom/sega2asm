@@ -18,11 +18,14 @@
    внутри bin-сегмента, регистр — имя подставится в ссылку, а определения не
    будет, и ассемблер упадёт на "Symbol does not exist". Поэтому после split
    мы смотрим, какие имена НЕ определены в выводе, и дописываем им `equ` в
-   out/asm/include/ports.asm, который подключается первым.
+   out/<имя>/asm/include/ports.asm, который подключается первым.
 """
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USER = os.path.join(HERE, "game_symbols.user.txt")
@@ -92,9 +95,9 @@ def equates():
         print("[--] %s пуст — сначала --merge" % os.path.basename(OUT))
         return 1
 
-    asm_dir = os.path.join(HERE, "out", "asm")
+    asm_dir = out_path("asm")
     if not os.path.isdir(asm_dir):
-        print("[--] нет out/asm — сначала make split")
+        print("[--] нет out/<имя>/asm — сначала make split")
         return 1
 
     defined = set()
@@ -119,7 +122,7 @@ def equates():
         print("equ не требуются: все %d символов определены в выводе" % len(syms))
         return 0
     if ports is None:
-        print("[FAIL] не найден out/asm/include/ports.asm")
+        print("[FAIL] не найден out/<имя>/asm/include/ports.asm")
         return 1
 
     with open(ports, "a", encoding="utf-8") as f:

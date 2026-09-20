@@ -37,6 +37,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 THEIRS = os.path.join(HERE, "build", "recomp", "out")
 
@@ -89,7 +92,7 @@ def read_theirs():
 
 def read_ours():
     out = {}
-    for p in glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm")):
+    for p in glob.glob(out_path("asm", "m68k", "*.asm")):
         pend = None
         for ln in open(p, encoding="utf-8", errors="replace"):
             m = (re.match(r";\s*\$([0-9A-F]{6})\s*$", ln) or

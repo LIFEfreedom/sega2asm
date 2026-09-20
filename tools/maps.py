@@ -11,7 +11,7 @@
 младших бит, направление — следующие три, Y — следующие шесть), байт типа и
 байт позы.
 
-Пишет PNG по карте на этап в `out/maps/` и сводку в `docs/game-maps.md`.
+Пишет PNG по карте на этап в `out/<имя>/maps/` и сводку в `docs/game-maps.md`.
 Цвета условные: имён у типов местности нет, известны только растения
 (`$01`, `$05`, `$15`, `$16`) и четвёрка смертельных 11, 12, 13, 20
 ([game-terrain.md](game-terrain.md)).
@@ -32,6 +32,9 @@ except Exception:
 
 from unpack import unpack                                    # noqa: E402
 from gfx import png                                          # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
 
 ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
@@ -103,7 +106,7 @@ def main():
     import stagescript
     miss = stagescript.stage_to_missions()
 
-    outdir = os.path.join(HERE, "out", "maps")
+    outdir = out_path("maps")
     os.makedirs(outdir, exist_ok=True)
 
     rows, by_map = [], collections.defaultdict(list)
@@ -134,7 +137,7 @@ def main():
     f = io.open(out, "w", encoding="utf-8", newline="\n")
     p = f.write
     p("# Карты этапов\n\n")
-    p("Собрано `tools/maps.py` (`make maps`). Картинки — в `out/maps/`.\n\n")
+    p("Собрано `tools/maps.py` (`make maps`). Картинки — в `out/<имя>/maps/`.\n\n")
     p(__doc__[__doc__.index("`StageTable`"):].strip() + "\n\n")
 
     p("## Сколько их\n\n")

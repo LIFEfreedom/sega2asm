@@ -36,6 +36,9 @@ except Exception:
 
 from unpack import unpack
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
 CODE_HI = 0x05E244
 OK_METHOD = {1, 2, 3, 6, 7}
@@ -46,7 +49,7 @@ PEA = re.compile(r"^\t(?:pea\t\(|lea\t\()\$([0-9A-F]{6})\)\.l")
 def literal_refs():
     """Адреса, которые код передаёт распаковщику и BiosBlitRegion."""
     packed, raw = collections.Counter(), collections.Counter()
-    for f in glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm")):
+    for f in glob.glob(out_path("asm", "m68k", "*.asm")):
         src = [l.rstrip("\n") for l in
                io.open(f, encoding="utf-8", errors="replace") if l.startswith("\t")]
         for i, l in enumerate(src):

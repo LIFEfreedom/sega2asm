@@ -67,6 +67,9 @@ except Exception:
 from unpack import unpack                                    # noqa: E402
 from gfx import png, read_palette                            # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 ROM = open(os.path.join(HERE, "game.gen"), "rb").read()
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
 
@@ -130,7 +133,7 @@ def main():
                                 row = canvas[oy + y]
                                 for x in range(8):
                                     row[ox + x] = pal[t[y][x]]
-    d = os.path.join(HERE, "out", "gfx")
+    d = out_path("gfx")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "worldmap_%06X.png" % src)
     png(path, px, px, canvas)

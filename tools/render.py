@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Прогоняет звуковой драйвер на эмуляторе и пишет WAV.
 
-    make render                 50 эффектов в out/sound/render/
+    make render                 50 эффектов в out/<имя>/sound/render/
     make render RENDERARGS=--music   плюс 45 песен по 30 секунд
 
 Разбор данных, сделанный раньше, описывал ЧТО драйвер сыграет. Здесь он
@@ -32,6 +32,9 @@ import pcm  # noqa: E402
 import sfx as sfxmod  # noqa: E402
 import z80dis  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -41,7 +44,7 @@ rom = open(os.path.join(HERE, "game.gen"), "rb").read()
 
 EXE = os.path.join(HERE, "build", "render.exe")
 IMG = os.path.join(HERE, "build", "z80.img")
-OUT = os.path.join(HERE, "out", "sound", "render")
+OUT = out_path("sound", "render")
 SFX_TABLE = 0x00201C
 MUSIC_TABLE = 0x001F36
 SONG_SECONDS = 30
@@ -175,7 +178,7 @@ def sample_check(job, img):
     n = pcm.dac_sample(img, job["cmd"])
     if n is None:
         return None
-    ref = os.path.join(HERE, "out", "sound",
+    ref = out_path("sound",
                        "bank%d_sample%d.wav" % (job["main"], n))
     if not os.path.exists(ref):
         return None

@@ -21,6 +21,9 @@ import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 
@@ -40,7 +43,7 @@ STUB = 0x02E8FA
 def listing_index():
     """Адрес -> текст инструкции, из всех листингов m68k."""
     code = {}
-    for f in glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm")):
+    for f in glob.glob(out_path("asm", "m68k", "*.asm")):
         cur = None
         for ln in open(f, encoding="utf-8", errors="replace"):
             ln = ln.rstrip("\n")
@@ -59,7 +62,7 @@ def listing_index():
 def label_index():
     """Имя метки -> адрес, из всех листингов."""
     out = {}
-    for f in glob.glob(os.path.join(HERE, "out", "asm", "m68k", "*.asm")):
+    for f in glob.glob(out_path("asm", "m68k", "*.asm")):
         for ln in open(f, encoding="utf-8", errors="replace"):
             m = re.match(r"^([A-Za-z_]\w*):\s+; \$([0-9A-F]{6})", ln)
             if m:

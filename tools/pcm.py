@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Достаёт сэмплы DAC в WAV.
 
-    make pcm            все девятнадцать сэмплов в out/sound/
+    make pcm            все девятнадцать сэмплов в out/<имя>/sound/
 
 Кодирование вычитано из главного цикла драйвера Z80 (`$0F26`, разбор в
 docs/game-sound.md) и повторено здесь один в один:
@@ -23,6 +23,9 @@ import os
 import struct
 import sys
 import wave
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
@@ -162,7 +165,7 @@ def raw():
 
 
 def main():
-    d = os.path.join(HERE, "out", "sound")
+    d = out_path("sound")
     os.makedirs(d, exist_ok=True)
     names = sfx_names()
     try:
@@ -182,7 +185,7 @@ def main():
     idx.write("Частота — **верхняя граница**: `3.58 МГц / (13·шаг + 117)`. В цикле\n"
               "задержки стоит `ei`, и прерывание кадра ворует такты, так что\n"
               "настоящая ниже на 7–13 процентов и зависит от того, сколько\n"
-              "каналов звучит. Измеренные значения — в `out/sound/render/index.md`\n"
+              "каналов звучит. Измеренные значения — в `out/<имя>/sound/render/index.md`\n"
               "(`make render`), там драйвер исполняется на эмуляторе.\n\n")
     idx.write("Столбец «звук» — звукоподражание из списка `$04C2F6`; оно есть\n"
               "только у сэмплов, которые заводят через `table_sfx`. Столбец\n"

@@ -2,7 +2,7 @@
 """Достаёт графику: распаковывает блоки и рисует их в PNG.
 
     make gfx                                    сводка по всему
-    make gfx GFXARGS=--all                      ВСЁ в цвете в out/gfx/
+    make gfx GFXARGS=--all                      ВСЁ в цвете в out/<имя>/gfx/
     make gfx GFXARGS="--stages 1 0"             набор тайлов этапа 1 палитрой 0
     make gfx GFXARGS="--sprites 43"             кадры набора 43
     make gfx GFXARGS=062BDA                     блок по адресу
@@ -49,6 +49,9 @@ except Exception:
     pass
 
 from unpack import unpack  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
 
 rom = open(os.path.join(HERE, "game.gen"), "rb").read()
 ASSETS = 0x061800
@@ -217,7 +220,7 @@ def render_frames(frames, path, per_row=8, side=4, pal=None, scale=2,
 
 
 def out_dir():
-    d = os.path.join(HERE, "out", "gfx")
+    d = out_path("gfx")
     os.makedirs(d, exist_ok=True)
     return d
 

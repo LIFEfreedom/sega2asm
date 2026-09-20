@@ -626,7 +626,7 @@ options:
   platform: megadrive
   region: ntsc
   basename: dynabrothers2
-  base_path: ./out
+  base_path: ./out/dynabrothers2
   target_path: ./game.gen
   asm_path: asm
   asset_path: assets

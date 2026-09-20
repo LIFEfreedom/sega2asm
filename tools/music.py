@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Выгружает партитуры: нотные строки всех песен в читаемый вид.
 
-    make music                 docs/game-music.md и out/sound/music/*.txt
+    make music                 docs/game-music.md и out/<имя>/sound/music/*.txt
 
 Формат вычитан из драйвера Z80 (docs/game-sound.md). Запись песни лежит
 в музыкальном банке по таблице `$8004`, и из неё берутся указатели на
@@ -34,6 +34,9 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 
 import notestring  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT as out_path
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -100,7 +103,7 @@ def walk(v, start, mul, limit=4000):
 
 
 def main():
-    d = os.path.join(HERE, "out", "sound", "music")
+    d = out_path("sound", "music")
     os.makedirs(d, exist_ok=True)
     doc = os.path.join(HERE, "docs", "game-music.md")
     f = open(doc, "w", encoding="utf-8", newline="\n")
@@ -153,7 +156,7 @@ def main():
                  sum(1 for c in s["chans"] if c[0] == "PSG"),
                  s["tempo"], s["mul"], ev))
     p("\nСобытий разобрано всего: %d.\n" % total)
-    p("\nПолные строки — в `out/sound/music/bank<N>_song<XX>.txt`.\n")
+    p("\nПолные строки — в `out/<имя>/sound/music/bank<N>_song<XX>.txt`.\n")
     f.close()
     print("записано: docs/game-music.md и %d файлов в %s"
           % (45, os.path.relpath(d, HERE)))
