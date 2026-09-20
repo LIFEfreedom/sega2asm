@@ -49,6 +49,7 @@ ROM даёт 383 функции и 13 507 команд, и сверка (`make x
 | [game-compression.md](game-compression.md) | распаковщик `$FF10`: пять методов, описания миссий, карта миссия→этап |
 | [game-missions.md](game-missions.md) | все 92 байта описания миссии: деньги, музыка, состав войск, разрешённые команды |
 | [game-species.md](game-species.md) | номера видов и привязка к именам |
+| [game-species-trikera.md](game-species-trikera.md) | один вид целиком: ﾄﾘｹﾗ — числа, поведение, возможности |
 | [game-actions.md](game-actions.md) | словарь действий `+$15`, развязка стычки |
 | [game-damage.md](game-damage.md) | формула урона, сила и защита, урон от местности |
 | [game-movement.md](game-movement.md) | стоимость шага по местности, механика скорости |
