@@ -142,38 +142,62 @@ def main():
     print("драйвер $%06X-$%06X, таблицы %s"
           % (lo, hi, " ".join("$%06X" % t for t in tables)))
 
-    out = out_path("sound", "music")
-    os.makedirs(out, exist_ok=True)
     frames = int(seconds * FPS)
-    print("к выгрузке %d звуков, по %d с (%d кадров)\n"
-          % (len(want), seconds, frames))
+    groups = {"music": [n for n in want if z80seq.tracks(n)[1] > 1],
+              "sfx": [n for n in want if z80seq.tracks(n)[1] == 1]}
+    # В таблице есть записи с нулём дорожек — играть в них нечего. Молчать
+    # об этом нельзя: иначе в выгрузке просто не окажется пары номеров, и
+    # поди пойми, инструмент их потерял или их там нет.
+    empty = [n for n in want if z80seq.tracks(n)[1] == 0]
+    print("к выгрузке %d звуков: мелодий %d, эффектов %d; предел %d с (%d кадров)"
+          % (len(want) - len(empty), len(groups["music"]), len(groups["sfx"]),
+             seconds, frames))
+    if empty:
+        print("пустых записей в таблице (дорожек ноль): %s"
+              % " ".join(str(n) for n in empty))
 
-    # Проход первый: узнать, кто громче всех.
-    peaks = {}
-    for n in want:
+    for kind in ("music", "sfx"):
+        nums = groups[kind]
+        if not nums:
+            continue
+        out = out_path("sound", kind)
+        os.makedirs(out, exist_ok=True)
+        print("\n── %s: %d звуков ──" % (out, len(nums)))
+
+        # Проход первый: узнать, кто в ГРУППЕ громче всех. Считать общий
+        # множитель на музыку и эффекты сразу нельзя: громкий эффект
+        # утянул бы за собой все мелодии.
         tmp = os.path.join(out, "_probe.wav")
-        cnt = z80seq.tracks(n)[1]
-        peaks[n] = render(exe, img, tmp, n, frames, 256, init, cnt == 1)
-        print("  звук %3d: дорожек %2d, пик %5d" % (n, cnt, peaks[n]))
-    if os.path.exists(os.path.join(out, "_probe.wav")):
-        os.remove(os.path.join(out, "_probe.wav"))
+        peaks = {}
+        for n in nums:
+            cnt = z80seq.tracks(n)[1]
+            peaks[n] = render(exe, img, tmp, n, frames, 256, init, cnt == 1)
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
-    top = max(peaks.values()) or 1
-    # Потолок высокий нарочно: у этого драйвера канал даёт около 768, и
-    # даже полный микс редко выходит за тысячу — без множителя в
-    # десятки раз файл получился бы тихим.
-    gain = max(1, min(65536, int(256 * 29500 / top)))
-    print("\nобщий множитель %d/256 (самый громкий пик %d)\n" % (gain, top))
+        top = max(peaks.values()) or 1
+        # Потолок высокий нарочно: у этого драйвера канал даёт около 768, и
+        # даже полный микс редко выходит за тысячу — без множителя в
+        # десятки раз файл получился бы тихим.
+        gain = max(1, min(65536, int(256 * 29500 / top)))
+        print("множитель %d/256 (самый громкий пик %d)" % (gain, top))
 
-    # Проход второй: с общим уровнем и в постоянные файлы.
-    for n in want:
-        cnt = z80seq.tracks(n)[1]
-        wav = os.path.join(out, "sound_%03d.wav" % n)
-        p = render(exe, img, wav, n, frames, gain, init, cnt == 1)
-        size = os.path.getsize(wav)
-        print("  %s: дорожек %2d, пик %5d, %.1f с"
-              % (os.path.basename(wav), cnt, p, (size - 44) / 4 / 53267.0))
-    print("\nготово: %s" % out)
+        # Проход второй: с общим уровнем и в постоянные файлы.
+        quiet = []
+        for n in nums:
+            cnt = z80seq.tracks(n)[1]
+            wav = os.path.join(out, "sound_%03d.wav" % n)
+            pk = render(exe, img, wav, n, frames, gain, init, cnt == 1)
+            size = os.path.getsize(wav)
+            secs = (size - 44) / 4 / 53267.0
+            if pk < 64:
+                quiet.append(n)
+            print("  %s: дорожек %2d, пик %5d, %.1f с"
+                  % (os.path.basename(wav), cnt, pk, secs))
+        if quiet:
+            print("  почти тихие (%d): %s"
+                  % (len(quiet), " ".join(str(n) for n in quiet)))
+    print("\nготово")
     return 0
 
 
