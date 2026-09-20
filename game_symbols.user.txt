@@ -3014,52 +3014,94 @@ SpreadFlagBitToNeighbours      = $02BB36   ; у каждой клетки CellFl
                              ; соседей предикатом a6 и прошедшим взвести тот же бит
 RunStageStartHook              = $02CE68   ; сценарий этапа: один раз при входе
 RunStageFrameHook              = $02D090   ; сценарий этапа: каждый кадр
-CoreTable_02D2D8               = $02D2D8   ; 16 инстр, 0 ссылок
-Core_02D358                    = $02D358   ; 37 инстр, 0 ссылок
-Sub_02D4FE                     = $02D4FE   ; 5 инстр, 0 ссылок
-Sub_02D51C                     = $02D51C   ; 6 инстр, 0 ссылок
-Sound_02D534                   = $02D534   ; 10 инстр, 0 ссылок
-Sound_02D588                   = $02D588   ; 11 инстр, 0 ссылок
-Sound_02D5E8                   = $02D5E8   ; 13 инстр, 0 ссылок
-Ai_02D622                      = $02D622   ; 11 инстр, 0 ссылок
-Sound_02D652                   = $02D652   ; 10 инстр, 0 ссылок
-Core_02D696                    = $02D696   ; 14 инстр, 0 ссылок
-Core_02D6D6                    = $02D6D6   ; 15 инстр, 0 ссылок
-Sound_02D71C                   = $02D71C   ; 11 инстр, 0 ссылок
-Core_02D74C                    = $02D74C   ; 12 инстр, 0 ссылок
-Core_02D7B8                    = $02D7B8   ; 16 инстр, 0 ссылок
-Sound_02D814                   = $02D814   ; 11 инстр, 0 ссылок
-Sound_02D84E                   = $02D84E   ; 11 инстр, 0 ссылок
-CoreTable_02D87E               = $02D87E   ; 16 инстр, 0 ссылок
-Core_02D8F6                    = $02D8F6   ; 15 инстр, 0 ссылок
-Core_02D946                    = $02D946   ; 26 инстр, 0 ссылок
-MapTable_02DADC                = $02DADC   ; 39 инстр, 0 ссылок
-Core_02DC2E                    = $02DC2E   ; 59 инстр, 0 ссылок
-Core_02DD5E                    = $02DD5E   ; 15 инстр, 0 ссылок
-Core_02DDA6                    = $02DDA6   ; 61 инстр, 0 ссылок
-Core_02DE9A                    = $02DE9A   ; 46 инстр, 0 ссылок
-Core_02DF52                    = $02DF52   ; 59 инстр, 0 ссылок
-Sub_02E03E                     = $02E03E   ; 21 инстр, 0 ссылок
-Core_02E090                    = $02E090   ; 38 инстр, 0 ссылок
-Sub_02E12A                     = $02E12A   ; 21 инстр, 0 ссылок
-Core_02E17C                    = $02E17C   ; 51 инстр, 0 ссылок
-Sub_02E24A                     = $02E24A   ; 34 инстр, 0 ссылок
-Sound_02E2D2                   = $02E2D2   ; 11 инстр, 0 ссылок
-Sound_02E302                   = $02E302   ; 11 инстр, 0 ссылок
-Sound_02E36C                   = $02E36C   ; 11 инстр, 0 ссылок
-Sound_02E3D4                   = $02E3D4   ; 11 инстр, 0 ссылок
-Sound_02E404                   = $02E404   ; 11 инстр, 0 ссылок
-Core_02E442                    = $02E442   ; 15 инстр, 0 ссылок
-Sound_02E570                   = $02E570   ; 10 инстр, 0 ссылок
-Sound_02E59C                   = $02E59C   ; 11 инстр, 0 ссылок
-Sound_02E5CC                   = $02E5CC   ; 11 инстр, 0 ссылок
-Sound_02E5FC                   = $02E5FC   ; 11 инстр, 0 ссылок
-Core_02E648                    = $02E648   ; 15 инстр, 0 ссылок
-Sound_02E6AA                   = $02E6AA   ; 10 инстр, 0 ссылок
-Core_02E6E4                    = $02E6E4   ; 13 инстр, 0 ссылок
-MapTable_02E728                = $02E728   ; 39 инстр, 0 ссылок
-Sound_02E842                   = $02E842   ; 11 инстр, 0 ссылок
-CoreRand_02E880                = $02E880   ; 147 инстр, 0 ссылок
+StageScript004                  = $02D2D8   ; этап 4, гл.1 м.9. старт на тике $189C; повтор каждые $012C; на тике
+                             ; 6300; на тике 6450; музыка 19 = банк 3 песня $87; зовёт PlaySound,
+                             ; MapRand_02F30A, LoadPlacement
+StageScript010                  = $02D358   ; этап 10, гл.1 м.38. на тике 5385; на тике 5401; на тике 5460; на тике
+                             ; 5400; музыка 105 = банк 4 песня $85; зовёт PlaySound, GfxScroll_016192,
+                             ; LoadPlacement
+LoadStagePalette2Tick           = $02D4FE   ; LoadStagePalette 2, дальше общий хвост $02D532
+LoadStagePalette1Tick           = $02D51C   ; LoadStagePalette 1, тот же хвост
+StageScript013                  = $02D534   ; этап 13, гл.1 м.26. старт на тике $2A30; на тике 10800; музыка 101 =
+                             ; банк 4 песня $8D; зовёт PlaySound, Core_02F7BC
+StageScript016                  = $02D588   ; этап 16, гл.1 м.25. старт на тике $4650; повтор каждые $0258; на тике
+                             ; 18000; музыка 59 = банк 3 песня $86; зовёт PlaySound, Map_02F4CC
+StageMusic43AtTick1068          = $02D5E8   ; на тике $1068 играет песню $43; ветка внутри сценария этапа
+FilterIdleSpecies014            = $02D622   ; виды 0, 1 и 4 (маска 19) в действии из ActionSetIdle
+StageScript019                  = $02D652   ; этап 19, гл.1 м.43. старт на тике $AFC8; на тике 45000; музыка 101 =
+                             ; банк 4 песня $8D; зовёт PlaySound, Core_02F7BC
+StageScript024                  = $02D696   ; этап 24, гл.1 м.6. старт на тике $1194; повтор каждые $0708; на тике
+                             ; 5400; на тике 5400; музыка 21 = банк 3 песня $88; зовёт PlaySound,
+                             ; Map_02F2B8
+StageScript025                  = $02D6D6   ; этап 25, гл.1 м.8. старт на тике $1518; повтор каждые $0A8C; на тике
+                             ; 7200; на тике 7200; музыка 21 = банк 3 песня $88; зовёт PlaySound,
+                             ; CoreLoop_00D572, Map_02F2B8
+StageScript026                  = $02D71C   ; этап 26, гл.1 м.11. старт на тике $4650; повтор каждые $0258; на тике
+                             ; 18000; музыка 59 = банк 3 песня $86; зовёт PlaySound, Map_02F4CC
+StageScript028                  = $02D74C   ; этап 28, гл.1 м.12. на тике 7200; на тике 7200; музыка 67 = банк 3 песня
+                             ; $85; зовёт PlaySound, Core_00DAA0
+StageMusic65AtTick3138          = $02D7B8   ; на тике $3138 играет песню $65
+StageScript041                  = $02D814   ; этап 41, гл.1 м.42. старт на тике $2328; повтор каждые $00FA; на тике
+                             ; 9000; музыка 67 = банк 3 песня $85; зовёт PlaySound, Core_02F55E
+StageScript043                  = $02D84E   ; этап 43, гл.1 м.30. старт на тике $4650; повтор каждые $01C2; на тике
+                             ; 18000; музыка 61 = банк 2 песня $8E; зовёт PlaySound, Core_02F1D2
+StageScript035                  = $02D87E   ; этап 35, гл.1 м.20. старт на тике $2328; повтор каждые $012C; на тике
+                             ; 9000; на тике 9005; музыка 19 = банк 3 песня $87; зовёт PlaySound,
+                             ; MapRand_02F38E, LoadPlacement
+StageMusic15AtTick34BC          = $02D8F6   ; на тике $34BC играет песню $15
+StageScript033                  = $02D946   ; этап 33, гл.1 м.15. старт на тике $34BC; повтор каждые $0258; на тике
+                             ; 13500; музыка 59 = банк 3 песня $86; зовёт PlaySound, Map_02F4CC,
+                             ; SoundSfx_00E036, ConvertTerrainInner
+StageMusic13AtTick2328          = $02DADC   ; на тике $2328 играет песню $13
+LoadStagePalette0Tick           = $02DC2E   ; LoadStagePalette 0, дальше сценарий этапа
+StageScript040                  = $02DD5E   ; этап 40, гл.1 м.28. старт на тике $8CA0; повтор каждые $0A8C; на тике
+                             ; 36000; на тике 36000; музыка 21 = банк 3 песня $88; зовёт PlaySound,
+                             ; CoreLoop_00D572, Map_02F2B8
+StageScript051                  = $02DDA6   ; этап 51, гл.0 м.1. параметр d7 = 8; зовёт WinIfHerbivoresReach,
+                             ; Core_02EB8C
+StageScript052                  = $02DE9A   ; этап 52, гл.0 м.3. зовёт Core_02EB8C
+StageScript053                  = $02DF52   ; этап 53, гл.0 м.2. зовёт Core_02EB8C
+StageScript054                  = $02E03E   ; этап 54, гл.0 м.4. зовёт Core_02EB8C
+StageScript055                  = $02E090   ; этап 55, гл.0 м.5. зовёт Core_02EB8C, Core_02F044
+StageScript056                  = $02E12A   ; этап 56, гл.0 м.8. зовёт Core_02EB8C
+StageScript057                  = $02E17C   ; этап 57, гл.0 м.6. зовёт Core_02EB8C, Core_02F056
+StageScript058                  = $02E24A   ; этап 58, гл.0 м.7. зовёт Core_02EB8C
+StageScript070                  = $02E2D2   ; этап 70, гл.3 м.6. старт на тике $4650; повтор каждые $0258; на тике
+                             ; 18000; музыка 59 = банк 3 песня $86; зовёт PlaySound, Map_02F4CC
+StageScript071                  = $02E302   ; этап 71, гл.3 м.10. старт на тике $3840; повтор каждые $0708; на тике
+                             ; 12600; музыка 19 = банк 3 песня $87; зовёт PlaySound, MapRand_02F30A
+StageScript081                  = $02E36C   ; этап 81, гл.3 м.2. старт на тике $1518; повтор каждые $2328; на тике
+                             ; 14400; музыка 21 = банк 3 песня $88; зовёт PlaySound, Core_02F5B2
+StageScript112                  = $02E3D4   ; этап 112, гл.4 м.10, гл.8 м.22. старт на тике $2328; повтор каждые
+                             ; $0708; на тике 9000; музыка 19 = банк 3 песня $87; зовёт PlaySound,
+                             ; MapRand_02F30A
+StageScript113                  = $02E404   ; этап 113, гл.5 м.4. старт на тике $1518; повтор каждые $0708; на тике
+                             ; 5400; музыка 19 = банк 3 песня $87; зовёт PlaySound, MapRand_02F30A
+StageScript116                  = $02E442   ; этап 116, миссия неизвестна. старт на тике $2A30; повтор каждые $0708;
+                             ; на тике 9000; на тике 9000; музыка 21 = банк 3 песня $88; зовёт
+                             ; PlaySound, CoreLoop_00D572, Map_02F2B8
+StageScript119                  = $02E570   ; этап 119, гл.5 м.5. старт на тике $1C20; на тике 7200; музыка 101 = банк
+                             ; 4 песня $8D; зовёт PlaySound, Core_02F7BC
+StageScript120                  = $02E59C   ; этап 120, гл.5 м.6. старт на тике $2A30; повтор каждые $0708; на тике
+                             ; 10800; музыка 67 = банк 3 песня $85; зовёт PlaySound, Core_02F46C
+StageScript121                  = $02E5CC   ; этап 121, миссия неизвестна. старт на тике $2A30; повтор каждые $00FA;
+                             ; на тике 10800; музыка 67 = банк 3 песня $85; зовёт PlaySound,
+                             ; Core_02F55E
+StageScript122                  = $02E5FC   ; этап 122, миссия неизвестна. старт на тике $1C20; повтор каждые $1518;
+                             ; на тике 7200; музыка 61 = банк 2 песня $8E; зовёт PlaySound, Core_02F1D2
+StageScript129                  = $02E648   ; этап 129, миссия неизвестна. старт на тике $34BC; повтор каждые $0708;
+                             ; на тике 5400; на тике 12600; музыка 21 = банк 3 песня $88; зовёт
+                             ; PlaySound, CoreLoop_00D572, Map_02F2B8
+StageScript130                  = $02E6AA   ; этап 130, гл.5 м.7. старт на тике $3840; на тике 14400; музыка 101 =
+                             ; банк 4 песня $8D; зовёт PlaySound, Core_02F7BC
+StageScript131                  = $02E6E4   ; этап 131, гл.5 м.3. на тике 7200; на тике 7200; музыка 67 = банк 3 песня
+                             ; $85; зовёт PlaySound, CoreLoop_00DAB0
+StageMusic13AtTick1194          = $02E728   ; на тике $1194 играет песню $13
+StageScript089                  = $02E842   ; этап 89, гл.4 м.9. старт на тике $3840; повтор каждые $0003; на тике
+                             ; 14400; музыка 73 = банк 2 песня $8A; зовёт PlaySound, Core_02F6EE
+StageScript076                  = $02E880   ; этап 76, гл.3 м.8. старт на тике $3138; повтор каждые $0A8C; на тике
+                             ; 14400; на тике 14400; музыка 21 = банк 3 песня $88; зовёт PlaySound,
+                             ; CoreLoop_00D572, Map_02F2B8
 LoseIfNeutralTypeGone          = $02EB16   ; нет нейтрального типа d7 -> поражение
 AllowWinIfNeutralTypeGone      = $02EB50   ; нет типа d7 -> победу разрешить
 ShowMissionNotice              = $02EB8C   ; всплывающее сообщение по условию миссии: +$2E — что уже
@@ -3070,7 +3112,7 @@ CheckNoticeConditions          = $02EE36   ; раз в тик проверить
                              ; через RaiseNoticeNN: перепись видов +$0/+$1 против порогов 5,
                              ; 7, 10 и 4, деньги больше $1236, приказ выше 8, флаги +$28/+$29.
                              ; Взведённые биты потом разбирает ShowMissionNotice
-MapLoop_02EF02                 = $02EF02   ; 32 инстр, 1 ссылок
+ScanUnitMap8x8AtP1              = $02EF02   ; обойти 8x8 клеток UnitMap от угла Player1State+$10/+$11
 RaiseNotice01                  = $002EF6C   ; SessionSetBit32 с номером 1
 RaiseNotice02                  = $002EF7E   ; SessionSetBit32 с номером 2
 RaiseNotice03                  = $002EF90   ; SessionSetBit32 с номером 3
@@ -3089,22 +3131,27 @@ RaiseNotice15                  = $002F068   ; SessionSetBit32 с номером 
 RaiseNotice16                  = $002F07A   ; SessionSetBit32 с номером 16
 SessionSetBit32                = $02F08C   ; 7 инстр, 16 ссылок
                                  ; ставит бит d0 в длинном +$32 SessionState
-Player_02F0A6                  = $02F0A6   ; 7 инстр, 1 ссылок
-Player_02F0C2                  = $02F0C2   ; 7 инстр, 0 ссылок
-Sub_02F0EE                     = $02F0EE   ; 13 инстр, 0 ссылок
-Unit_02F12C                    = $02F12C   ; 42 инстр, 0 ссылок
-Core_02F1D2                    = $02F1D2   ; 18 инстр, 2 ссылок
-Core_02F222                    = $02F222   ; 17 инстр, 0 ссылок
-Map_02F26C                     = $02F26C   ; 17 инстр, 0 ссылок
+SetSessionFlagBit0              = $02F0A6   ; бит 0 в длинном слове +$2E SessionState
+SetSessionFlagBit8              = $02F0C2   ; бит 8 там же
+StageSpecies18MarchTick         = $02F0EE   ; по таймеру этапа двигать составного зверя (TickSpecies18March)
+Species18StepGate               = $02F12C   ; каждые 32 кадра по счётчику $FFE05F: сверить X зверя с $FF9CEC
+                             ; и решить, шагать ли
+StageSpreadWideTick             = $02F1D2   ; RunEventAnimation60, потом $020EE4 и SpreadTypeMapWide;
+                             ; в $FFE11F ставится $FF
+StageSeedType25Tick             = $02F222   ; SeedEmptyTerrain из типа $18 в $19
+StageSpreadType25Tick           = $02F26C   ; SpreadTerrainRandom маской $01000000 (тип 24) в тип $19
 StageSpreadTerrainTick         = $02F2B8   ; сценарный таймер StageEventTimer: на нуле распаковать и
                              ; разбросать 16 клеток по маске $002683FF через
                              ; SpreadTerrainRandom, затем перезарядить таймер из d6
 StageSpreadRandomTypeTick      = $02F30A   ; сценарный таймер: на нуле бросок выбирает тип 8, 9 или 5 и
                              ; SpreadTerrainRandom разносит его, таймер перезаряжается из d6.
                              ; Отдельной веткой после тика d7 — ConvertTerrainInner в тип 19
-MapRand_02F38E                 = $02F38E   ; 29 инстр, 1 ссылок
-Map_02F412                     = $02F412   ; 20 инстр, 0 ссылок
-Core_02F46C                    = $02F46C   ; 21 инстр, 1 ссылок
+StageSpreadRandom89Tick         = $02F38E   ; SpreadTerrainRandom маской $00010000: тип 8 с шансом $80/256,
+                             ; иначе 9 с шансом $50/256
+StageSpreadType8Tick            = $02F412   ; RunEventAnimation60 и SpreadTerrainRandom маской $00080000
+                             ; (тип 19) в тип 8
+StageShudderTick                = $02F46C   ; на первом срабатывании StartScreenShudder, дальше только
+                             ; перезарядка таймера
 StageConvertWaveTick           = $02F4CC   ; сценарная волна по таймеру: голая земля (маска 1) становится
                              ; типом 8, растительность (маска $FE) — типом 9, горелое
                              ; (маска $60000) — нулём; каждое превращение по два прохода
@@ -3112,27 +3159,34 @@ StageConvertWaveTick           = $02F4CC   ; сценарная волна по 
 TickLavaEruption               = $02F55E   ; извержение по StageEventTimer: на первом срабатывании вспышка
                              ; палитры и LavaFlowDown, дальше по кругу LavaFlowWide плюс
                              ; RebuildGrowthFlagMap. Период перезаряжается из d6
-Core_02F5B2                    = $02F5B2   ; 18 инстр, 1 ссылок
-Core_02F604                    = $02F604   ; 18 инстр, 0 ссылок
-Core_02F656                    = $02F656   ; 17 инстр, 0 ссылок
-Core_02F6A2                    = $02F6A2   ; 17 инстр, 0 ссылок
-Core_02F6EE                    = $02F6EE   ; 20 инстр, 1 ссылок
+StageConvertInner14Tick         = $02F5B2   ; RunAnimatedBackdrop и ConvertTerrainInner маской $00080000
+                             ; (тип 19) в тип $0E
+StageConvertAll14Tick           = $02F604   ; RunAnimatedBackdrop и ConvertTerrainAll маской $00080000 в тип $0E,
+                             ; с повтором по таймеру. У StageConvertAll14Once повтора нет
+StageConvertInner14Once         = $02F656   ; то же, но только по достижении тика d7, без повторов
+StageConvertAll14Once           = $02F6A2   ; то же через ConvertTerrainAll — по всей карте, а не по нутру
+StagePoisonTick                 = $02F6EE   ; HpDamageOne каждому юниту обоих игроков; на первом срабатывании
+                             ; взводится PoisonTerrainFlag и показывается ShowPoisonEventIcon
 SetSpreadingTerrainWide        = $02F74E   ; маска $40184000: те же плюс тип 30
-Core_02F76E                    = $02F76E   ; 18 инстр, 0 ссылок
+StageQuakeSpreadTick            = $02F76E   ; ShakeScreen и SpreadTypeMapWide маской $B8004000 в тип $1E
 StageSoundLoopTick             = $02F7BC   ; сценарный таймер без превращений: перезаряжается в $FF и на
                              ; первом срабатывании заводит SoundLoop_00DC1C
-Map_02F802                     = $02F802   ; 36 инстр, 1 ссылок
-Map_02F8B4                     = $02F8B4   ; 26 инстр, 1 ссылок
-Core_02F93C                    = $02F93C   ; 46 инстр, 1 ссылок
-Core_02FA22                    = $02FA22   ; 18 инстр, 0 ссылок
-Core_02FA6E                    = $02FA6E   ; 20 инстр, 1 ссылок
-Map_02FAC2                     = $02FAC2   ; 24 инстр, 2 ссылок
-Map_02FB0A                     = $02FB0A   ; 24 инстр, 2 ссылок
-Map_02FB4A                     = $02FB4A   ; 18 инстр, 0 ссылок
-GfxClear_02FBEE                = $02FBEE   ; 24 инстр, 1 ссылок
-CoreLoop_02FC6E                = $02FC6E   ; 103 инстр, 2 ссылок
-GfxUnpack_02FDF6               = $02FDF6   ; 118 инстр, 1 ссылок
-GfxPalette_02FFE4              = $02FFE4   ; 34 инстр, 1 ссылок
+StageTickByChapter              = $02F802   ; ветвление по байту +$2A главного состояния: до 6, 6…7 и дальше
+SpreadSeveralTerrainTypes       = $02F8B4   ; несколько SpreadTerrainRandom подряд: маска $3FF в типы $12, $11
+                             ; и $0C, маска $400 в тип $0A
+StageShakeAtTick708             = $02F93C   ; на тике $708 ShakeScreen с силой 6 и SetStageAnimByte0
+StagePickRandomUnitAndScroll    = $02FA22   ; выбрать случайный юнит, отметить его ($01F410) и подвести курсор
+                             ; через ScrollToClampedCell
+StageBurnRandomUnitCell         = $02FA6E   ; выбрать случайный юнит и поджечь клетку под ним (PaintCellFire)
+ScrollToClampedCell             = $02FAC2   ; свести клетку в границы и ScrollCursorToTarget
+PlaceTerrainListFiltered        = $02FB0A   ; список длинных слов (a6) до отрицательного: клетка из старшего
+                             ; слова (6 бит x, y), тип берётся с оглядкой на d5
+PlaceTerrainList                = $02FB4A   ; то же без фильтра по d5
+InitEndingScreen                = $02FBEE   ; подготовка экрана концовки: трапы $FF21, $FF22, $FF29, $FF32,
+                             ; фон в цвет PAL1[15] и чистка VRAM с $D800
+TickEndingActors                = $02FC6E   ; шесть записей сцены концовки по байту +$4D
+LoadEndingGraphics              = $02FDF6   ; наборы графики концовки через LoadSceneGfxSet
+TickEndingPalette               = $02FFE4   ; счётчик +$2(a6) на нуле берёт следующий шаг из data_249
 GfxScroll_0301C4               = $0301C4   ; 27 инстр, 2 ссылок
 CombatLoop_030354              = $030354   ; 74 инстр, 3 ссылок
 GfxDraw_030492                 = $030492   ; 40 инстр, 4 ссылок
