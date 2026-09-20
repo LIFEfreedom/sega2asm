@@ -26,6 +26,7 @@ Dyna Brothers 2 — проект дизассемблирования
   terrain   — скорость и урон от местности по видам
   maps      — карты этапов в out/maps/*.png
   gfx       — графика в out/gfx/*.png
+  unitgfx   — как выглядит каждый тип юнита (UARGS=номер типа)
   tileprobe — показать кусок ROM как тайлы 4bpp:  make tileprobe ADDR=020000
   pcm       — сэмплы DAC в WAV
   music     — партитуры песен; sfx — звуковые эффекты

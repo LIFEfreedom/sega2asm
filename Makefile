@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -187,6 +187,13 @@ unpack:
 GFXARGS ?=
 gfx:
 	@$(PYTHON) $(TOOLS_DIR)/gfx.py $(GFXARGS)
+
+# Как выглядит каждый тип юнита: от номера типа до PNG.
+#   make unitgfx            сводка по всем типам, кто с кем совпадает
+#   make unitgfx UARGS=32   кадры типа 32
+UARGS ?=
+unitgfx:
+	@$(PYTHON) $(TOOLS_DIR)/unitgfx.py $(UARGS)
 
 # Сценарии событий этапов: что делает покадровый обработчик каждой карты.
 # Читает листинги, поэтому зависит от split.
