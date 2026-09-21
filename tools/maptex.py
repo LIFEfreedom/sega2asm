@@ -5,6 +5,8 @@ u"""Карты миссий настоящими тайлами игры.
     make maptex MTARGS="1 5"        # только глава 1, миссия 5
     make maptex MTARGS=--types      # лист образцов местности
     make maptex MTARGS=--export     # местность в раскладке ремейка
+    make maptex MTARGS="--anim 1 1"           # GIF: живая вода
+    make maptex MTARGS="--anim 1 1 14 7 8 8"  # он же, окно задано руками
 
 `maps.py` рисует карту клетками по восемь точек, одним усреднённым цветом
 на клетку. Здесь она собирается так же, как её собирает сама игра: байт
@@ -59,10 +61,10 @@ u"""Карты миссий настоящими тайлами игры.
   двухбитным кодам соседства, а коды считает `RefreshCellTileStyle`
   `$0215DA` — с обращением к `Random`. То есть у самой игры стыки от
   запуска к запуску разные, и воспроизводить их бессмысленно.
-- **Движение анимации.** Берётся только ПЕРВЫЙ кадр каждого потока (см.
-  «Вода нарисована не в наборе тайлов»), дальше они не крутятся.
-  `SeedAnimatedTiles` `$0214D2` раздаёт клеткам ещё и случайную фазу;
-  здесь всегда нулевая.
+- **Движение анимации** — на больших PNG. Там берётся ПЕРВЫЙ кадр каждого
+  потока: одна картинка, одно мгновение. Чтобы вода пошла, есть `--anim`
+  (см. ниже). `SeedAnimatedTiles` `$0214D2` раздаёт клеткам ещё и
+  случайную фазу; здесь всегда нулевая, и в `--anim` тоже.
 - **Кадр юнита взят первый.** Спрайты рисуются, но анимация стоит на
   первом кадре своей последовательности.
 
@@ -79,25 +81,34 @@ u"""Карты миссий настоящими тайлами игры.
 раз в несколько кадров переливает куски этого буфера в VRAM поверх
 пустых тайлов — `DrawHudList` `$00C62C` и `VramUploadBlocks` `$00C600`.
 
+Какую пару процедур брать, говорит `StagePalettes` `$013686` — таблица по
+восемь байт: длинное слово «завести», длинное слово «шаг раз в кадр».
+Второе ведёт не на саму процедуру, а на шестибайтную шапку `bra.s` через
+ещё один указатель — на `StageAnimStepN`, которая двигает все потоки
+разом; её зовут отдельно, `$00D918` читает её как `$2(a0)`.
+
 Десять наборов написаны по-разному, и здесь разобраны все:
 
-| набор | как устроен |
-|---|---|
-| 0, 2, 3, 8 | таблица словных смещений на списки кадров, `DrawHudList` в цикле |
-| 4, 9 | те же списки, но развёрнутые в цепочку `lea`/`jsr` |
-| 1 | четыре прямых выгрузки по `$0136D6` — по два тайла с шагом `$200` |
-| 5, 6, 7 | общий хвост `$013DB2`, три вызова `VramUploadBlocks` |
+| набор | как устроен | завести | шаг |
+|---|---|---|---|
+| 0, 2, 3, 8 | таблица словных смещений на списки кадров, `DrawHudList` в цикле | `$013806` … | `StageAnimTick0` `$013846` … |
+| 4, 9 | те же списки, но развёрнутые в цепочку `lea`/`jsr`, плюс рукописный довесок | `$013C66`, `$014174` | `$013CDA`, `$014210` |
+| 1 | три рукописных счётчика, выгрузка по `$0136D6` — по два тайла с шагом `$200` | `$01389C` | `$0138E8` |
+| 5, 6, 7 | общий хвост `$013DB2`, три вызова `VramUploadBlocks` | `$013D5E` … | общий `$013E00` |
 
-Здесь подставляется **первый кадр** каждого потока — то, что игрок видит
-в первый миг после загрузки.
+На больших PNG подставляется **первый кадр** каждого потока — то, что
+игрок видит в первый миг после загрузки. `--anim` крутит их все.
 
 ### Чем это крутится и с какими периодами
 
-Набор 0 держит шесть потоков, и записи о них лежат в `$FF4394` по шесть
-байт: длинное слово — где поток стоит в своём списке, слово — сколько
-кадров до следующего шага. `StageAnimTick0` `$013846` раз в кадр убавляет
-счётчик у каждого и на нуле зовёт `DrawHudList`, который выгружает
-очередные блоки и возвращает новую позицию и новую задержку.
+У списковых наборов записи о потоках лежат в `$FF4394` по шесть байт:
+длинное слово — где поток стоит в своём списке, слово — сколько кадров до
+следующего шага. `StageAnimTick0` `$013846` раз в кадр убавляет счётчик у
+каждого и на нуле зовёт `DrawHudList`, который выгружает очередные блоки
+и возвращает новую позицию и новую задержку. У рукописных наборов в том
+же `$FF4394` лежат просто байтовые счётчики и номера фаз.
+
+Набор 0, шесть потоков:
 
 | поток | тайлы | кадров | задержка | период |
 |---|---|---:|---:|---:|
@@ -119,6 +130,33 @@ u"""Карты миссий настоящими тайлами игры.
 ровно восемь секунд.
 
 **Жерло** (байт 73, тип 20) идёт своим потоком 5 с периодом 24.
+
+Периоды полного повтора по наборам: 480, 144, 24, 24, 72, 24, 24, 24,
+1872 и 156 тактов. У набора 8 длинный период набегает из взаимно простых
+26, 18, 12, 16 и 4, а вода в нём крутится за 26 тактов.
+
+## Живая вода (`--anim`)
+
+`--anim` пишет GIF с окном карты, где потоки идут по-настоящему:
+
+    make maptex MTARGS="--anim 1 1"           # само выберет место
+    make maptex MTARGS="--anim 1 1 14 7 8 8"  # x, y, ширина, высота в клетках
+
+Место без подсказки выбирается по воде: берётся окно, где больше всего
+РАЗНЫХ водяных байтов. Сплошная гладь — это один байт 25 и один поток, а
+кромка берега даёт десяток байтов и до пяти потоков сразу; смотреть
+интересно её.
+
+Кадр выдаётся на каждом такте, где хоть один поток меняет картинку, и
+держится до следующей смены. Задержка GIF идёт сотыми долями секунды, а
+такт — шестидесятая, поэтому она считается нарастающим итогом: округление
+не копится, и весь цикл выходит ровно той длины, что в игре. Потоки, чьих
+тайлов в окне нет, из счёта выкидываются — иначе период у набора 8 был бы
+31 секунда на ровном месте.
+
+Окно по умолчанию 8x8 клеток, то есть 256x256 точек. Больше — можно, но
+цена растёт вдвойне: и кадров рисовать столько же, и каждый вчетверо
+дороже. Вся карта 40x40 на 224 кадрах — это десятки мегабайт.
 
 ## Юниты
 
@@ -266,7 +304,7 @@ except Exception:
     pass
 
 from unpack import unpack                                    # noqa: E402
-from gfx import png, columnwise, table_len                   # noqa: E402
+from gfx import png, gif, columnwise, table_len              # noqa: E402
 from gfx import L as gfx_L                                   # noqa: E402
 from paths import OUT as out_path, rom_bytes                 # noqa: E402
 
@@ -346,25 +384,41 @@ def array_palette(n):
 
 VRAM_BASE = 0x0EA0         # к нему прибавляются смещения в списках
 
-# Как заведена фоновая анимация каждого из десяти наборов. Адреса —
-# процедуры StageAnimStartN, разобранные поодиночке.
+# Списковые наборы: адреса процедур StageAnimStartN (вид "table") либо
+# сразу адреса списков (вид "lists"). У остальных списков нет вовсе.
 ANIM_SETS = {
     0: ("table", 0x013806),
-    1: ("pairs", ((0x000, 0x1EA0), (0x040, 0x1EE0),
-                  (0x400, 0x22A0), (0x500, 0x1C60))),
     2: ("table", 0x013A20),
     3: ("table", 0x013B56),
     4: ("lists", (0x013BE8, 0x013C06, 0x013C24)),
-    5: ("blocks", None),
-    6: ("blocks", None),
-    7: ("blocks", None),
     8: ("table", 0x014014),
     9: ("lists", (0x0140A8, 0x0140DE, 0x014114, 0x01413E)),
 }
 
-# Общий хвост наборов 5, 6 и 7, `$013DB2`: (источник, VRAM, тайлов, блоков)
-BLOCKS_567 = ((0x900, 0x1EA0, 2, 2), (0x800, 0x22A0, 2, 2),
-              (0x000, 0x3620, 4, 4))
+# Рукописные потоки: (кадров, задержка, шаг фазы, выгрузки), где выгрузка —
+# (источник нулевой фазы, шаг источника, VRAM, тайлов, блоков). Разобраны
+# по счётчикам в `$FF4394`; у наборов 4 и 9 это довесок к спискам.
+HAND = {
+    1: ((4, 4, 1, ((0x000, 0x80, 0x1EA0, 2, 2),      # $013980
+                   (0x040, 0x80, 0x1EE0, 2, 2))),
+        (4, 6, 1, ((0x400, 0x40, 0x22A0, 2, 2),)),   # $013910
+        (3, 6, 1, ((0x500, 0x40, 0x1C60, 2, 2),))),  # $013942
+    # У четвёртого StageAnimStart4 заряжает счётчик четвёркой, а тик потом
+    # перезаряжает тройкой: самый первый шаг приходит на такт позже. Здесь
+    # везде тройка — разница в один кадр за всю игру.
+    4: ((3, 3, 1, ((0x600, 0x80, 0x1EA0, 4, 2),)),),  # $013D26
+    5: ((4, 6, 1, ((0x900, 0x40, 0x1EA0, 2, 2),)),   # $013EB4
+        (4, 6, 1, ((0x800, 0x40, 0x22A0, 2, 2),)),   # $013E2C
+        (4, 6, 1, ((0x000, 0x80, 0x3620, 4, 4),))),  # $013E6A
+    6: ((4, 6, 1, ((0x900, 0x40, 0x1EA0, 2, 2),)),
+        (4, 6, 1, ((0x800, 0x40, 0x22A0, 2, 2),)),
+        (1, 1, 1, ((0x000, 0x80, 0x3620, 4, 4),))),  # заморожен: `st $0(a0)`
+    7: ((4, 6, 1, ((0x900, 0x40, 0x1EA0, 2, 2),)),
+        (4, 6, 1, ((0x800, 0x40, 0x22A0, 2, 2),)),
+        (4, 6, -1, ((0x000, 0x80, 0x3620, 4, 4),))),  # назад: `st $1(a0)`
+    9: ((4, 3, 1, ((0x000, 0x40, 0x1EA0, 2, 2),      # $01425C
+                   (0x400, 0x40, 0x1EE0, 2, 2))),),
+}
 
 
 def _S16(a):
@@ -372,64 +426,158 @@ def _S16(a):
     return v - 0x10000 if v & 0x8000 else v
 
 
-def _frame0(a):
-    u"""Первый кадр списка: [(источник, VRAM, тайлов, блоков)]."""
-    n = U16(a)
-    a += 2
-    if n == 0:                       # список начинается с перехода
-        a = U32(a)
+def _stream(a):
+    u"""Список кадров потока: [([(источник, VRAM, тайлов, блоков)], такты)].
+
+    Ход по списку такой же, как у `DrawHudList` `$00C62C`: слово «сколько
+    блоков», сами блоки по восемь байт, следом слово задержки; ноль вместо
+    счётчика значит переход по длинному слову. Списки замкнуты сами на
+    себя, поэтому ход кончается на первом повторе адреса.
+    """
+    out, seen = [], set()
+    while a not in seen and 0 < a < len(ROM) - 8:
+        seen.add(a)
         n = U16(a)
         a += 2
-    out = []
-    for _ in range(n):
-        src, dst, d1 = U16(a), U16(a + 2), U32(a + 4)
-        out.append((src, VRAM_BASE + dst, d1 >> 16, d1 & 0xFFFF))
-        a += 8
+        if n == 0:
+            a = U32(a)
+            continue
+        blocks = []
+        for _ in range(n):
+            src, dst, d1 = U16(a), U16(a + 2), U32(a + 4)
+            blocks.append((src, VRAM_BASE + dst, d1 >> 16, d1 & 0xFFFF))
+            a += 8
+        out.append((blocks, U16(a)))
+        a += 2
     return out
 
 
-def anim_blocks(setno):
-    u"""Что набор выгружает в VRAM первым кадром."""
+def anim_streams(setno):
+    u"""Все потоки набора: [[(блоки, задержка), ...], ...].
+
+    Порядок важен — потоки пишут в VRAM один поверх другого ровно так,
+    как их обходит StageAnimTickN, а рукописные идут после списковых.
+    """
     kind, arg = ANIM_SETS.get(setno, (None, None))
+    out = []
     if kind == "table":
         # lea (d16,pc),a2 ; moveq #n,d7 ; ... ; lea (d8,pc,d0.w),a0
         tbl = arg + 0x0C + _S16(arg + 0x0A + 2)
         count = ROM[arg + 0x0F] + 1
         base = arg + 0x14 + (U16(arg + 0x12 + 2) & 0xFF)
-        out = []
         for i in range(count):
-            out += _frame0((base + _S16(tbl + 2 * i)) & 0xFFFFFF)
-        return out
-    if kind == "lists":
-        out = []
+            out.append(_stream((base + _S16(tbl + 2 * i)) & 0xFFFFFF))
+    elif kind == "lists":
         for a in arg:
-            out += _frame0(a)
-        return out
-    if kind == "pairs":                       # $0136D6: по 2 тайла дважды
-        return [(src, vram, 2, 2) for src, vram in arg]
-    if kind == "blocks":
-        return list(BLOCKS_567)
-    return []
+            out.append(_stream(a))
+    for n, delay, step, ups in HAND.get(setno, ()):
+        frames = []
+        for k in range(n):
+            ph = (k * step) % n
+            frames.append(([(src + ph * st, vram, tiles, blocks)
+                            for src, st, vram, tiles, blocks in ups], delay))
+        out.append(frames)
+    return [s for s in out if s]
 
 
-def tileset(rec):
-    u"""{номер тайла в VRAM: 32 байта}, уже с первым кадром анимации."""
+def stream_frame(stream, tick):
+    u"""Блоки потока на такте tick."""
+    total = sum(d for _b, d in stream)
+    if total <= 0:
+        return stream[0][0]
+    t = tick % total
+    for blocks, d in stream:
+        if t < d:
+            return blocks
+        t -= d
+    return stream[-1][0]
+
+
+def _lcm(a, b):
+    x, y = a, b
+    while y:
+        x, y = y, x % y
+    return a * b // x if x else max(a, b)
+
+
+def streams_period(streams):
+    u"""Сколько тактов до полного повтора набора потоков."""
+    p = 1
+    for s in streams:
+        p = _lcm(p, max(1, sum(d for _b, d in s)))
+    return p
+
+
+def streams_ticks(streams):
+    u"""Такты внутри периода, на которых хоть один поток меняет кадр.
+
+    Поток из одного кадра не меняется никогда — он ничего не отмечает.
+    """
+    total = streams_period(streams)
+    marks = {0}
+    for s in streams:
+        if len(s) < 2:
+            continue
+        per = max(1, sum(d for _b, d in s))
+        t = 0
+        for _blocks, d in s:
+            t += d
+            for k in range(t, total, per):
+                marks.add(k)
+    return sorted(marks)
+
+
+def anim_period(setno):
+    return streams_period(anim_streams(setno))
+
+
+def anim_ticks(setno):
+    return streams_ticks(anim_streams(setno))
+
+
+def stream_tiles(stream):
+    u"""Номера тайлов VRAM, в которые пишет поток."""
+    out = set()
+    for blocks, _d in stream:
+        for _src, vram, per, nb in blocks:
+            for b in range(nb):
+                t0 = (vram + b * 0x200) // 32
+                out.update(range(t0, t0 + per))
+    return out
+
+
+def animated_tiles(setno):
+    u"""Номера тайлов VRAM, которые шевелит фоновая анимация."""
+    out = set()
+    for s in anim_streams(setno):
+        out |= stream_tiles(s)
+    return out
+
+
+def anim_blocks(setno):
+    u"""Что набор выгружает в VRAM первым кадром."""
+    return [b for s in anim_streams(setno) for b in s[0][0]]
+
+
+def tileset(rec, tick=0):
+    u"""{номер тайла в VRAM: 32 байта} на такте tick фоновой анимации."""
     w = lambda o: (rec[o] << 8) | rec[o + 1]
     out = {}
     for base, off, nbytes in TILE_BANKS:
         d = asset(w(off))
         for t in range(nbytes // 32):
             out[base + t] = d[t * 32:(t + 1) * 32]
-    # поверх пустых тайлов — первый кадр фоновой анимации
+    # поверх пустых тайлов — текущий кадр каждого потока фоновой анимации
     frames = asset(w(0x1C6))[0x400:]
-    for src, vram, per, blocks in anim_blocks(rec[0x1CB]):
-        for b in range(blocks):
-            so = src + b * 0x200
-            t0 = (vram + b * 0x200) // 32
-            for k in range(per):
-                chunk = frames[so + k * 32:so + (k + 1) * 32]
-                if len(chunk) == 32:
-                    out[t0 + k] = chunk
+    for s in anim_streams(rec[0x1CB]):
+        for src, vram, per, blocks in stream_frame(s, tick):
+            for b in range(blocks):
+                so = src + b * 0x200
+                t0 = (vram + b * 0x200) // 32
+                for k in range(per):
+                    chunk = frames[so + k * 32:so + (k + 1) * 32]
+                    if len(chunk) == 32:
+                        out[t0 + k] = chunk
     return out
 
 
@@ -522,8 +670,8 @@ def pose_anim(t, pose, facing):
     return 0x0A
 
 
-def unit_sprite(t, pose, facing, pal_rows):
-    u"""32x32 цветов, None вместо прозрачного; None, если кадра нет."""
+def unit_sprite(t, pose, facing):
+    u"""32x32 номеров цветов, None вместо прозрачного; None, если кадра нет."""
     import unitgfx
     anim = pose_anim(t, pose, facing)
     try:
@@ -546,7 +694,7 @@ def unit_sprite(t, pose, facing, pal_rows):
         data = columnwise(bytes(unpack(ROM, p)[2]))
     except Exception:
         return None
-    pal = pal_rows[ROM[UNIT_PALETTE_ROW + t - 1] & 3]
+    prow = (ROM[UNIT_PALETTE_ROW + t - 1] & 3) * 16
     hf = bool(w & 0x800)
     out = [[None] * 32 for _ in range(32)]
     for ty in range(4):
@@ -555,110 +703,262 @@ def unit_sprite(t, pose, facing, pal_rows):
             if len(tile) < 32:
                 continue
             for y in range(8):
-                row = out[ty * 8 + y]
+                line = out[ty * 8 + y]
                 for x in range(8):
                     b = tile[y * 4 + (x >> 1)]
                     v = (b >> 4) if x % 2 == 0 else (b & 15)
-                    if v:
-                        row[31 - (tx * 8 + x) if hf else tx * 8 + x] = pal[v]
+                    if not v:
+                        continue
+                    at = tx * 8 + x
+                    line[31 - at if hf else at] = prow + v
     return out
 
 
-def draw(cells, rec, mrec, units, path, nosprite=None):
+def palettes(rec, mrec):
+    u"""Четыре ряда CRAM поля боя, как их кладёт `BuildStagePalettes`."""
+    return [array_palette(0), array_palette(mrec[0x28]),
+            array_palette(mrec[0x29]), rec_palette(rec, mrec[0x4C])]
+
+
+PAL_SIZE = 64              # четыре ряда по шестнадцать
+BACK_INDEX = 3 * 16 + 15   # фон: пятнадцатый цвет палитры этапа
+
+
+def render(cells, rec, units, tick=0, rect=None, nosprite=None, tiles=None):
+    u"""Кусок карты НОМЕРАМИ цветов: (ширина, высота, байты, сколько нулевых).
+
+    Номер = ряд * 16 + цвет в ряду. Сами краски сюда не входят вовсе —
+    поэтому картинка годится и для PNG (цвета берутся из `palettes`), и
+    для кадра GIF, где палитра общая на весь файл. `rect` — (клетка x,
+    клетка y, ширина, высота) в клетках, по умолчанию вся карта; `tick` —
+    такт фоновой анимации; `tiles` даёт переиспользовать готовый набор.
+    """
     if nosprite is None:
         nosprite = set()
+    cx0, cy0, cw, ch = rect or (0, 0, W, H)
     _typeof, celltab, metatab = meta_tables(rec)
-    tiles = tileset(rec)
-    pals = [array_palette(0), array_palette(mrec[0x28]),
-            array_palette(mrec[0x29]), rec_palette(rec, mrec[0x4C])]
-    back = pals[3][15]
-    px = [[back] * (W * CELL) for _ in range(H * CELL)]
+    if tiles is None:
+        tiles = tileset(rec, tick)
+    wpx, hpx = cw * CELL, ch * CELL
+    px = bytearray([BACK_INDEX]) * (wpx * hpx)
     skipped = 0
 
     cache = {}
     flames = fire_tiles()
-    sys_pal = array_palette(0)                 # пламя рисуется рядом 0
 
     def block(name):
-        u"""8x8 готовых цветов по слову имени; слов на карту немного."""
+        u"""8x8 номеров цветов по слову имени; слов на карту немного."""
         b = cache.get(name)
         if b is None:
             g = tiles.get(name & 0x7FF)
-            p = pals[(name >> 13) & 3]
+            row = ((name >> 13) & 3) * 16
             hf, vf = (name >> 11) & 1, (name >> 12) & 1
             if g is None:
-                b = None
+                b = False
             else:
                 b = []
                 for y in range(8):
                     sy = 7 - y if vf else y
-                    line = []
+                    line = bytearray()
                     for x in range(8):
                         sx = 7 - x if hf else x
                         v = g[sy * 4 + (sx >> 1)]
-                        line.append(p[(v >> 4) if sx % 2 == 0 else (v & 15)])
-                    b.append(line)
+                        line.append(row + ((v >> 4) if sx % 2 == 0
+                                           else (v & 15)))
+                    b.append(bytes(line))
             cache[name] = b
         return b
 
-    for cy in range(H):
-        for cx in range(W):
+    def plain(entry, ox, oy):
+        for q in range(4):
+            meta = metatab[entry[q] & 0x1FF]
+            for s in range(4):
+                bl = block((meta[s] + 0x6075) & 0xFFFF)
+                if not bl:
+                    continue
+                bx = ox + (q & 1) * 16 + (s & 1) * 8
+                by = oy + (q >> 1) * 16 + (s >> 1) * 8
+                for y in range(8):
+                    o = (by + y) * wpx + bx
+                    px[o:o + 8] = bl[y]
+
+    for cy in range(cy0, cy0 + ch):
+        for cx in range(cx0, cx0 + cw):
             b = cells[cy * W + cx]
+            ox, oy = (cx - cx0) * CELL, (cy - cy0) * CELL
             if b == 0:                 # см. «Байт 0» в шапке
                 skipped += 1
                 continue
             if b == FIRE_BYTE:         # огонь идёт мимо таблицы метатайлов
-                f = fire_cell(cy * W + cx, sys_pal, flames)
-                base = celltab[b - 1]
-                for q in range(4):     # под пламенем — та же голая земля
-                    meta = metatab[base[q] & 0x1FF]
-                    for sq in range(4):
-                        bl = block((meta[sq] + 0x6075) & 0xFFFF)
-                        if bl is None:
-                            continue
-                        bx = cx * CELL + (q & 1) * 16 + (sq & 1) * 8
-                        by = cy * CELL + (q >> 1) * 16 + (sq >> 1) * 8
-                        for y in range(8):
-                            px[by + y][bx:bx + 8] = bl[y]
+                plain(celltab[b - 1], ox, oy)   # под пламенем голая земля
+                f = fire_cell(cy * W + cx, flames)
                 for y in range(CELL):
-                    row = px[cy * CELL + y]
+                    o = (oy + y) * wpx + ox
                     src = f[y]
                     for x in range(CELL):
                         if src[x] is not None:
-                            row[cx * CELL + x] = src[x]
+                            px[o + x] = src[x]
                 continue
-            entry = celltab[b - 1]
-            for q in range(4):
-                meta = metatab[entry[q] & 0x1FF]
-                ox0 = cx * CELL + (q & 1) * 16
-                oy0 = cy * CELL + (q >> 1) * 16
-                for s in range(4):
-                    b = block((meta[s] + 0x6075) & 0xFFFF)
-                    if b is None:
-                        continue
-                    bx = ox0 + (s & 1) * 8
-                    by = oy0 + (s >> 1) * 8
-                    for y in range(8):
-                        px[by + y][bx:bx + 8] = b[y]
+            plain(celltab[b - 1], ox, oy)
 
     # ближний перекрывает дальнего: рисуем сверху вниз
     for ux, uy, ud, ut, upose in sorted(units, key=lambda u: (u[1], u[0])):
-        if not (0 <= ux < W and 0 <= uy < H):
+        if not (cx0 <= ux < cx0 + cw and cy0 <= uy < cy0 + ch):
             continue
-        spr = unit_sprite(ut, upose, ud, pals)
+        spr = unit_sprite(ut, upose, ud)
         if spr is None:
             nosprite.add(ut)
             continue
-        ox, oy = ux * CELL, uy * CELL
+        ox, oy = (ux - cx0) * CELL, (uy - cy0) * CELL
         for y in range(32):
-            dst = px[oy + y]
+            o = (oy + y) * wpx + ox
             src = spr[y]
             for x in range(32):
                 if src[x] is not None:
-                    dst[ox + x] = src[x]
+                    px[o + x] = src[x]
+    return wpx, hpx, px, skipped
 
-    png(path, W * CELL, H * CELL, px)
+
+def draw(cells, rec, mrec, units, path, nosprite=None):
+    wpx, hpx, px, skipped = render(cells, rec, units, nosprite=nosprite)
+    pal = [c for row in palettes(rec, mrec) for c in row]
+    png(path, wpx, hpx, [[pal[c] for c in px[y * wpx:(y + 1) * wpx]]
+                         for y in range(hpx)])
     return skipped
+
+
+ANIM_WIN = 8               # сторона окна анимации по умолчанию, в клетках
+TICK_HZ = 60.0             # кадр экрана — такт анимации
+
+
+def cell_tiles(cells, rec, idx):
+    u"""Номера тайлов VRAM, из которых сложена клетка."""
+    _typeof, celltab, metatab = meta_tables(rec)
+    b = cells[idx]
+    if not b or b == FIRE_BYTE:
+        return set()
+    return {(mt + 0x6075) & 0x7FF
+            for q in range(4)
+            for mt in metatab[celltab[b - 1][q] & 0x1FF]}
+
+
+def animated_cells(cells, rec):
+    u"""Номера клеток, чьи тайлы шевелит фоновая анимация."""
+    _typeof, celltab, metatab = meta_tables(rec)
+    hot = animated_tiles(rec[0x1CB])
+    out = set()
+    for i, b in enumerate(cells):
+        if not b or b == FIRE_BYTE:
+            continue
+        entry = celltab[b - 1]
+        for q in range(4):
+            meta = metatab[entry[q] & 0x1FF]
+            if any(((mt + 0x6075) & 0x7FF) in hot for mt in meta):
+                out.add(i)
+                break
+    return out
+
+
+WATER_TYPE = 19            # см. «Экспорт местности» в шапке
+
+
+def best_window(cells, typeof, hot, cw, ch):
+    u"""Самое живое окно cw x ch клеток.
+
+    Сначала вода: сколько в окне РАЗНЫХ водяных байтов. Сплошная гладь —
+    это один байт 25 и один поток, а кромка берега даёт десяток разных
+    байтов и до пяти потоков сразу, и смотреть интересно именно её. Если
+    воды на карте нет, тем же порядком берётся любая анимация.
+    """
+    best, at = None, (0, 0)
+    for y in range(H - ch + 1):
+        for x in range(W - cw + 1):
+            wk, wn, ak, an = set(), 0, set(), 0
+            for k in range(ch):
+                for j in range(cw):
+                    i = (y + k) * W + x + j
+                    if i not in hot:
+                        continue
+                    ak.add(cells[i])
+                    an += 1
+                    if typeof[cells[i]] == WATER_TYPE:
+                        wk.add(cells[i])
+                        wn += 1
+            key = (len(wk), wn, len(ak), an)
+            if best is None or key > best:
+                best, at = key, (x, y)
+    return at[0], at[1], cw, ch, best[3]
+
+
+def anim_map(c, m, r, recs, outdir, rect=None):
+    u"""Один GIF с движущейся фоновой анимацией.
+
+    Кадр выдаётся на каждом такте, где хоть один поток меняет картинку,
+    и держится до следующего такта смены; задержка считается нарастающим
+    итогом, чтобы округление до сотых долей не копило ошибку.
+
+    Потоки, чьи тайлы в окно не попали, из счёта выкидываются — иначе у
+    набора 8 период выходит 1872 такта на ровном месте, хотя вода в нём
+    крутится куда быстрее.
+    """
+    rec = recs[r[0x2A]]
+    setno = rec[0x1CB]
+    st = r[3]
+    o = STAGES + (st - 1) * 8
+    _me, size, cells, _e = unpack(ROM, U32(o))
+    if size != W * H:
+        return None
+    if r[0x2F] & 0x80:
+        cells = autotile(cells)
+    units = placement(U32(o + 4))
+
+    hot = animated_cells(cells, rec)
+    if rect is None:
+        typeof = meta_tables(rec)[0]
+        x0, y0, cw, ch, n = best_window(cells, typeof, hot,
+                                        ANIM_WIN, ANIM_WIN)
+        rect = (x0, y0, cw, ch)
+    else:
+        n = sum(1 for cy in range(rect[1], rect[1] + rect[3])
+                for cx in range(rect[0], rect[0] + rect[2])
+                if cy * W + cx in hot)
+
+    seen = set()
+    for cy in range(rect[1], rect[1] + rect[3]):
+        for cx in range(rect[0], rect[0] + rect[2]):
+            seen |= cell_tiles(cells, rec, cy * W + cx)
+    live = [s for s in anim_streams(setno) if stream_tiles(s) & seen]
+    if not live:
+        print(u"гл.%d м.%d: в окне (%d,%d) %dx%d нет анимированных тайлов"
+              % (c, m, rect[0], rect[1], rect[2], rect[3]))
+        return None
+
+    period = streams_period(live)
+    ticks = streams_ticks(live)
+    frames, delays, acc = [], [], 0
+    wpx = hpx = 0
+    for i, t in enumerate(ticks):
+        nxt = ticks[i + 1] if i + 1 < len(ticks) else period
+        wpx, hpx, px, _sk = render(cells, rec, units, tick=t, rect=rect)
+        frames.append(px)
+        a = int(round(nxt * 100.0 / TICK_HZ))
+        delays.append(a - acc)
+        acc = a
+
+    pal = [col for row in palettes(rec, r) for col in row]
+    path = os.path.join(outdir, "ch%d_m%02d_stage%03d.gif" % (c, m, st - 1))
+    kept = gif(path, wpx, hpx, pal, frames, delays)
+    print(u"гл.%d м.%d, набор анимации %d: клетки (%d,%d)..(%d,%d), "
+          u"из них живых %d" % (c, m, setno, rect[0], rect[1],
+                                rect[0] + rect[2] - 1, rect[1] + rect[3] - 1,
+                                n))
+    print(u"    потоки в окне: %s (всего в наборе %d); период %d тактов "
+          u"(%.1f с), кадров %d из %d, %d Кб -> %s"
+          % (", ".join(str(sum(d for _b, d in s)) for s in live),
+             len(anim_streams(setno)), period, period / TICK_HZ,
+             kept, len(ticks), (os.path.getsize(path) + 1023) // 1024,
+             os.path.relpath(path, HERE)))
+    return path
 
 
 def record_palette_no(recs):
@@ -785,8 +1085,12 @@ def fire_tiles():
     return [d[:32], d[32:]]
 
 
-def fire_cell(idx, pal, tiles2):
-    u"""Клетка огня так, как её строит DrawFireCell `$015D18`."""
+def fire_cell(idx, tiles2):
+    u"""Клетка огня так, как её строит DrawFireCell `$015D18`.
+
+    Номера цветов ряда 0 (пламя рисуется системной палитрой), None вместо
+    прозрачного — под ним видно голую землю.
+    """
     a0 = MAP_BUFFER + idx * 2
     d4 = ((a0 & 0xFFFF) << 16) | ((a0 + (a0 & 0xFFFF)) & 0xFFFF)
     masks = ROM[FIRE_PATTERN:FIRE_PATTERN + 8]
@@ -807,7 +1111,7 @@ def fire_cell(idx, pal, tiles2):
                     b = g[y * 4 + (x >> 1)]
                     v = (b >> 4) if x % 2 == 0 else (b & 15)
                     if v:
-                        px[row * 8 + y][col * 8 + x] = pal[v]
+                        px[row * 8 + y][col * 8 + x] = v
     return px
 
 
@@ -905,10 +1209,33 @@ def export_terrain():
     return 0
 
 
+def do_anim(rest):
+    u"""`--anim [глава миссия [x y ширина высота]]` — GIF с живой водой."""
+    want = (int(rest[0]), int(rest[1])) if len(rest) >= 2 else (1, 1)
+    rect = tuple(int(v) for v in rest[2:6]) if len(rest) >= 6 else None
+    if rect and (rect[0] + rect[2] > W or rect[1] + rect[3] > H
+                 or min(rect[2:]) < 1):
+        print(u"окно не лезет в карту 40x40")
+        return 2
+    recs = gfx_records()
+    outdir = out_path("maptex")
+    os.makedirs(outdir, exist_ok=True)
+    for c, m, r in missions():
+        if (c, m) != want:
+            continue
+        if r[0x2A] >= len(recs):
+            continue
+        return 0 if anim_map(c, m, r, recs, outdir, rect) else 1
+    print(u"нет такой миссии: гл.%d м.%d" % want)
+    return 2
+
+
 def main():
     args = sys.argv[1:]
     if "--export" in args:
         return export_terrain()
+    if args and args[0] == "--anim":
+        return do_anim(args[1:])
     want = None
     if args and args[0] == "--types":
         recs = gfx_records()

@@ -111,6 +111,144 @@ def png(path, w, h, rows, alpha=False):
         f.write(chunk(b"IEND", b""))
 
 
+def _lzw(data, mcs):
+    """Сжатие GIF. mcs — начальный размер кода, биты пакуются младшими."""
+    clear, end = 1 << mcs, (1 << mcs) + 1
+    acc = nbits = 0
+    buf = bytearray()
+
+    def put(code, size):
+        nonlocal acc, nbits
+        acc |= code << nbits
+        nbits += size
+        while nbits >= 8:
+            buf.append(acc & 0xFF)
+            acc >>= 8
+            nbits -= 8
+
+    def fresh():
+        return {bytes([i]): i for i in range(clear)}, clear + 2, mcs + 1
+
+    tbl, nxt, cs = fresh()
+    put(clear, cs)
+    if data:
+        prefix = data[:1]
+        for k in data[1:]:
+            nb = prefix + bytes([k])
+            if nb in tbl:
+                prefix = nb
+                continue
+            put(tbl[prefix], cs)
+            if nxt < 4096:
+                tbl[nb] = nxt
+                nxt += 1
+                if nxt > (1 << cs) and cs < 12:
+                    cs += 1
+            else:
+                put(clear, cs)
+                tbl, nxt, cs = fresh()
+            prefix = bytes([k])
+        put(tbl[prefix], cs)
+    put(end, cs)
+    if nbits:
+        buf.append(acc & 0xFF)
+    out = bytearray()
+    for i in range(0, len(buf), 255):
+        part = buf[i:i + 255]
+        out.append(len(part))
+        out += part
+    out.append(0)
+    return bytes(out)
+
+
+def _diff_box(cur, prev, w, h):
+    """Наименьший прямоугольник, накрывающий разницу; None, если её нет."""
+    y0, y1 = None, None
+    for y in range(h):
+        o = y * w
+        if cur[o:o + w] != prev[o:o + w]:
+            if y0 is None:
+                y0 = y
+            y1 = y
+    if y0 is None:
+        return None
+    x0, x1 = w, -1
+    for y in range(y0, y1 + 1):
+        o = y * w
+        for x in range(w):
+            if cur[o + x] != prev[o + x]:
+                if x < x0:
+                    x0 = x
+                break
+        for x in range(w - 1, x1, -1):
+            if cur[o + x] != prev[o + x]:
+                x1 = x
+                break
+    return x0, y0, x1 - x0 + 1, y1 - y0 + 1
+
+
+def gif(path, w, h, palette, frames, delays, loop=0):
+    """Анимация индексами палитры.
+
+    `frames` — байты длиной w*h, номера цветов в `palette` (до 255);
+    `delays` — задержки в сотых долях секунды, по одной на кадр. Кадры,
+    кроме первого, пишутся РАЗНИЦЕЙ: берётся наименьший изменившийся
+    прямоугольник, а внутри него неизменившиеся точки закрыты прозрачным
+    индексом при способе утилизации «оставить как есть». Одинаковые
+    подряд кадры сливаются в один с суммарной задержкой.
+    """
+    n = len(palette)
+    tr = n                                 # прозрачный — сразу за палитрой
+    bits = 2                               # в таблице нужно место и под tr
+    while (1 << bits) < n + 1:
+        bits += 1
+    gct = bytearray()
+    for c in palette:
+        gct += bytes(c[:3])
+    gct += bytes(3 * ((1 << bits) - n))
+
+    out = [bytes([71, 73, 70, 56, 57, 97]),
+           struct.pack("<HHBBB", w, h, 0xF0 | (bits - 1), 0, 0), bytes(gct),
+           b"\x21\xFF\x0BNETSCAPE2.0\x03\x01" + struct.pack("<H", loop)
+           + b"\x00"]
+    parts = []                             # (задержка, кусок) — чтобы слить
+
+    prev = None
+    for fr, d in zip(frames, delays):
+        fr = bytes(fr)
+        if prev is None:
+            box, sub = (0, 0, w, h), fr
+        else:
+            box = _diff_box(fr, prev, w, h)
+            if box is None:                # ничего не изменилось
+                if parts:
+                    parts[-1][0] += d
+                continue
+            x0, y0, bw, bh = box
+            sub = bytearray()
+            for y in range(y0, y0 + bh):
+                o = y * w + x0
+                cur, old = fr[o:o + bw], prev[o:o + bw]
+                if cur == old:
+                    sub += bytes([tr]) * bw
+                else:
+                    sub += bytes(c if c != p else tr
+                                 for c, p in zip(cur, old))
+        x0, y0, bw, bh = box
+        body = (struct.pack("<BHHHHB", 0x2C, x0, y0, bw, bh, 0)
+                + bytes([bits]) + _lzw(bytes(sub), bits))
+        parts.append([d, body])
+        prev = fr
+
+    for d, body in parts:
+        out.append(b"\x21\xF9\x04\x05" + struct.pack("<H", min(d, 0xFFFF))
+                   + bytes([tr, 0]) + body)
+    out.append(b"\x3B")
+    with open(path, "wb") as f:
+        f.write(b"".join(out))
+    return len(parts)
+
+
 def ground_colours(data):
     """Цвета фона: набор красок самого простого тайла.
 

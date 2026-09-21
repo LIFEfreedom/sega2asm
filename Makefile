@@ -246,6 +246,8 @@ unitanim:
 # юнитов, плюс лист образцов местности. Аргументы — глава и миссия:
 #     make maptex MTARGS="1 5"
 #     make maptex MTARGS=--types
+#     make maptex MTARGS="--anim 1 1"           GIF: живая вода
+#     make maptex MTARGS="--anim 1 1 14 7 8 8"  он же, окно задано руками
 MTARGS ?=
 maptex:
 	@$(PYTHON) $(TOOLS_DIR)/maptex.py $(MTARGS)
