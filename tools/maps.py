@@ -16,17 +16,18 @@
 docs/game-stages.md). Раньше здесь было наоборот, и точки юнитов ложились
 на PNG зеркально относительно диагонали.
 
-Байт клетки — **не тип местности**. Тип даёт таблица перевода на 256
-байт, которую `LoadStageGraphics` кладёт в `$FFBBBC`; она приходит вместе
-с набором графики этапа и своя у каждого из девяти наборов, хотя по делу
-они почти совпадают. `BuildTerrainMap` `$0203FE` гоняет карту через неё.
-Разбор цепочки — в `tools/maptex.py`; там же карты рисуются настоящими
-тайлами игры, а не условными цветами.
+Байт клетки — **не тип местности**, и у карты две независимые жизни.
+Правила (стоимость шага, урон, съедобность) работают по ТИПУ, который
+даёт таблица перевода на 256 байт в `$FFBBBC`: она приходит с набором
+графики этапа, и `BuildTerrainMap` `$0203FE` гоняет карту через неё.
+А рисуется карта по САМОМУ БАЙТУ, мимо типа: `DrawMapColumn` `$015A80`
+берёт слово из буфера `$FF9FC6` и отдаёт `DrawCellTiles`. Разбор цепочки —
+в `tools/maptex.py`, там же полноразмерные карты настоящими тайлами.
 
 Пишет PNG по карте на этап в `out/<имя>/maps/` и сводку в `docs/game-maps.md`.
-Цвет клетки — средний цвет её настоящей текстуры, посчитанный по набору
-графики 0; имён у типов местности в ROM всё равно нет
-([game-terrain.md](game-terrain.md)).
+Цвет клетки — средний цвет её настоящей текстуры по набору графики 0.
+Полноразмерные карты настоящими тайлами рисует `tools/maptex.py`; имён у
+типов местности в ROM всё равно нет ([game-terrain.md](game-terrain.md)).
 """
 import collections
 import io
@@ -60,46 +61,44 @@ CELL = 8                      # пикселей на клетку
 LETHAL = (11, 12, 13, 20)
 PLANTS = (1, 5, 21, 22)
 
-# Цвет типа — СРЕДНИЙ цвет его клетки, посчитанный по настоящим тайлам
-# игры (набор графики 0). Раньше здесь была выдуманная шкала; после того
-# как `tools/maptex.py` научился собирать клетку так же, как её собирает
-# игра, придумывать цвета стало незачем.
-TYPE_COLOUR = None
+# Цвет клетки — СРЕДНИЙ цвет её настоящей текстуры, по набору графики 0.
+# Считается по БАЙТУ карты, а не по типу: рисует игра именно по байту
+# (`DrawMapColumn` `$015A80` -> `DrawCellTiles`), тип к картинке отношения
+# не имеет. Раньше здесь была выдуманная шкала.
+BYTE_COLOUR = None
 
 
-def build_type_colours():
+def build_byte_colours():
     import maptex
     rec = maptex.gfx_records()[0]
     _typeof, celltab, metatab = maptex.meta_tables(rec)
     tiles = maptex.tileset(rec)
     pals = [maptex.array_palette(0), maptex.array_palette(1),
             maptex.array_palette(3), maptex.rec_palette(rec, 0)]
-    t2t = ROM[0x020454:0x020474]     # data_165: тип -> плитка
-    out = {0xFF: (24, 24, 28)}
-    for t in range(32):
-        tile = t2t[t]
-        entry = (0, 0, 0, 0) if tile == 0 else celltab[tile - 1]
+    out = [(24, 24, 28)] * 256
+    for b in range(1, 256):
         acc = [0, 0, 0]
         n = 0
-        for q in range(4):
-            for v in metatab[entry[q] & 0x1FF]:
+        for w in celltab[b - 1]:
+            for v in metatab[w & 0x1FF]:
                 name = (v + 0x6075) & 0xFFFF
                 g = tiles.get(name & 0x7FF)
                 if g is None:
                     continue
                 pal = pals[(name >> 13) & 3]
-                for b in g:
-                    for c in (pal[b >> 4], pal[b & 15]):
+                for byte in g:
+                    for c in (pal[byte >> 4], pal[byte & 15]):
                         acc[0] += c[0]
                         acc[1] += c[1]
                         acc[2] += c[2]
                         n += 1
-        out[t] = tuple(v // n for v in acc) if n else (24, 24, 28)
+        if n:
+            out[b] = tuple(v // n for v in acc)
     return out
 
 
-def colour(t):
-    return TYPE_COLOUR[t]
+def colour(b):
+    return BYTE_COLOUR[b]
 
 
 def terrain_types():
@@ -139,7 +138,7 @@ def render(path, cells, units):
     for y in range(H):
         line = []
         for x in range(W):
-            line.extend([colour(cell_type(cells[y * W + x]))] * CELL)
+            line.extend([colour(cells[y * W + x])] * CELL)
         for _ in range(CELL):
             rows.append(list(line))
     # юниты — светлая точка 4x4 в центре клетки
@@ -172,7 +171,7 @@ def sheet(path, plates):
         oy = SHEET_GAP + (i // cols) * step
         for y in range(H):
             for x in range(W):
-                c = colour(cell_type(cells[y * W + x]))
+                c = colour(cells[y * W + x])
                 for dy in range(SHEET_SCALE):
                     row = img[oy + y * SHEET_SCALE + dy]
                     for dx in range(SHEET_SCALE):
@@ -195,9 +194,9 @@ def main():
     # карта подписывалась соседней миссией.
     miss = stagescript.maptable_to_missions()
 
-    global TYPE_OF, TYPE_COLOUR
+    global TYPE_OF, BYTE_COLOUR
     TYPE_OF = terrain_types()
-    TYPE_COLOUR = build_type_colours()
+    BYTE_COLOUR = build_byte_colours()
 
     outdir = out_path("maps")
     os.makedirs(outdir, exist_ok=True)
@@ -249,10 +248,15 @@ def main():
 
     p("## Из чего сложены карты\n\n")
     p("ПОПРАВКА. Раньше здесь стояло «тип в младших пяти битах байта, старшие\n"
-      "три — флаги». Это неверно: байт целиком идёт в таблицу перевода\n"
+      "три — флаги». Это неверно. Байт целиком идёт в таблицу перевода\n"
       "`$FFBBBC`, которая приходит с набором графики этапа, и уже она даёт\n"
-      "тип. Числа ниже пересчитаны по ней; прежние — и доля типа 25, и доля\n"
-      "типа 31 — были посчитаны не про то.\n\n")
+      "тип — тот, по которому считаются стоимость шага, урон и съедобность.\n"
+      "Числа ниже пересчитаны по ней; прежние — и доля типа 25, и доля типа\n"
+      "31 — были посчитаны не про то.\n\n"
+      "К КАРТИНКЕ этот тип отношения не имеет: рисует игра по самому байту,\n"
+      "мимо типа (`tools/maptex.py`). Поэтому одному типу отвечают десятки\n"
+      "байтов, различающихся только кромкой — типу 19, например, байты\n"
+      "25…71.\n\n")
     p("Гистограмма по типам, всего %d клеток:\n\n" % sum(hist.values()))
     p("| тип | клеток | доля | что известно |\n|---|---|---|---|\n")
     tot = sum(hist.values())
