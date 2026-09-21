@@ -1344,7 +1344,11 @@ TickSceneObjects               = $05718C   ; шаг объектов сцены:
                              ; +$4E с +$4C и +$4D. Оси независимы, поэтому траектория
                              ; получается ступенчатой
 ScreenLoadByByte56            = $057272   ; Р±Р°Р№С‚ +$56 Р·Р°РїРёСЃРё a1; $FF РѕР·РЅР°С‡Р°РµС‚ В«РЅРµС‡РµРіРѕ РіСЂСѓР·РёС‚СЊВ»
-ScreenWriteFromA567           = $057310   ; РґР°РЅРЅС‹Рµ СЃ +$67 Р·Р°РїРёСЃРё a5
+AllocTileSlot                 = $057310   ; занять слот плиток: пять байт с +$67(a5) — битовая карта
+                             ; СОРОКА слотов по 16 тайлов, номер слота даёт адрес VRAM
+                             ; (слот*16 + $374)*32. Освобождают через bclr в $6C(a5).
+                             ; Если все пять байт $FF, печатает адрес и валится в
+                             ; SystemErrorHalt с надписью TextNoFreeTileSlot
 FadeOutUntilMusicEnds          = $05737A   ; затемнять палитру восемью шагами GfxPalette_0523D8, ожидая
                              ; между ними +$18 кадров, и крутиться, ПОКА драйвер не скажет,
                              ; что музыка кончилась: байт $A01C14 читается через захват шины
@@ -1485,7 +1489,9 @@ SpriteListRam    = $FF2748   ; = GameState + $21E4
 ;
 ; По категориям: Player 142, Ai 128, Sub 120, Map 94, Core 81, GfxDraw 76, Unit 68, UnitLoop 39, SubLoop 28, AiRand 26, Combat 25, PlayerLoop 24, CoreLoop 24, MapLoop 22, Gfx 21, Sound 18, MapRand 17, GfxClear 15, GfxUnpack 15, GfxLoop 14, UnitRand 14, GfxPalette 13, GfxScroll 11, Input 11, GfxLoad 10, UnitDraw 9, GfxText 8, CoreSfx 8, BiosLoop 7, CorePalette 7, AiLoop 7, CombatLoop 6, CoreLoad 6, CoreDraw 6, PlayerRand 6, SubRand 6, CoreUnpack 5, SubArgs 5, Bios 4, InputLoop 4, CoreTable 4, SubPalette 4, Z80Unpack 4, BiosDraw 3, SubTable 3, CombatTable 3, SoundLoop 3, UnitTable 3, MapTable 3, PlayerTable 3, SubUnpack 3, UnitUnpack 3, PlayerUnpack 2, SoundSfx 2, GfxRand 2, CombatRand 2, CoreRand 2, UnitArgs 2, CoreArgs 2, SubDraw 2, UnitPalette 2, GfxArgs 2, SubText 1, Z80 1, Z80Loop 1, BiosScroll 1, BiosPalette 1, CoreScroll 1, UnitClear 1, UnitLoad 1, Z80Draw 1, AiTable 1, GfxTable 1, SubLoad 1, AiUnpack 1, CoreText 1, GfxSfx 1, SoundDraw 1, InputSfx 1, UnitText 1, AiArgs 1
 
-DrawBiosMessage                 = $000328   ; строки трапом $FF25 по трём позициям таблицы имён
+DrawBiosMessage                 = $000328   ; TextAddressLabel и следом восемь цифр d0 через HexDigits,
+                             ; двумя строками трапа $FF25. Единственная площадка —
+                             ; AllocTileSlot, когда слоты кончились
 VBlankTimerTick                = $000430   ; 150 инстр, 0 ссылок
                                  ; обработчик таймеров: FrameCounter и FrameWait +1 безусло
                                  ; вно, ElapsedFrames только при сброшенном бите 7 GlobalFl
@@ -1509,12 +1515,22 @@ TrapScrollClearA               = $00136A   ; трап $FF27: обнулить 25
 ;                             ; $50000003 и $40000010 — скролл одного плана
 TrapScrollClearB               = $00137E   ; трап $FF28: то же по $50020003 и $40020010,
 ;                             ; второй план. Общий хвост с TrapScrollClearA
-TrapLoadCached                 = $00141E   ; трап $FF23: если указатель (a6) совпал с тем, что лежит
-;                             ; в $FF2A74, ничего не делать; иначе запомнить и грузить
-TrapDrawUnlessBit3             = $0014F6   ; трап $FF2A: вывод, целиком пропускается при
+DrawTextBoxCached              = $00141E   ; трап $FF23: ОКНО 7x10 клеток в таблице имён по $0982 +
+;                             ; $FF2A50. Заливает тайлом $8001, чистит девять записей
+;                             ; спрайтов с $FF27F8, обнуляет $FF9C72 и печатает строку
+;                             ; (a6) построчно ($01 — перевод, $00 — конец) с битом
+;                             ; приоритета. Кэш: если указатель тот же, что в $FF2A74,
+;                             ; не делать вообще ничего. Единственная площадка $0052D0
+DrawHintBox                    = $0014F6   ; трап $FF2A: ПОЛОСА 4x10 клеток по $0602 + $FF2A50, тем же
+;                             ; способом, что DrawTextBoxCached. Аргументы: слово (a6) —
+;                             ; номер подсказки, оседает в $FF2BDC; длинное $2(a6) —
+;                             ; строка, оседает в $267A(a5). Целиком пропускается при
 ;                             ; взведённом бите 3 GlobalFlags
-TrapLoop16                     = $0017B6   ; трап $FF2C: шестнадцать шагов по аргументам (a6):
-;                             ; +$0 приёмник, +$4 источник, +$8 счётчик
+ShiftPaletteBrightness         = $0017B6   ; трап $FF2C: ЯРКОСТЬ шестнадцати цветов. +$0 приёмник,
+;                             ; +$4 источник, +$8 — знаковая добавка. Каждая тетрада CRAM
+;                             ; делится на 2, к ней прибавляется добавка, результат
+;                             ; зажимается в 0..7 и умножается обратно. Выход обычно
+;                             ; уходит прямо в трап $FF20
 StepPaletteToward              = $001B62   ; шаг шестнадцати цветов к цели: каждая из трёх составляющих
                              ; сравнивается с целевой ($2(a1)) и, если не совпала, двигается
                              ; на шаг ((a1)). Маски и шаг сдвигаются на тетраду за проход
@@ -1533,6 +1549,33 @@ BiosSelectSoundBank      = $001D06   ; трап $FF35: в $A01C06 кладётс
 Z80BusGrab                     = $001DA8   ; трап $FF2E: замаскировать прерывания, взять шину Z80
 ;                             ; и дождаться подтверждения. К палитре отношения не имеет —
 ;                             ; старое имя было машинной догадкой
+MusicFadeStart                 = $001ED6   ; трап $FF33: взять шину Z80, положить $1F в $A01C14,
+;                             ; по 2 в $A01C0E и $A01C0F, $28 в Z80FadeCounter и отпустить.
+;                             ; Это ЗАПУСК затухания музыки; ждать его конца — дело
+;                             ; вызывающего. Все четыре площадки — смена сцены
+MusicFadeAndWait               = $001E7C   ; трап $FF31: MusicFadeStart, а потом ждать по кадру, пока
+;                             ; $A01C14 не станет нулём, то есть пока музыка не смолкнет.
+;                             ; Все пять площадок — выход из экранной последовательности
+;                             ; обратно в AttractLoop. Банк $05 повторяет это вручную
+;                             ; в FadeOutUntilMusicEnds
+
+; ── Экран системной ошибки ────────────────────────────────────────────
+; Четыре вектора исключений ведут в одинаковые обработчики, которые
+; печатают «ｼｽﾃﾑｴﾗｰ X ﾃﾞｽ ﾘｾｯﾄ ｼﾃｸﾀﾞｻｲ» и вешают машину на красном фоне.
+; Различается один байт X. В ASCII это B, a, u и 0 — но строчных букв в
+; шрифте нет, поэтому читаются только две из четырёх.
+SystemErrorPrepare             = $000310   ; общая подготовка: LoadFontAndUi и палитра трапом $FF20
+SystemErrorHalt                = $003734   ; палитра, цвет 0 = $000E (красный), фон = PAL0[0],
+;                             ; и вечный цикл nop/nop/bra. Возврата нет
+SystemErrorTextBus             = $000228   ; вектор 2, код «B» — единственный, где буква верная
+SystemErrorTextAddress         = $00026C   ; вектор 3, код $61 — ASCII «a», а рисуется кружок
+SystemErrorTextIllegal         = $0002B0   ; вектор 4 (и line-A), код $75 — ASCII «u», рисуется ｵ
+SystemErrorTextZeroDiv         = $0002F4   ; вектор 5, код «0»
+HexDigits                      = $000372   ; «0123456789abcdef» для DrawBiosMessage
+TextAddressLabel               = $000382   ; «ｱﾄﾞﾚｽ:» — подпись перед восемью шестнадцатеричными
+;                             ; цифрами регистра d0
+TextNoFreeTileSlot             = $057356   ; «ｱｷPCGｶﾞﾐﾂｶﾗﾅｲ» — «свободного PCG не нашлось»;
+;                             ; пятый путь в SystemErrorHalt, из AllocTileSlot
 RunMission                     = $003846   ; прогон одной миссии целиком: LoadMissionState, LoadFontAndUi,
                              ; проверка UnlockFlag на $5548596F (это ASCII «UHYo»; не
                              ; совпало — флаг гасится), запуск партии, разбор MissionOutcome
@@ -1771,7 +1814,7 @@ DrawEffectBanner                = $00B2DC   ; обновить экран, ра�
 DroughtCurrentWithFlash        = $00B47C   ; DroughtAreaCurrent внутри FlashPaletteAroundEffect
 DroughtP2WithFlash             = $00B486   ; то же с DroughtAreaP2; сюда ходит ApplyDroughtHere
 FlashPaletteAroundEffect       = $00B490   ; отбелить экран, применить эффект a6, вернуть цвет:
-                             ; четыре уровня смешения строятся TrapLoop16, потом 4 шага вверх,
+                             ; четыре уровня смешения строятся ShiftPaletteBrightness, потом 4 шага вверх,
                              ; jsr (a6) и BuildTerrainMapTiles, 4 кадра паузы и 4 шага обратно
 UploadPaletteToCram            = $00B4FA   ; 32 длинных слова из (a0) в CRAM с нуля, под запретом прерываний
 RefreshThenDroughtCurrent       = $00B46A   ; RefreshScreenAndSprites, потом DroughtCurrentWithFlash
