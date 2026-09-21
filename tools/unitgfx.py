@@ -146,6 +146,31 @@ def signature(t):
                   for an in ANIMS for f in FACINGS))
 
 
+PALETTE_ROW = 0x015156      # тип минус один -> ряд CRAM 0..3
+
+
+def palette_row(t):
+    u"""Ряд CRAM, которым рисуется тип.
+
+    Выбирает его `MakeUnitNameWord` на `$014BDA`: берёт тип из `+$14`
+    записи анимации, минус один, идёт в эту таблицу и `ror.b #3`
+    укладывает результат в биты 13-14 слова имени спрайта.
+    """
+    return rom[PALETTE_ROW + t - 1]
+
+
+def row_palette(row, stage_rec=0, stage_pal=0):
+    u"""Ряд CRAM -> цвета, по `BuildStagePalettes` `$005384`.
+
+    Ряд 0 всегда `data_99[0]`, ряды 1 и 2 — `data_99` по байтам `+$28`
+    и `+$29` описания миссии (1 у всех 123 миссий и 3 у 119 из 123),
+    ряд 3 — палитра `+$4C` из записи графики этапа.
+    """
+    if row == 3:
+        return gfx.stage_records()[stage_rec][0][stage_pal]
+    return gfx.read_palette(gfx.PAL_ARRAY + 32 * (0, 1, 3)[row])
+
+
 def render_type(t, anims=None, path=None, pal=None, scale=4):
     tbl = frame_table(t)
     n = gfx.table_len(tbl)
@@ -168,11 +193,11 @@ def render_type(t, anims=None, path=None, pal=None, scale=4):
     d = out_path("gfx")
     os.makedirs(d, exist_ok=True)
     path = path or os.path.join(d, "type_%03d.png" % t)
-    gfx.render_frames(frames, path, per_row=8,
-                      pal=pal or gfx.stage_records()[0][0][0],
+    row = palette_row(t)
+    gfx.render_frames(frames, path, per_row=8, pal=pal or row_palette(row),
                       scale=scale, cut=gfx.SPRITE_CUT)
-    print("тип %3d: банк $%06X, кадры %s -> %s"
-          % (t, tbl, keys, os.path.relpath(path, HERE)))
+    print("тип %3d: банк $%06X, ряд палитры %d, кадры %s -> %s"
+          % (t, tbl, row, keys, os.path.relpath(path, HERE)))
     return path
 
 
