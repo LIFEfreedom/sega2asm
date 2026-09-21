@@ -1,0 +1,482 @@
+#!/usr/bin/env python3
+u"""Карты миссий настоящими тайлами игры.
+
+    python tools/maptex.py          # все 123 миссии
+    python tools/maptex.py 1 5      # только глава 1, миссия 5
+    python tools/maptex.py --types  # лист образцов местности
+
+`maps.py` красит клетки условными цветами по номеру типа. Здесь карта
+собирается так же, как её собирает сама игра: байт карты -> тип ->
+плитка -> метатайлы -> тайлы 8x8 -> пиксели палитрой этапа. Клетка выходит
+32x32 точки, вся карта — 1280x1280.
+
+## Цепочка
+
+Набор графики выбирает байт `+$2A` описания миссии: `LoadStageGraphics`
+`$0053DA` берёт запись `$1CC` байт из `StageGfxRecords` `$01318C` (их
+одиннадцать) и кладёт в `$FF02E6`. В записи 14 палитр по 32 байта и четыре
+номера ассетов:
+
+| поле | что |
+|---|---|
+| `+$1C0` | описание метатайлов, 6144 байта |
+| `+$1C2` | 96 тайлов -> VRAM `$0EA0`, то есть номера `$75`…`$D4` |
+| `+$1C4` | 256 тайлов -> VRAM `$1AA0`, номера `$D5`…`$1D4` |
+| `+$1C6` | 32 тайла -> VRAM `$3AA0`, номера `$1D5`…`$1F4` |
+
+Описание метатайлов `$FF10` распаковывает и раскладывает по `data_35`
+`$00541C` на три куска:
+
+| байты | куда | что |
+|---|---|---|
+| 0…255 | `$FFBBBC` | **байт карты -> тип местности** |
+| 256…2303 | `$FF2C00` (`+$269C`) | плитка -> четыре метатайла |
+| 2304…6143 | `$FF3400` (`+$2E9C`) | метатайл -> четыре тайла |
+
+`BuildTerrainMap` `$0203FE` гоняет карту через первую таблицу и кладёт в
+`TerrainMap` пару «счётчик, плитка», где плитка = `data_165` `$020454` по
+типу. `DrawCellTiles` `$015B3C` берёт плитку **минус один**, достаёт из
+второй таблицы четыре слова, каждое по младшим девяти битам идёт в третью,
+и оттуда четыре слова имени. К каждому прибавляется `$6075` — номер первого
+тайла набора плюс палитра 3.
+
+## Чего здесь нет
+
+- **Стыки.** `DrawTerrainEdges` `$0158A0` дорисовывает краевые тайлы по
+  двухбитным кодам соседства, а коды считает `RefreshCellTileStyle`
+  `$0215DA` — с обращением к `Random`. То есть у самой игры стыки от
+  запуска к запуску разные, и воспроизводить их бессмысленно.
+- **Анимация.** `SeedAnimatedTiles` `$0214D2` раздаёт клеткам случайную
+  фазу; здесь всегда нулевая.
+- **Юниты** нарисованы точками цветами миникарты (`MinimapTypeColours`
+  `$00A2DC`), а не спрайтами.
+
+## Лист образцов
+
+`--types` рисует таблицу 32 x 9: строка — номер типа местности сверху
+вниз от 0 до 31, столбец — один из девяти различных наборов графики.
+Имён у типов в ROM нет, и это единственный способ увидеть, что за ними
+стоит.
+
+## Плитка 0 читает мимо таблицы
+
+У типа 0 (голая земля) `data_165` даёт плитку `$00`, а `DrawCellTiles`
+вычитает единицу — и уходит на восемь байт ПЕРЕД таблицей, в `$FF2BF8`.
+Своей записи у голой земли нет. Судя по карте ОЗУ, эти восемь байт при
+разборе не используются, а `GameState` перед партией обнуляется, так что
+на деле читаются четыре нуля — то есть метатайл 0 четыре раза. Здесь
+сделано так же. Клеток этого типа 13% (25961 из 196800), и выглядят они
+ровной землёй, так что догадка похожа на правду; но это догадка, а не
+прочитанное значение.
+"""
+import collections
+import io
+import os
+import struct
+import sys
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+from unpack import unpack                                    # noqa: E402
+from gfx import png                                          # noqa: E402
+from paths import OUT as out_path, rom_bytes                 # noqa: E402
+
+ROM = rom_bytes()
+U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
+U32 = lambda o: struct.unpack_from(">I", ROM, o)[0]
+
+STAGES = 0x164400          # StageTable, индекс = номер этапа минус один
+STAGE_GFX = 0x01318C       # StageGfxRecords
+STAGE_REC = 0x01CC
+ASSETS = 0x061800          # AssetTable, индекс уже в байтах
+CHAPTERS = 0x060400        # ChapterTable
+MREC = 0x5C                # описание миссии
+TYPE_TO_TILE = 0x020454    # data_165: тип -> плитка
+PAL_ARRAY = 0x00F784       # data_99
+MINIMAP_COLOURS = 0x00A2DC
+
+W = H = 40
+CELL = 32                  # точек на клетку: 2x2 метатайла по 2x2 тайла
+
+# Куда ложатся три набора тайлов: (первый номер, поле записи, байт).
+TILE_BANKS = ((0x075, 0x1C2, 0x0C00),
+              (0x0D5, 0x1C4, 0x2000),
+              (0x1D5, 0x1C6, 0x0400))
+
+
+def chapters():
+    u"""[(номер главы, тело)] — распакованные главы."""
+    out = []
+    for c in range(16):
+        p = U32(CHAPTERS + c * 4)
+        if not (0 < p < 0x280000):
+            continue
+        try:
+            out.append((c, bytes(unpack(ROM, p)[2])))
+        except Exception:
+            continue
+    return out
+
+
+def missions():
+    u"""[(глава, номер миссии, запись)] по всем главам."""
+    out = []
+    for c, body in chapters():
+        for i in range(len(body) // MREC):
+            r = body[i * MREC:(i + 1) * MREC]
+            if not r[3]:
+                continue
+            out.append((c, i + 1, r))
+    return out
+
+
+def gfx_records():
+    _m, size, d, _e = unpack(ROM, STAGE_GFX)
+    return [bytes(d[k * STAGE_REC:(k + 1) * STAGE_REC])
+            for k in range(size // STAGE_REC)]
+
+
+def asset(w):
+    u"""w — сырое слово записи, уже байтовое смещение в AssetTable."""
+    return bytes(unpack(ROM, U32(ASSETS + w))[2])
+
+
+def cram(v):
+    return (((v >> 1) & 7) * 36, ((v >> 5) & 7) * 36, ((v >> 9) & 7) * 36)
+
+
+def rec_palette(rec, n):
+    o = n * 32
+    return [cram((rec[o + 2 * j] << 8) | rec[o + 2 * j + 1]) for j in range(16)]
+
+
+def array_palette(n):
+    a = PAL_ARRAY + 32 * n
+    return [cram(U16(a + 2 * j)) for j in range(16)]
+
+
+def tileset(rec):
+    u"""{номер тайла в VRAM: 32 байта}."""
+    w = lambda o: (rec[o] << 8) | rec[o + 1]
+    out = {}
+    for base, off, nbytes in TILE_BANKS:
+        d = asset(w(off))
+        for t in range(nbytes // 32):
+            out[base + t] = d[t * 32:(t + 1) * 32]
+    return out
+
+
+def meta_tables(rec):
+    u"""(байт карты -> тип, плитка -> метатайлы, метатайл -> тайлы)."""
+    w = lambda o: (rec[o] << 8) | rec[o + 1]
+    d = asset(w(0x1C0))
+    d += b"\0" * max(0, 6144 - len(d))
+    cells = [struct.unpack_from(">4H", d, 256 + 8 * i) for i in range(256)]
+    metas = [struct.unpack_from(">4H", d, 2304 + 8 * i) for i in range(480)]
+    return d[:256], cells, metas
+
+
+EDGE_ADD = 0x00558A        # data_36: маска соседей -> добавка к байту
+
+
+def autotile(cells):
+    u"""Достройка берегов, `BuildMapEdgeCodes` `$00546E`.
+
+    Работает, только когда взведён бит 7 байта `+$2F` описания миссии
+    (93 миссии из 123), и только для байтов `$19` и `$49`: у них по восьми
+    соседям собирается маска «сосед НЕ такой же», и `data_36` по ней даёт
+    добавку к байту. То есть в данных лежит сплошная заливка, а кромку
+    игра досчитывает при загрузке.
+    """
+    src = bytes(cells)
+    out = bytearray(src)
+    add = ROM[EDGE_ADD:EDGE_ADD + 256]
+    for y in range(H):
+        for x in range(W):
+            i = y * W + x
+            v = src[i]
+            if v not in (0x19, 0x49):
+                continue
+            m = 0
+            if y:
+                if src[i - 40] != v:
+                    m |= 1 << 0
+                if x and src[i - 41] != v:
+                    m |= 1 << 7
+                if x != 39 and src[i - 39] != v:
+                    m |= 1 << 1
+            if y != 39:
+                if src[i + 40] != v:
+                    m |= 1 << 4
+                if x and src[i + 39] != v:
+                    m |= 1 << 5
+                if x != 39 and src[i + 41] != v:
+                    m |= 1 << 3
+            if x and src[i - 1] != v:
+                m |= 1 << 6
+            if x != 39 and src[i + 1] != v:
+                m |= 1 << 2
+            out[i] = (v + add[m]) & 0xFF
+    return bytes(out)
+
+
+def placement(a):
+    u"""[(x, y, тип)] расстановки; разбор тот же, что в maps.py."""
+    out = []
+    if not (0x100000 <= a < len(ROM) - 4):
+        return out
+    for _ in range(400):
+        v = U16(a)
+        if v & 0x8000:
+            break
+        out.append(((v >> 9) & 0x3F, v & 0x3F, ROM[a + 2]))
+        a += 4
+    return out
+
+
+def draw(cells, rec, mrec, units, path):
+    typeof, celltab, metatab = meta_tables(rec)
+    tiles = tileset(rec)
+    t2t = ROM[TYPE_TO_TILE:TYPE_TO_TILE + 32]
+    pals = [array_palette(0), array_palette(mrec[0x28]),
+            array_palette(mrec[0x29]), rec_palette(rec, mrec[0x4C])]
+    back = pals[3][15]
+    px = [[back] * (W * CELL) for _ in range(H * CELL)]
+    skipped = 0
+
+    cache = {}
+
+    def block(name):
+        u"""8x8 готовых цветов по слову имени; слов на карту немного."""
+        b = cache.get(name)
+        if b is None:
+            g = tiles.get(name & 0x7FF)
+            p = pals[(name >> 13) & 3]
+            hf, vf = (name >> 11) & 1, (name >> 12) & 1
+            if g is None:
+                b = None
+            else:
+                b = []
+                for y in range(8):
+                    sy = 7 - y if vf else y
+                    line = []
+                    for x in range(8):
+                        sx = 7 - x if hf else x
+                        v = g[sy * 4 + (sx >> 1)]
+                        line.append(p[(v >> 4) if sx % 2 == 0 else (v & 15)])
+                    b.append(line)
+            cache[name] = b
+        return b
+
+    for cy in range(H):
+        for cx in range(W):
+            t = typeof[cells[cy * W + cx]]
+            if t & 0x80:
+                skipped += 1
+                continue
+            tile = t2t[t & 0x1F]
+            if tile == 0:              # см. «Плитка 0» в шапке
+                skipped += 1
+                entry = (0, 0, 0, 0)
+            else:
+                entry = celltab[tile - 1]
+            for q in range(4):
+                meta = metatab[entry[q] & 0x1FF]
+                ox0 = cx * CELL + (q & 1) * 16
+                oy0 = cy * CELL + (q >> 1) * 16
+                for s in range(4):
+                    b = block((meta[s] + 0x6075) & 0xFFFF)
+                    if b is None:
+                        continue
+                    bx = ox0 + (s & 1) * 8
+                    by = oy0 + (s >> 1) * 8
+                    for y in range(8):
+                        px[by + y][bx:bx + 8] = b[y]
+
+    for ux, uy, ut in units:
+        if not (0 <= ux < W and 0 <= uy < H):
+            continue
+        c = ROM[MINIMAP_COLOURS + ut - 1] if 1 <= ut <= 51 else 0xFF
+        col = pals[0][c >> 4]
+        cx0, cy0 = ux * CELL + CELL // 2, uy * CELL + CELL // 2
+        for dy in range(-5, 6):
+            for dx in range(-5, 6):
+                if abs(dx) + abs(dy) <= 5:
+                    px[cy0 + dy][cx0 + dx] = col
+
+    png(path, W * CELL, H * CELL, px)
+    return skipped
+
+
+def record_palette_no(recs):
+    u"""{запись графики: номер палитры +$4C первой миссии, что её берёт}."""
+    out = {}
+    for _c, _m, r in missions():
+        out.setdefault(r[0x2A], r[0x4C])
+    return out
+
+
+def type_sheet(recs, path, scale=2):
+    u"""Лист образцов: строка — тип местности, столбец — набор графики.
+
+    Каждая клетка нарисована так же, как на карте, 32x32 точки. Это
+    единственный способ увидеть, что за местность скрыта за номером: имён
+    у типов в ROM нет.
+    """
+    uniq = []
+    for k, rec in enumerate(recs):
+        key = (rec[0x1C0:0x1C8],)
+        if key not in [u[0] for u in uniq]:
+            uniq.append((key, k))
+    cols = [k for _key, k in uniq]
+    t2t = ROM[TYPE_TO_TILE:TYPE_TO_TILE + 32]
+    palno = record_palette_no(recs)
+    gap = 4
+    step = CELL * scale + gap
+    wpx = len(cols) * step + gap
+    hpx = 32 * step + gap
+    img = [[(20, 20, 24)] * wpx for _ in range(hpx)]
+
+    for ci, k in enumerate(cols):
+        rec = recs[k]
+        _typeof, celltab, metatab = meta_tables(rec)
+        tiles = tileset(rec)
+        pals = [array_palette(0), array_palette(1),
+                array_palette(3), rec_palette(rec, palno.get(k, 0))]
+        for t in range(32):
+            tile = t2t[t]
+            entry = (0, 0, 0, 0) if tile == 0 else celltab[tile - 1]
+            ox = gap + ci * step
+            oy = gap + t * step
+            for q in range(4):
+                meta = metatab[entry[q] & 0x1FF]
+                for s in range(4):
+                    name = (meta[s] + 0x6075) & 0xFFFF
+                    g = tiles.get(name & 0x7FF)
+                    if g is None:
+                        continue
+                    p = pals[(name >> 13) & 3]
+                    hf, vf = (name >> 11) & 1, (name >> 12) & 1
+                    bx = ox + ((q & 1) * 16 + (s & 1) * 8) * scale
+                    by = oy + ((q >> 1) * 16 + (s >> 1) * 8) * scale
+                    for y in range(8):
+                        sy = 7 - y if vf else y
+                        for x in range(8):
+                            sx = 7 - x if hf else x
+                            b = g[sy * 4 + (sx >> 1)]
+                            c = p[(b >> 4) if sx % 2 == 0 else (b & 15)]
+                            for ky in range(scale):
+                                row = img[by + y * scale + ky]
+                                for kx in range(scale):
+                                    row[bx + x * scale + kx] = c
+    png(path, wpx, hpx, img)
+    return cols
+
+
+def main():
+    args = sys.argv[1:]
+    want = None
+    if args and args[0] == "--types":
+        recs = gfx_records()
+        d = out_path("maptex")
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "_types.png")
+        cols = type_sheet(recs, p)
+        print("лист образцов: 32 типа x %d набора -> %s"
+              % (len(cols), os.path.relpath(p, HERE)))
+        print("столбцы — записи графики: %s"
+              % ", ".join(str(c) for c in cols))
+        return 0
+    if len(args) >= 2:
+        want = (int(args[0]), int(args[1]))
+
+    recs = gfx_records()
+    outdir = out_path("maptex")
+    os.makedirs(outdir, exist_ok=True)
+
+    by_rec = collections.defaultdict(list)
+    drawn = skipped_total = 0
+    for c, m, r in missions():
+        if want and (c, m) != want:
+            continue
+        st = r[3]
+        o = STAGES + (st - 1) * 8
+        mp, pl = U32(o), U32(o + 4)
+        if not (0x164C00 <= mp < 0x200000):
+            continue
+        try:
+            _me, size, cells, _e = unpack(ROM, mp)
+        except Exception:
+            continue
+        if size != W * H:
+            continue
+        if r[0x2F] & 0x80:
+            cells = autotile(cells)
+        rec_no = r[0x2A]
+        if rec_no >= len(recs):
+            continue
+        by_rec[rec_no].append("гл.%d м.%d" % (c, m))
+        name = "ch%d_m%02d_stage%03d.png" % (c, m, st)
+        skipped_total += draw(cells, recs[rec_no], r,
+                              placement(pl), os.path.join(outdir, name))
+        drawn += 1
+
+    print("нарисовано карт: %d -> %s"
+          % (drawn, os.path.relpath(outdir, HERE)))
+    if want:
+        return 0
+    print("клеток типа 0 (плитки нет, взят метатайл 0): %d"
+          % skipped_total)
+
+    doc = os.path.join(HERE, "docs", "game-tilesets.md")
+    f = io.open(doc, "w", encoding="utf-8", newline="\n")
+    p = f.write
+    p(u"# Наборы тайлов этапов\n\n")
+    p(u"Собрано `tools/maptex.py`. Картинки — "
+      u"в `out/<имя>/maptex/`, по PNG 1280x1280 на миссию.\n\n")
+    p(u"СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
+      u"Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
+    p(u"Цепочка «байт карты -> пиксели» разобрана в шапке "
+      u"`tools/maptex.py`; там же перечислено, чего в этих картинках "
+      u"нет (стыки, анимация, спрайты юнитов).\n\n")
+    p(u"## Одиннадцать записей `StageGfxRecords` `$01318C`\n\n")
+    p(u"| запись | метатайлы | наборы тайлов | анимация `+$1CA` | миссии |\n")
+    p(u"|---|---|---|---|---|\n")
+    for k, rec in enumerate(recs):
+        w = lambda o: (rec[o] << 8) | rec[o + 1]
+        ms = by_rec.get(k, [])
+        p(u"| %d | `$%06X` | %s | %d | %d: %s |\n"
+          % (k, U32(ASSETS + w(0x1C0)),
+             ", ".join("`$%06X`" % U32(ASSETS + w(0x1C2 + 2 * i))
+                       for i in range(3)),
+             rec[0x1CB], len(ms),
+             ", ".join(ms[:6]) + (" …" if len(ms) > 6 else "") or "—"))
+    p(u"\n## Байт карты -> тип местности\n\n")
+    p(u"Первые 256 байт описания метатайлов. Это **не** «младшие пять бит "
+      u"байта», как считалось раньше: таблица своя у каждого набора, хотя "
+      u"по делу они почти совпадают.\n\n")
+    tabs = collections.OrderedDict()
+    for k, rec in enumerate(recs):
+        tabs.setdefault(meta_tables(rec)[0], []).append(k)
+    p(u"Различных таблиц: **%d** на одиннадцать записей.\n\n" % len(tabs))
+    first = list(tabs)[0]
+    p(u"| байт | тип | байт | тип | байт | тип | байт | тип |\n")
+    p(u"|---|---|---|---|---|---|---|---|\n")
+    shown = [b for b in range(64) if first[b] != 0xFF]
+    for i in range(0, len(shown), 4):
+        row = shown[i:i + 4]
+        p(u"| " + " | ".join("%d | %d" % (b, first[b]) for b in row)
+          + " |" * (4 - len(row)) * 2 + u" |\n")
+    f.close()
+    print("сводка: %s" % os.path.relpath(doc, HERE))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

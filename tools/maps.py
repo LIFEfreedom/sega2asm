@@ -16,9 +16,16 @@
 docs/game-stages.md). Раньше здесь было наоборот, и точки юнитов ложились
 на PNG зеркально относительно диагонали.
 
+Байт клетки — **не тип местности**. Тип даёт таблица перевода на 256
+байт, которую `LoadStageGraphics` кладёт в `$FFBBBC`; она приходит вместе
+с набором графики этапа и своя у каждого из девяти наборов, хотя по делу
+они почти совпадают. `BuildTerrainMap` `$0203FE` гоняет карту через неё.
+Разбор цепочки — в `tools/maptex.py`; там же карты рисуются настоящими
+тайлами игры, а не условными цветами.
+
 Пишет PNG по карте на этап в `out/<имя>/maps/` и сводку в `docs/game-maps.md`.
-Цвета условные: имён у типов местности нет, известны только растения
-(`$01`, `$05`, `$15`, `$16`) и четвёрка смертельных 11, 12, 13, 20
+Цвет клетки — средний цвет её настоящей текстуры, посчитанный по набору
+графики 0; имён у типов местности в ROM всё равно нет
 ([game-terrain.md](game-terrain.md)).
 """
 import collections
@@ -53,22 +60,60 @@ CELL = 8                      # пикселей на клетку
 LETHAL = (11, 12, 13, 20)
 PLANTS = (1, 5, 21, 22)
 
-# Палитра условная: под номер типа, а не под смысл. Смертельные красным,
-# растения зелёным, остальное — ровная серо-синяя шкала, чтобы рельеф
-# читался глазом.
+# Цвет типа — СРЕДНИЙ цвет его клетки, посчитанный по настоящим тайлам
+# игры (набор графики 0). Раньше здесь была выдуманная шкала; после того
+# как `tools/maptex.py` научился собирать клетку так же, как её собирает
+# игра, придумывать цвета стало незачем.
+TYPE_COLOUR = None
+
+
+def build_type_colours():
+    import maptex
+    rec = maptex.gfx_records()[0]
+    _typeof, celltab, metatab = maptex.meta_tables(rec)
+    tiles = maptex.tileset(rec)
+    pals = [maptex.array_palette(0), maptex.array_palette(1),
+            maptex.array_palette(3), maptex.rec_palette(rec, 0)]
+    t2t = ROM[0x020454:0x020474]     # data_165: тип -> плитка
+    out = {0xFF: (24, 24, 28)}
+    for t in range(32):
+        tile = t2t[t]
+        entry = (0, 0, 0, 0) if tile == 0 else celltab[tile - 1]
+        acc = [0, 0, 0]
+        n = 0
+        for q in range(4):
+            for v in metatab[entry[q] & 0x1FF]:
+                name = (v + 0x6075) & 0xFFFF
+                g = tiles.get(name & 0x7FF)
+                if g is None:
+                    continue
+                pal = pals[(name >> 13) & 3]
+                for b in g:
+                    for c in (pal[b >> 4], pal[b & 15]):
+                        acc[0] += c[0]
+                        acc[1] += c[1]
+                        acc[2] += c[2]
+                        n += 1
+        out[t] = tuple(v // n for v in acc) if n else (24, 24, 28)
+    return out
+
+
 def colour(t):
-    if t in LETHAL:
-        return (170, 30, 30)
-    if t in PLANTS:
-        return (60, 150, 60)
-    if t <= 7:                       # открытое, чем выше — тем гуще трава
-        g = 90 + t * 12
-        return (70, g, 70)
-    if t in (8, 9):
-        return (60, 90, 170)
-    if t <= 14:
-        return (150, 140, 110)
-    return (110, 110, 120)
+    return TYPE_COLOUR[t]
+
+
+def terrain_types():
+    """Байт карты -> тип местности, из набора графики 0."""
+    import maptex
+    return maptex.meta_tables(maptex.gfx_records()[0])[0]
+
+
+TYPE_OF = None
+
+
+def cell_type(b):
+    """$FF означает «типа нет»; такие клетки игра не рисует."""
+    return TYPE_OF[b]
 
 
 def placement(a):
@@ -94,7 +139,7 @@ def render(path, cells, units):
     for y in range(H):
         line = []
         for x in range(W):
-            line.extend([colour(cells[y * W + x] & 0x1F)] * CELL)
+            line.extend([colour(cell_type(cells[y * W + x]))] * CELL)
         for _ in range(CELL):
             rows.append(list(line))
     # юниты — светлая точка 4x4 в центре клетки
@@ -127,7 +172,7 @@ def sheet(path, plates):
         oy = SHEET_GAP + (i // cols) * step
         for y in range(H):
             for x in range(W):
-                c = colour(cells[y * W + x] & 0x1F)
+                c = colour(cell_type(cells[y * W + x]))
                 for dy in range(SHEET_SCALE):
                     row = img[oy + y * SHEET_SCALE + dy]
                     for dx in range(SHEET_SCALE):
@@ -149,6 +194,10 @@ def main():
     # сценариев и ИИ. Раньше здесь стоял stage_to_missions(), и каждая
     # карта подписывалась соседней миссией.
     miss = stagescript.maptable_to_missions()
+
+    global TYPE_OF, TYPE_COLOUR
+    TYPE_OF = terrain_types()
+    TYPE_COLOUR = build_type_colours()
 
     outdir = out_path("maps")
     os.makedirs(outdir, exist_ok=True)
@@ -174,10 +223,10 @@ def main():
         name = "stage_%03d" % st
         render(os.path.join(outdir, name + ".png"), cells, units)
         drawn += 1
-        hist.update(c & 0x1F for c in cells)
-        flags.update(c >> 5 for c in cells)
+        hist.update(cell_type(c) for c in cells)
         rows.append((st, m, pl, len(units),
-                     sorted({c & 0x1F for c in cells}), name))
+                     sorted({cell_type(c) for c in cells
+                             if cell_type(c) != 0xFF}), name))
 
     sheet(os.path.join(outdir, "_all.png"), plates)
 
@@ -199,34 +248,38 @@ def main():
     p("- юнитов в расстановках: %d\n\n" % sum(r[3] for r in rows))
 
     p("## Из чего сложены карты\n\n")
-    p("Байт клетки держит **тип в младших пяти битах**, старшие три — флаги\n"
-      "([game-map.md](game-map.md)). Гистограмма по типам, всего %d клеток:\n\n"
-      % sum(hist.values()))
+    p("ПОПРАВКА. Раньше здесь стояло «тип в младших пяти битах байта, старшие\n"
+      "три — флаги». Это неверно: байт целиком идёт в таблицу перевода\n"
+      "`$FFBBBC`, которая приходит с набором графики этапа, и уже она даёт\n"
+      "тип. Числа ниже пересчитаны по ней; прежние — и доля типа 25, и доля\n"
+      "типа 31 — были посчитаны не про то.\n\n")
+    p("Гистограмма по типам, всего %d клеток:\n\n" % sum(hist.values()))
     p("| тип | клеток | доля | что известно |\n|---|---|---|---|\n")
     tot = sum(hist.values())
     for t, n in sorted(hist.items()):
-        note = ("**смертельный**" if t in LETHAL else
+        note = ("типа нет: игра такую клетку не рисует" if t == 0xFF else
+                "**смертельный**" if t in LETHAL else
                 "растение" if t in PLANTS else "")
-        p("| %d | %d | %.1f%% | %s |\n" % (t, n, 100.0 * n / tot, note))
-    p("\nСтаршие три бита:\n\n| флаги | клеток | доля |\n|---|---|---|\n")
-    for v, n in sorted(flags.items()):
-        p("| %d | %d | %.1f%% |\n" % (v, n, 100.0 * n / tot))
+        p("| %s | %d | %.2f%% | %s |\n"
+          % ("$FF" if t == 0xFF else t, n, 100.0 * n / tot, note))
     p("\n")
 
     p("## Что видно\n\n")
-    top = hist.most_common(1)[0]
-    p("Треть всех клеток — **тип %d** (%.0f%%), и по краям карт его ещё\n"
-      "больше. Он непроходим для всех видов, гасит обзор по маске `$7F800000`\n"
-      "и **горит**: тип 25 входит в маску поджига `$07E000FE`\n"
-      "([game-map.md](game-map.md)). Раньше я записал его как фон за пределами\n"
-      "поля — горящий фон это странно, так что вернее читать его как густую\n"
-      "растительность. Имён у типов местности всё равно нет\n"
-      "([game-terrain.md](game-terrain.md)).\n\n"
-      % (top[0], 100.0 * top[1] / tot))
+    big = [(t, n) for t, n in hist.most_common(4) if t != 0xFF][:2]
+    p("Вся поверхность игры держится на двух типах: **%d** (%.0f%%) и **%d**\n"
+      "(%.0f%%). Первый занимает середину карт, второй — края и всё\n"
+      "непроходимое. Остальные тридцать делят оставшуюся треть.\n\n"
+      % (big[0][0], 100.0 * big[0][1] / tot,
+         big[1][0], 100.0 * big[1][1] / tot))
+    rare = sorted((n, t) for t, n in hist.items() if t != 0xFF)[:4]
+    p("На другом конце — типы, которых в исходных картах почти нет: %s.\n"
+      "Это важно помнить, читая разборы кода: правило, которое срабатывает\n"
+      "на типе 31, в реальных данных не срабатывает никогда.\n\n"
+      % ", ".join("**%d** (%d клет.)" % (t, n) for n, t in rare))
     dead = {}
     for st, m, _pl, _n, _t, _nm in rows:
         dead.setdefault(m, sum(1 for c in unpack(ROM, m)[2]
-                               if (c & 0x1F) in LETHAL))
+                               if cell_type(c) in LETHAL))
     p("Карты с самой злой местностью — смертельных клеток из 1600 "
       "(по карте, не по этапу):\n\n")
     for m, n in sorted(dead.items(), key=lambda kv: -kv[1])[:6]:
