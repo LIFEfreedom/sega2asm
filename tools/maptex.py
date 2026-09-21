@@ -5,7 +5,7 @@ u"""Карты миссий настоящими тайлами игры.
     make maptex MTARGS="1 5"        # только глава 1, миссия 5
     make maptex MTARGS=--types      # лист образцов местности
     make maptex MTARGS=--export     # местность в раскладке ремейка
-    make maptex MTARGS="--anim 1 1"           # GIF: живая вода
+    make maptex MTARGS="--anim 1 1"           # GIF: живые вода и огонь
     make maptex MTARGS="--anim 1 1 14 7 8 8"  # он же, окно задано руками
 
 `maps.py` рисует карту клетками по восемь точек, одним усреднённым цветом
@@ -62,9 +62,10 @@ u"""Карты миссий настоящими тайлами игры.
   `$0215DA` — с обращением к `Random`. То есть у самой игры стыки от
   запуска к запуску разные, и воспроизводить их бессмысленно.
 - **Движение анимации** — на больших PNG. Там берётся ПЕРВЫЙ кадр каждого
-  потока: одна картинка, одно мгновение. Чтобы вода пошла, есть `--anim`
-  (см. ниже). `SeedAnimatedTiles` `$0214D2` раздаёт клеткам ещё и
-  случайную фазу; здесь всегда нулевая, и в `--anim` тоже.
+  потока и первое состояние огня: одна картинка, одно мгновение. Чтобы всё
+  это пошло, есть `--anim` (см. ниже). `SeedAnimatedTiles` `$0214D2`
+  раздаёт клеткам ещё и случайную фазу; здесь всегда нулевая, и в `--anim`
+  тоже.
 - **Кадр юнита взят первый.** Спрайты рисуются, но анимация стоит на
   первом кадре своей последовательности.
 
@@ -135,17 +136,23 @@ u"""Карты миссий настоящими тайлами игры.
 1872 и 156 тактов. У набора 8 длинный период набегает из взаимно простых
 26, 18, 12, 16 и 4, а вода в нём крутится за 26 тактов.
 
-## Живая вода (`--anim`)
+## Живые вода и огонь (`--anim`)
 
 `--anim` пишет GIF с окном карты, где потоки идут по-настоящему:
 
     make maptex MTARGS="--anim 1 1"           # само выберет место
     make maptex MTARGS="--anim 1 1 14 7 8 8"  # x, y, ширина, высота в клетках
 
-Место без подсказки выбирается по воде: берётся окно, где больше всего
-РАЗНЫХ водяных байтов. Сплошная гладь — это один байт 25 и один поток, а
-кромка берега даёт десяток байтов и до пяти потоков сразу; смотреть
-интересно её.
+Место без подсказки выбирается сначала по **огню**: горящих клеток на все
+209 этапов сотня с небольшим, и если они в карте есть, смотреть надо их.
+Иначе по **воде**, и по РАЗНЫМ водяным байтам: сплошная гладь — это один
+байт 25 и один поток, а кромка берега даёт десяток байтов и до пяти
+потоков сразу; смотреть интересно её.
+
+Огонь идёт мимо потоков, своим счётчиком, поэтому его период (4 такта)
+подмешивается к периодам потоков через НОК, а такты смены — через
+объединение. Если в окне один огонь и ничего больше, GIF выходит из двух
+кадров: два состояния по два кадра экрана, ровно как в игре.
 
 Кадр выдаётся на каждом такте, где хоть один поток меняет картинку, и
 держится до следующей смены. Задержка GIF идёт сотыми долями секунды, а
@@ -245,13 +252,42 @@ DrawCellTiles:                 ; $015B3C
 **палитрой ряда 0** — системной, где есть `$B40000`, `$FC2400` и
 `$FCFC00`. В ROM это последние 64 байта блока `SharedTiles` `$010A6C`.
 
-Анимирует их `TickFireTiles` `$00B7EE`: DMA копирует `$6E40` в `$6E60`
-(так что второй тайл отстаёт на кадр), потом выгружает 32 байта из
-`FireTileFrames`, щёлкая смещением между 0 и `$20`. Кадра всего два.
-
 Поэтому `objects/fire.png` — это два тайла 8x8, а не клетка 32x32, и
 рядом кладётся `fire_cell.png`: та же клетка, собранная как её собирает
 игра, для сверки.
+
+### Анимация огня — это перестановка двух плиток
+
+`TickFireTilesGate` `$00B7E4` убавляет счётчик и выходит, пока тот не
+ноль; `TickFireTiles` `$00B7EE` перезаряжает его **двойкой**, то есть
+работает раз в два кадра, 30 раз в секунду. Работа такая:
+
+```asm
+	move.b	#$02,$4AF7(a5)     ; FireTileTimer
+	eori.b	#$20,$4AF6(a5)     ; FireTileOffset: 0 <-> $20
+	dc.w	$FF02              ; VRAM->VRAM, $20 БАЙТ: $6E40 -> $6E60
+	dc.w	$FF04              ; $10 СЛОВ из FireTileFrames+смещение -> $6E40
+```
+
+Единицы у трапов разные, и это легко прочесть неправильно: `$FF02` —
+копия внутри VRAM, длина в байтах (`$20` = один тайл), а `$FF04` —
+выгрузка из ОЗУ, длина в словах (`$10` = тот же один тайл).
+
+Кадра в `FireTileFrames` всего два, назовём их A и B. При загрузке
+`$004E20` кладёт в VRAM оба сразу: `$0372` = A, `$0373` = B. Дальше на
+каждом шаге `$0373` получает то, что было в `$0372`, а `$0372` — кадр по
+новому смещению. Разворачивается это в простое качание:
+
+| шаг | `$0372` | `$0373` |
+|---|---|---|
+| 0 | A | B |
+| 1 | B | A |
+| 2 | A | B |
+
+То есть **плитки просто меняются местами раз в два кадра**, и период всей
+анимации — четыре такта. А `DrawFireCell`, раскладывая клетку, чередует
+`$0373` и `$0372` по занятым местам, так что соседние язычки качаются в
+противофазе.
 
 Карты рисуются с этой веткой: горящая клетка выходит такой же, как в
 игре, включая то, что узор у каждой свой. Хеш взят оттуда же — `a0` при
@@ -508,12 +544,15 @@ def streams_period(streams):
     return p
 
 
-def streams_ticks(streams):
+def streams_ticks(streams, total=None):
     u"""Такты внутри периода, на которых хоть один поток меняет кадр.
 
     Поток из одного кадра не меняется никогда — он ничего не отмечает.
+    `total` задаёт период больше собственного: тогда отметки повторяются
+    по кругу, чтобы их можно было слить с чужими.
     """
-    total = streams_period(streams)
+    if total is None:
+        total = streams_period(streams)
     marks = {0}
     for s in streams:
         if len(s) < 2:
@@ -791,7 +830,7 @@ def render(cells, rec, units, tick=0, rect=None, nosprite=None, tiles=None):
                 continue
             if b == FIRE_BYTE:         # огонь идёт мимо таблицы метатайлов
                 plain(celltab[b - 1], ox, oy)   # под пламенем голая земля
-                f = fire_cell(cy * W + cx, flames)
+                f = fire_cell(cy * W + cx, flames, tick // FIRE_STEP)
                 for y in range(CELL):
                     o = (oy + y) * wpx + ox
                     src = f[y]
@@ -832,10 +871,14 @@ TICK_HZ = 60.0             # кадр экрана — такт анимации
 
 
 def cell_tiles(cells, rec, idx):
-    u"""Номера тайлов VRAM, из которых сложена клетка."""
+    u"""Номера тайлов VRAM, из которых сложена клетка.
+
+    У горящей клетки это земля под пламенем: сами плитки пламени лежат не
+    в наборе этапа и через таблицу метатайлов не проходят.
+    """
     _typeof, celltab, metatab = meta_tables(rec)
     b = cells[idx]
-    if not b or b == FIRE_BYTE:
+    if not b:
         return set()
     return {(mt + 0x6075) & 0x7FF
             for q in range(4)
@@ -863,20 +906,24 @@ WATER_TYPE = 19            # см. «Экспорт местности» в ша
 
 
 def best_window(cells, typeof, hot, cw, ch):
-    u"""Самое живое окно cw x ch клеток.
+    u"""Самое живое окно cw x ch клеток: (x, y, ширина, высота, живых, огня).
 
-    Сначала вода: сколько в окне РАЗНЫХ водяных байтов. Сплошная гладь —
-    это один байт 25 и один поток, а кромка берега даёт десяток разных
-    байтов и до пяти потоков сразу, и смотреть интересно именно её. Если
-    воды на карте нет, тем же порядком берётся любая анимация.
+    Сначала огонь: горящих клеток на все 209 этапов сотня с небольшим, и
+    если они в карте есть, смотреть надо их. Потом вода, и по РАЗНЫМ
+    водяным байтам: сплошная гладь — это один байт 25 и один поток, а
+    кромка берега даёт десяток байтов и до пяти потоков сразу. Если нет ни
+    того ни другого, тем же порядком берётся любая анимация.
     """
     best, at = None, (0, 0)
     for y in range(H - ch + 1):
         for x in range(W - cw + 1):
-            wk, wn, ak, an = set(), 0, set(), 0
+            wk, wn, ak, an, fn = set(), 0, set(), 0, 0
             for k in range(ch):
                 for j in range(cw):
                     i = (y + k) * W + x + j
+                    if cells[i] == FIRE_BYTE:
+                        fn += 1
+                        continue
                     if i not in hot:
                         continue
                     ak.add(cells[i])
@@ -884,10 +931,10 @@ def best_window(cells, typeof, hot, cw, ch):
                     if typeof[cells[i]] == WATER_TYPE:
                         wk.add(cells[i])
                         wn += 1
-            key = (len(wk), wn, len(ak), an)
+            key = (fn, len(wk), wn, len(ak), an)
             if best is None or key > best:
                 best, at = key, (x, y)
-    return at[0], at[1], cw, ch, best[3]
+    return at[0], at[1], cw, ch, best[4], best[0]
 
 
 def anim_map(c, m, r, recs, outdir, rect=None):
@@ -915,26 +962,35 @@ def anim_map(c, m, r, recs, outdir, rect=None):
     hot = animated_cells(cells, rec)
     if rect is None:
         typeof = meta_tables(rec)[0]
-        x0, y0, cw, ch, n = best_window(cells, typeof, hot,
-                                        ANIM_WIN, ANIM_WIN)
+        x0, y0, cw, ch, n, fires = best_window(cells, typeof, hot,
+                                               ANIM_WIN, ANIM_WIN)
         rect = (x0, y0, cw, ch)
     else:
-        n = sum(1 for cy in range(rect[1], rect[1] + rect[3])
-                for cx in range(rect[0], rect[0] + rect[2])
-                if cy * W + cx in hot)
+        n = fires = 0
+        for cy in range(rect[1], rect[1] + rect[3]):
+            for cx in range(rect[0], rect[0] + rect[2]):
+                i = cy * W + cx
+                fires += cells[i] == FIRE_BYTE
+                n += i in hot
 
     seen = set()
     for cy in range(rect[1], rect[1] + rect[3]):
         for cx in range(rect[0], rect[0] + rect[2]):
             seen |= cell_tiles(cells, rec, cy * W + cx)
     live = [s for s in anim_streams(setno) if stream_tiles(s) & seen]
-    if not live:
-        print(u"гл.%d м.%d: в окне (%d,%d) %dx%d нет анимированных тайлов"
+    if not live and not fires:
+        print(u"гл.%d м.%d: в окне (%d,%d) %dx%d ничего не шевелится"
               % (c, m, rect[0], rect[1], rect[2], rect[3]))
         return None
 
+    # огонь живёт своим счётчиком, мимо потоков — периоды складываем
     period = streams_period(live)
-    ticks = streams_ticks(live)
+    if fires:
+        period = _lcm(period, FIRE_PERIOD)
+    ticks = set(streams_ticks(live, period))
+    if fires:
+        ticks |= set(range(0, period, FIRE_STEP))
+    ticks = sorted(ticks)
     frames, delays, acc = [], [], 0
     wpx = hpx = 0
     for i, t in enumerate(ticks):
@@ -949,12 +1005,13 @@ def anim_map(c, m, r, recs, outdir, rect=None):
     path = os.path.join(outdir, "ch%d_m%02d_stage%03d.gif" % (c, m, st - 1))
     kept = gif(path, wpx, hpx, pal, frames, delays)
     print(u"гл.%d м.%d, набор анимации %d: клетки (%d,%d)..(%d,%d), "
-          u"из них живых %d" % (c, m, setno, rect[0], rect[1],
-                                rect[0] + rect[2] - 1, rect[1] + rect[3] - 1,
-                                n))
+          u"из них живых %d%s"
+          % (c, m, setno, rect[0], rect[1], rect[0] + rect[2] - 1,
+             rect[1] + rect[3] - 1, n,
+             u", горящих %d" % fires if fires else u""))
     print(u"    потоки в окне: %s (всего в наборе %d); период %d тактов "
           u"(%.1f с), кадров %d из %d, %d Кб -> %s"
-          % (", ".join(str(sum(d for _b, d in s)) for s in live),
+          % (", ".join(str(sum(d for _b, d in s)) for s in live) or u"нет",
              len(anim_streams(setno)), period, period / TICK_HZ,
              kept, len(ticks), (os.path.getsize(path) + 1023) // 1024,
              os.path.relpath(path, HERE)))
@@ -1074,6 +1131,8 @@ def cell_pixels(t, celltab, metatab, tiles, pals, typeof):
 
 SHARED_TILES = 0x010A6C            # общий блок; пламя — последние 64 байта
 FIRE_TILES = 2
+FIRE_STEP = 2                      # кадров между сменами, `TickFireTiles`
+FIRE_PERIOD = FIRE_STEP * 2        # состояния два: плитки меняются местами
 FIRE_BYTE = 0x14                   # байт карты горящей клетки
 FIRE_PATTERN = 0x015E10            # FireTilePattern: восемь масок
 MAP_BUFFER = 0xFF9FC6              # буфер отрисовки: из его адреса берётся хеш
@@ -1085,17 +1144,18 @@ def fire_tiles():
     return [d[:32], d[32:]]
 
 
-def fire_cell(idx, tiles2):
+def fire_cell(idx, tiles2, phase=0):
     u"""Клетка огня так, как её строит DrawFireCell `$015D18`.
 
     Номера цветов ряда 0 (пламя рисуется системной палитрой), None вместо
-    прозрачного — под ним видно голую землю.
+    прозрачного — под ним видно голую землю. `phase` — состояние пары
+    плиток, см. «Анимация огня» в шапке: на нечётной они меняются местами.
     """
     a0 = MAP_BUFFER + idx * 2
     d4 = ((a0 & 0xFFFF) << 16) | ((a0 + (a0 & 0xFFFF)) & 0xFFFF)
     masks = ROM[FIRE_PATTERN:FIRE_PATTERN + 8]
     px = [[None] * CELL for _ in range(CELL)]
-    flame = 1                                  # первым идёт $0373
+    flame = 1 ^ (phase & 1)                    # первым идёт $0373
     for row in range(4):
         m = masks[(d4 & 7)]
         d4 >>= 4

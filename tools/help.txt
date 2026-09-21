@@ -26,7 +26,7 @@ Dyna Brothers 2 — проект дизассемблирования
   terrain   — скорость и урон от местности по видам
   maps      — карты этапов в out/maps/*.png
   maptex    — карты миссий тайлами и спрайтами (MTARGS="1 5", --types, --export)
-              MTARGS="--anim 1 1" — GIF с живой водой; хвостом x y ш в — окно
+              MTARGS="--anim 1 1" — GIF с живой водой и огнём; хвостом x y ш в — окно
   gfx       — графика в out/gfx/*.png
   unitgfx   — как выглядит каждый тип юнита (UARGS=номер типа)
   unitanim  — анимации юнитов по отдельности (UAARGS="5 --split")
