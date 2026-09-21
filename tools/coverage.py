@@ -30,6 +30,9 @@ except Exception:
 
 ROM = rom_bytes()
 
+# Банк кода: им ограничена последняя таблица обработчиков порождения.
+CODE_START, CODE_END = 0x28D000, 0x2AC000
+
 
 def build():
     """-> (карта меток, названия меток)."""
@@ -72,6 +75,16 @@ def build():
     put(0x1D6D74, 0x1DD7BE, "скрипты анимации")
     put(0x1FBC50, 0x1FD8B0, "таблицы уровней")
     put(0x1FCF14, 0x1FD014, "таблицы уровней")   # свойства местности
+    # Таблицы обработчиков порождения лежат подряд, от $288CB2 до банка
+    # кода. Размер БЕРЁМ ПО СОСЕДУ, а не константой: шаг между ними 2044
+    # байта, то есть 511 длинных слов, а не 256. Прежняя оценка `256 * 4`
+    # не дотягивала по 1020 байт на таблицу (около 9 КБ суммарно), а на
+    # последней, наоборот, перелетала в банк кода на 146 байт.
+    spawn = sorted(set(L.U32(L.record(k) + 0x20) for k in range(L.COUNT)))
+    spawn_end = {}
+    for i, a in enumerate(spawn):
+        spawn_end[a] = spawn[i + 1] if i + 1 < len(spawn) else CODE_START
+
     seen = set()
     for k in range(L.COUNT):
         g = L.gfx(k)
@@ -94,9 +107,9 @@ def build():
             else:
                 u = len(g[key + "_data"])
             put(a, a + u, "графика уровней")
-        # таблица обработчиков порождения: 256 длинных слов на мир
-        put(L.U32(L.record(k) + 0x20), L.U32(L.record(k) + 0x20) + 256 * 4,
-            "таблицы уровней")
+        # таблица обработчиков порождения: одна на мир, границы см. выше
+        sp = L.U32(L.record(k) + 0x20)
+        put(sp, spawn_end[sp], "таблицы уровней")
         # профили земли: длину берём по самому дальнему смещению в свойствах
         prof = L.U32(L.record(k) + 4)
         far = max(w for w, _c, _s in L.props(g))
@@ -126,7 +139,7 @@ def build():
     for a in SP.find_pals(8):
         if not mark[a]:
             put(a, a + 128, "палитры")
-    put(0x28D000, 0x2AC000, "код")
+    put(CODE_START, CODE_END, "код")
     put(0x2F8000, 0x2F9000, "код")
     put(0x2ABADA, 0x2ABADA + 0x1862, "звук")
     put(0x2AD33C, 0x2F8BF2, "звук")
