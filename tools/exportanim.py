@@ -3,6 +3,7 @@ u"""Анимации шести видов в раскладке ремейка 
 
     python tools/exportanim.py          # шесть видов игрока 1
     python tools/exportanim.py --all    # все 45 различных наборов
+    python tools/exportanim.py --props  # яйца и гнёзда под имена ремейка
 
 Пишет в `out/<имя>/export/` дерево, которое кладётся прямо в `Content`:
 
@@ -77,6 +78,52 @@ u"""Анимации шести видов в раскладке ремейка 
 шести видов, а у гнезда ячейка `$0A` это просто ячейка `$0A`. Заодно
 видно, что заполнены у них не все пять: у пустого яйца только `$05`,
 у головы ﾒｶﾞｻﾞｳﾙｽ только `$13` и `$0D`.
+
+## Яйца и гнёзда (`--props`)
+
+Ремейк рисует их **одной картинкой на целую текстуру**, без сетки:
+`objects/eggs/<вид>.png` и `objects/spawner.png` / `spawner2.png`. Под эти
+же имена кладётся и вывод.
+
+**Яйцо у всех видов — общий банк кадров**, свои кадры не используются
+вовсе. Номера идут с шагом три, по кадру на стадию:
+
+| анимация | что | кадр общего банка |
+|---|---|---|
+| `$05` | лежит | `1 + (вид - 1) * 3` |
+| `$06` | шевелится | `2 + (вид - 1) * 3`, вперемешку с кадром покоя |
+| `$07` | вот-вот вылупится | `3 + (вид - 1) * 3` |
+
+То есть ｽﾃｺﾞ это кадры 1, 2, 3, ﾄﾘｹﾗ — 4, 5, 6 и так далее до ﾋﾟｰﾁｬﾝ с
+16, 17, 18.
+
+**У игрока 2 яйца СВОИ, а не перекрашенные.** Второй набор начинается с
+кадра 19 и устроен так же: `19 + (вид - 1) * 3`, до 34, 35, 36 у ﾋﾟｰﾁｬﾝ.
+Узоры те же шесть, а форма другая — у игрока 1 яйцо округлое, у игрока 2
+угловатое, с шипами по углам. Восемнадцать кадров против восемнадцати.
+
+Осторожно с выбором представителя: «первый тип с рядом палитры 2» брать
+нельзя. Типы 18 и 20 носят виды 4 и 6, но набор анимаций у них общий с
+неиспользуемым видом 7, и яйцо оттуда приходит чужое — вида 2. Здесь
+представитель выбирается по большинству (`p2_type`).
+
+Ещё три анимации общие для всех шести и для обоих игроков: `$04`
+(кладка, кадры 68…73), `$08` (скорлупа трескается, 0 и 46…50) и `$03`
+(вылупился, 42…45, дальше перетекает в `$00`).
+
+**Гнездо, наоборот, целиком в своём банке.** Спокойное гнездо — это
+анимация `$04`, один кадр 0 с длительностью 255. Анимация `$06`, которую
+включает `EnterNestPose` при расстановке, это разовая искра (кадры 0, 3,
+4, 5, 6, 0), и она перетекает обратно в `$04`. Разновидностей гнезда
+игрока 2 три — типы 2, 3 и 4; `spawner2.png` берётся с типа 2, остальные
+кладутся рядом с суффиксом. Они заметно разные: у типа 2 существо с
+красным куполом и синими крыльями, у типов 3 и 4 — механические пульты,
+серые, с лампами и кольцом. Рядом кладётся `_spark` — та самая разовая
+искра анимации `$06`.
+
+Кроме одиночных картинок `--props` пишет `eggs/stages/` (три стадии по
+видам) и `eggs/shared/` (кладка, трещина, вылупление) — лентами, как
+`unitanim`.
 
 ## Время
 
@@ -226,7 +273,123 @@ def sheet(t, words, pal, path):
     return cols, rows
 
 
+EGG_SPECIES = 6                    # шесть видов, по три кадра на каждый
+EGG_STAGES = ((0x05, "rest"), (0x06, "stir"), (0x07, "ready"))
+EGG_SHARED = ((0x04, "lay"), (0x08, "crack"), (0x03, "hatch"))
+NESTS = ((1, "spawner", u"гнездо игрока 1"),
+         (2, "spawner2", u"гнездо игрока 2"),
+         (3, "spawner2_b", u"гнездо игрока 2, вариант B"),
+         (4, "spawner2_c", u"гнездо игрока 2, вариант C"))
+NEST_IDLE = 0x04                   # спокойное гнездо: один кадр, 255 тактов
+
+
+def p2_type(sp):
+    u"""Представитель вида у игрока 2: по БОЛЬШИНСТВУ кадра яйца.
+
+    Просто «первый тип с рядом палитры 2» брать нельзя: типы 18 и 20
+    носят вид 4 и 6, а набор анимаций у них общий с неиспользуемым видом
+    7, и яйцо оттуда приходит чужое — вида 2. Большинство их отсекает.
+    """
+    votes = collections.Counter()
+    where = {}
+    for k in range(1, unitgfx.N_TYPES + 1):
+        if species_of(k) != sp or unitgfx.palette_row(k) != 2:
+            continue
+        try:
+            seq, _l, ok, _n = unitanim.steps(unitgfx.script_addr(k, 0x05, 0),
+                                             unitanim.entry_map(k))
+        except Exception:
+            continue
+        if not ok or not seq or not (seq[0][0] & 0x100):
+            continue
+        f = seq[0][0] & 0xFF
+        votes[f] += 1
+        where.setdefault(f, k)
+    if not votes:
+        return None
+    return where[votes.most_common(1)[0][0]]
+
+
+def single(t, word, pal, path):
+    u"""Один кадр целой картинкой: ремейк берёт текстуру регионом целиком."""
+    f = unitanim.frame_pixels(t, word, pal)
+    if f is None:
+        return False
+    img = [[(c + (255,)) if c is not None else (0, 0, 0, 0) for c in row]
+           for row in f]
+    gfx.png(path, FRAME, FRAME, img, alpha=True)
+    return True
+
+
+def export_props():
+    root = out_path("export")
+    eggs = os.path.join(root, "objects", "eggs")
+    objects = os.path.join(root, "objects")
+    stages = os.path.join(root, "eggs", "stages")
+    shared = os.path.join(root, "eggs", "shared")
+    for d in (eggs, objects, stages, shared):
+        os.makedirs(d, exist_ok=True)
+
+    made, note = 0, {}
+    for sp in sorted(PLAYABLE):
+        folder, name = PLAYABLE[sp]
+        for t, suffix in ((PLAYER1[sp], ""), (None, "_p2")):
+            if t is None:                      # тот же вид у игрока 2
+                t = p2_type(sp)
+                if t is None:
+                    continue
+            pal = unitgfx.row_palette(unitgfx.palette_row(t))
+            ent = unitanim.entry_map(t)
+            for an, stage in EGG_STAGES:
+                seq, _l, ok, _n = unitanim.steps(
+                    unitgfx.script_addr(t, an, 0), ent)
+                if not ok or not seq:
+                    continue
+                w = seq[0][0]
+                if stage == "rest" and not suffix:
+                    if single(t, w, pal, os.path.join(eggs, folder + ".png")):
+                        made += 1
+                        note[folder] = w & 0xFF
+                if single(t, w, pal, os.path.join(
+                        stages, "%s%s_%s.png" % (folder, suffix, stage))):
+                    made += 1
+            if suffix:
+                continue
+            for an, nm in EGG_SHARED:
+                seq, _l, ok, _n = unitanim.steps(
+                    unitgfx.script_addr(t, an, 0), ent)
+                if not ok or not seq or sp != 1:
+                    continue
+                path = os.path.join(shared, nm + ".png")
+                words = [w for w, _d in seq]
+                cols, rows = sheet(t, words, pal, path)
+                made += 1
+
+    for t, fname, human in NESTS:
+        pal = unitgfx.row_palette(unitgfx.palette_row(t))
+        ent = unitanim.entry_map(t)
+        seq, _l, ok, _n = unitanim.steps(
+            unitgfx.script_addr(t, NEST_IDLE, 0), ent)
+        if ok and seq:
+            if single(t, seq[0][0], pal,
+                      os.path.join(objects, fname + ".png")):
+                made += 1
+        seq, _l, ok, _n = unitanim.steps(
+            unitgfx.script_addr(t, 0x06, 0), ent)
+        if ok and seq:
+            sheet(t, [w for w, _d in seq], pal,
+                  os.path.join(objects, fname + "_spark.png"))
+            made += 1
+    print(u"яйца и гнёзда: %d картинок -> %s"
+          % (made, os.path.relpath(root, HERE)))
+    print(u"кадр покоя по видам: %s"
+          % ", ".join("%s %d" % kv for kv in sorted(note.items())))
+    return 0
+
+
 def main():
+    if "--props" in sys.argv[1:]:
+        return export_props()
     both = "--all" in sys.argv[1:]
     root = os.path.join(out_path("export"), "objects", "units")
     layouts, manifest, made, missing = [], {}, 0, []
