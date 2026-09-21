@@ -37,6 +37,8 @@ Dyna Brothers 2 — проект дизассемблирования
   z80voice  — записи тембров (Maui Mallard):  make z80voice VOICE=0
   levels    — уровни Maui Mallard: сводка, карты, фон, метатайлы в PNG
               make levels LEVEL="--map 0"
+              LEVEL="--solid 0" — профиль земли и преграды поверх карты
+              LEVEL=--names — названия уровней, LEVEL="--title 0" — заставка
   unlz      — распаковать блок LZSS:  make unlz UNLZ=221904
   sprites   — кадры спрайтов в PNG (Maui Mallard):
               make sprites SPRITE="--sheet 900 64 --pal 1F6F58"

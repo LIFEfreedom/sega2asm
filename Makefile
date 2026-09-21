@@ -286,6 +286,9 @@ frames:
 #   make levels                    сводка по 23 уровням
 #   make levels LEVEL="--map 0"    карта уровня целиком в PNG
 #   make levels LEVEL="--bg 6"     фоновый слой
+#   make levels LEVEL="--solid 0"  карта с профилем земли и преградами
+#   make levels LEVEL=--names      названия всех уровней
+#   make levels LEVEL="--title 0"  заставка уровня в PNG
 #   make levels LEVEL="--meta 0"   лист метатайлов
 #   make levels LEVEL="--tiles 0"  лист тайлов
 LEVEL ?=

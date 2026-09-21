@@ -6,6 +6,9 @@
     python tools/levels.py --meta 0    лист метатайлов 16x16
     python tools/levels.py --map 0     карта уровня целиком
     python tools/levels.py --bg 0      фоновый слой (64x32)
+    python tools/levels.py --solid 0   карта с профилем земли и преградами
+    python tools/levels.py --names     названия всех уровней
+    python tools/levels.py --title 0   заставка уровня в PNG
     make levels LEVEL="--map 0"
 
 Три таблицы по 23 записи идут подряд и держат всё об уровне:
@@ -13,7 +16,7 @@
 | адрес | что |
 |---|---|
 | `$1FCB50` | запись уровня, `$42` байта |
-| `$1FCBAC` | список объектов |
+| `$1FCBAC` | буквы названия уровня для заставки |
 | `$1FCC08` | процедура уровня (все 23 ведут в код) |
 
 Читает их `$2984BC` по номеру из `$FF1B14`. Из записи нам нужны два поля:
@@ -28,7 +31,8 @@
 +$08 long   таблица метатайлов -> $FFFFE11C: по 8 байт, четыре имени VDP
             в порядке «слева сверху, справа сверху, слева снизу, справа снизу»
 +$0C long   тайлы уровня, упакованы всегда -> VRAM
-+$10 long   ещё один упакованный блок -> $FFFFE140 (что в нём — не разобрано)
++$10 long   свойства клеток -> $FFFFE140: по четыре байта на метатайл,
+            слово-профиль земли, код местности, номер порождаемого объекта
 +$14 long   карта имён фона: ширина, высота, дальше имена -> VRAM $E000
 +$18 слово  флаг: блок (+$1A) упакован
 +$1A long   -> $FFFFE120
@@ -50,6 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT as out_path
 from paths import rom_bytes
 
+import frames as F
 import lzss
 import sprites as S
 
@@ -187,6 +192,131 @@ def do_map(n, scale=1):
     save("level%02d_map.png" % n, w, h, buf, scale)
 
 
+TERRAIN = 0x1FCF14   # свойства кода местности: бит 0 — не пройти
+GLYPHS = 0x1D6D80    # скрипты анимации букв: индекс буквы * 2
+S16 = lambda o: struct.unpack_from(">h", ROM, o)[0]
+
+
+def title(n):
+    """Заставка уровня: по шесть байт на букву, конец — отрицательное слово.
+
+    Разбор из `$28EE02`: он зовёт процедуру уровня из `$1FCC08`, потом идёт
+    по списку из `$1FCBAC` и на каждую запись заводит объект — скрипт
+    анимации берётся как `$1D6D80 + индекс * 2`, положение кладётся в
+    `$12`, а исходное — в `$4C`, причём по вертикали объект стартует на
+    `$100` выше, то есть буквы слетают сверху.
+    """
+    a = U32(OBJLISTS + n * 4)
+    out = []
+    while S16(a) >= 0:
+        out.append((S16(a), S16(a + 2), S16(a + 4)))
+        a += 6
+    return out
+
+
+def title_text(n):
+    """Буквы -> строка. Индексы 0-25 это A-Z, 26 — слово THE."""
+    out, prev = "", None
+    for i, x, y in title(n):
+        if prev and (y != prev[1] or x - prev[0] > 18):
+            out += " "
+        out += ("THE" if i == 26 else
+                chr(65 + i) if 0 <= i < 26 else "?%d" % i)
+        prev = (x, y)
+    return out
+
+
+def do_names():
+    print("названия уровней: список букв в `$1FCBAC`, глиф — кадр спрайта,")
+    print("скрипт анимации — `$1D6D80 + индекс * 2` (буквы шевелятся)")
+    print()
+    for n in range(COUNT):
+        print(" %2d  $%06X  %2d букв  %s"
+              % (n, U32(OBJLISTS + n * 4), len(title(n)), title_text(n)))
+
+
+def do_title(n, scale=2):
+    """Заставка как она есть: буквы кадрами спрайтов на своих местах."""
+    import sprites as SP
+    SP.PALS = pal(n)
+    letters = title(n)
+    placed = []
+    for i, x, y in letters:
+        for d, name, px, py, src in F.parse(F.U32(F.BASE + i * 4)):
+            placed.append((d, name, px + x, py + y, src))
+    x0, y0, x1, y1 = SP.bounds(placed)
+    w, h = x1 - x0, y1 - y0
+    buf = [None] * (w * h)
+    for q in placed:
+        SP.draw(buf, w, h, -x0, -y0, q)
+    print("уровень %d: «%s», %d букв" % (n, title_text(n), len(letters)))
+    save("level%02d_title.png" % n, w, h, buf, scale)
+
+
+def props(g):
+    """Блок +$10: по четыре байта на метатайл.
+
+    Разбор вычитан из трёх читателей:
+
+    * `$291A7C` — слово `+0` плюс `x & 15` даёт байт в таблице профилей
+      (поле `+$4` записи уровня, `$FF1B1E`), по 16 байт на профиль: это
+      высота земли в каждом из шестнадцати столбцов клетки, считая от её
+      верха. Ноль — земли в этом столбце нет;
+    * `$2A5180` — байт `+2` это код местности, а `$1FCF14` по нему даёт
+      свойства, бит 0 — «не пройти» (`$2A51BC`);
+    * `$2914D0` — байт `+3` это номер объекта, который надо породить, когда
+      клетка въезжает на экран; номер ищется в таблице `$FF1B32` (поле
+      `+$20` записи уровня). Объект помнит клетку в `$2A` и при гибели
+      возвращает номер на место (`$2918BA`).
+    """
+    b = g["blk10_data"]
+    return [(struct.unpack_from(">H", b, i * 4)[0], b[i * 4 + 2], b[i * 4 + 3])
+            for i in range(len(b) // 4)]
+
+
+def do_solid(n, scale=1):
+    """Карта, поверх неё профиль земли и клетки, через которые не пройти."""
+    g, p = gfx(n), pal(n)
+    d, pr = g["map_data"], props(g)
+    prof = U32(record(n) + 4)
+    mw, mh = struct.unpack_from(">HH", d, 0)
+    mt, t = metatiles(g), g["tiles_data"]
+    w, h = mw * 16, mh * 16
+    buf = [None] * (w * h)
+    solid = ground = 0
+    for cy in range(mh):
+        for cx in range(mw):
+            off = struct.unpack_from(">H", d, 4 + (cy * mw + cx) * 2)[0]
+            for k, name in enumerate(mt[off // 8]):
+                blit(buf, w, h, t, name, cx * 16 + (k % 2) * 8,
+                     cy * 16 + (k // 2) * 8, p)
+            # В коде индекс — `off >> 1` БАЙТОВОГО смещения, а записи по
+            # четыре байта: метатайлу k (off = k*8) отвечает pr[k].
+            slope, code, _spawn = pr[off // 8]
+            block = ROM[TERRAIN + code] & 1
+            solid += bool(block)
+            for i in range(16):
+                px, py = cx * 16 + i, cy * 16
+                if block:
+                    for y in range(16):
+                        q = buf[(py + y) * w + px] or (0, 0, 0, 255)
+                        buf[(py + y) * w + px] = (q[0] // 2, q[1] // 2,
+                                                  min(255, q[2] // 2 + 90), 255)
+                if not slope:
+                    continue
+                v = ROM[prof + slope + i]
+                if not v:
+                    continue
+                ground += 1
+                yy = py + min(v, 15)
+                for k in range(2):     # линия в две точки, иначе не видно
+                    if yy + k < h:
+                        buf[(yy + k) * w + px] = (255, 40, 40, 255)
+    print("уровень %d: клеток «не пройти» %d, точек профиля %d, профиль $%06X"
+          % (n, solid, ground, prof))
+    save("level%02d_solid.png" % n, w, h, buf, scale)
+
+
 def do_bg(n, scale=1):
     g, p = gfx(n), pal(n)
     d = g["bg_data"]
@@ -257,6 +387,17 @@ def main():
     if mode == "--bg":
         for n in args or [0]:
             do_bg(n, scale)
+        return 0
+    if mode == "--solid":
+        for n in args or [0]:
+            do_solid(n, scale)
+        return 0
+    if mode == "--names":
+        do_names()
+        return 0
+    if mode == "--title":
+        for n in args or [0]:
+            do_title(n, scale)
         return 0
     print("неизвестный ключ %s" % mode)
     return 2
