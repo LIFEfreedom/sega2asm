@@ -107,6 +107,42 @@ def render(path, cells, units):
     png(path, W * CELL, H * CELL, rows)
 
 
+SHEET_SCALE = 2               # пикселей на клетку в контактном листе
+SHEET_COLS = 12
+SHEET_GAP = 3
+SHEET_BG = (24, 24, 28)
+
+
+def sheet(path, plates):
+    """Все различные карты одним листом: [(cells, units)] по порядку этапов."""
+    tile = W * SHEET_SCALE
+    step = tile + SHEET_GAP
+    cols = SHEET_COLS
+    lines = (len(plates) + cols - 1) // cols
+    wpx = cols * step + SHEET_GAP
+    hpx = lines * step + SHEET_GAP
+    img = [[SHEET_BG] * wpx for _ in range(hpx)]
+    for i, (cells, units) in enumerate(plates):
+        ox = SHEET_GAP + (i % cols) * step
+        oy = SHEET_GAP + (i // cols) * step
+        for y in range(H):
+            for x in range(W):
+                c = colour(cells[y * W + x] & 0x1F)
+                for dy in range(SHEET_SCALE):
+                    row = img[oy + y * SHEET_SCALE + dy]
+                    for dx in range(SHEET_SCALE):
+                        row[ox + x * SHEET_SCALE + dx] = c
+        for ux, uy, _d, _t, _p in units:
+            if not (0 <= ux < W and 0 <= uy < H):
+                continue
+            for dy in range(SHEET_SCALE):
+                row = img[oy + uy * SHEET_SCALE + dy]
+                for dx in range(SHEET_SCALE):
+                    row[ox + ux * SHEET_SCALE + dx] = (245, 240, 120)
+    png(path, wpx, hpx, img)
+    return wpx, hpx
+
+
 def main():
     import stagescript
     # Карты индексируются байтом +$3 МИНУС ОДИН, в отличие от таблиц
@@ -117,7 +153,7 @@ def main():
     outdir = out_path("maps")
     os.makedirs(outdir, exist_ok=True)
 
-    rows, by_map = [], collections.defaultdict(list)
+    rows, by_map, plates = [], collections.defaultdict(list), []
     hist, flags = collections.Counter(), collections.Counter()
     drawn = 0
     for st in range(N_STAGES):
@@ -132,6 +168,8 @@ def main():
         if size != W * H:
             continue
         units = placement(pl)
+        if m not in by_map:
+            plates.append((cells, units))
         by_map[m].append(st)
         name = "stage_%03d" % st
         render(os.path.join(outdir, name + ".png"), cells, units)
@@ -141,11 +179,15 @@ def main():
         rows.append((st, m, pl, len(units),
                      sorted({c & 0x1F for c in cells}), name))
 
+    sheet(os.path.join(outdir, "_all.png"), plates)
+
     out = os.path.join(HERE, "docs", "game-maps.md")
     f = io.open(out, "w", encoding="utf-8", newline="\n")
     p = f.write
     p("# Карты этапов\n\n")
-    p("Собрано `tools/maps.py` (`make maps`). Картинки — в `out/<имя>/maps/`.\n\n")
+    p("Собрано `tools/maps.py` (`make maps`). Картинки — в `out/<имя>/maps/`:\n"
+      "по PNG на этап плюс `_all.png` — контактный лист со всеми различными\n"
+      "картами в порядке этапов.\n\n")
     p("СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
       "Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
     p(__doc__[__doc__.index("`StageTable`"):].strip() + "\n\n")
@@ -194,11 +236,31 @@ def main():
           % (m, n, "ы" if len(sts) > 1 else "",
              ", ".join(str(s) for s in sts),
              " (%s)" % ", ".join(ms) if ms else ""))
-    p("\nПервая строка — не карта. `$1748E0` это **рисунок**: если раскрасить\n"
-      "клетки по типу, выходит фигура женщины на красном фоне, и 841\n"
-      "«смертельная» клетка — просто этот фон. На неё смотрят шестнадцать\n"
-      "записей таблицы этапов подряд, 196…211. Похоже на пасхалку или на\n"
-      "заготовку, оставшуюся в данных; проверить в игре я не могу.\n\n")
+    p("\nПервая строка обманывает: `$1748E0` — **рисунок**, фигура женщины на\n"
+      "красном фоне, и 841 «смертельная» клетка это просто фон. Но картой он\n"
+      "при этом остаётся: на него смотрят шестнадцать записей подряд, 196…211,\n"
+      "и две из них — настоящие миссии главы 8. То же у `$174A56` (329):\n"
+      "это портрет мужчины в тёмных очках, глава 8 миссия 7.\n\n")
+
+    p("## Глава 8 нарисована, а не размечена\n\n")
+    p("Если разложить все различные карты в один лист, глава 8 отделяется от\n"
+      "остальных с первого взгляда. Семь её миссий (10, 11, 13, 15, 21, 22, 23)\n"
+      "берут обычные карты из середины таблицы, а остальные — картинки и\n"
+      "постановочные арены:\n\n")
+    p("| миссия | этап | карта | что нарисовано |\n"
+      "|---|---|---|---|\n"
+      "| м.1, м.2 | 210, 211 | `$1748E0` | женщина на красном фоне |\n"
+      "| м.4 | 213 | `$1FFA42` | морда и надпись «VJ» красным |\n"
+      "| м.5, м.9 | 254 | `$175346` | логотип **CRI** синими буквами |\n"
+      "| м.6, м.14 | 253 | `$1FFCF2` | надпись **«DB2»** над картой |\n"
+      "| м.7 | 214 | `$174A56` | портрет мужчины в очках и с усами |\n"
+      "| м.17 | 218 | `$174F07` | женская фигура на звёздном фоне |\n"
+      "| м.19 | 220 | `$175166` | пустая синяя арена, стена из 78 юнитов посередине |\n"
+      "| м.20 | 221 | `$17518C` | то же поле, один-единственный юнит |\n"
+      "| м.24 | 222 | `$1751B2` | существо в рамке |\n\n")
+    p("Карту `$175346` с логотипом CRI держат **31** запись таблицы, `$1748E0` —\n"
+      "шестнадцать. Лишние записи миссиям не принадлежат: это запас, которым\n"
+      "заполнили хвост таблицы, и заполнили его заставкой.\n\n")
 
     p("## Этапы\n\n")
     p("| этап | карта | расстановка | юнитов | типов | миссии | картинка |\n")
