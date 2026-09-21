@@ -16,6 +16,8 @@
     python tools/levels.py --hud 1ECC9E 10   произвольная таблица глифов
     python tools/levels.py --screen    титульный экран и титры
     python tools/levels.py --screen 1F0194 1EFBFE 1F0612   своя тройка
+    python tools/levels.py --actors    актёры сценок, все 11 списков
+    python tools/levels.py --actors 1E9272   один список
     make levels LEVEL="--map 0"
 
 Три таблицы по 23 записи идут подряд и держат всё об уровне:
@@ -324,6 +326,50 @@ def do_scene(n, scale=2):
         SP.draw(buf, w, h, -x0, -y0, q)
     print("уровень %d: «%s», актёров %d" % (n, title_text(n), len(act)))
     save("level%02d_scene.png" % n, w, h, buf, scale)
+
+
+# Списки актёров СЦЕНОК, которые не привязаны к заставке уровня. Формат тот
+# же, что у `scene()`: слово-счётчик, дальше по 12 байт — x, y, скрипт
+# анимации, обработчик. Найдены перебором неразобранных адресов: у всех
+# одиннадцати скрипт попадает в область скриптов, обработчик — в банк кода,
+# а координаты держатся в пределах экрана. Скрипты сценок лежат ВЫШЕ
+# скриптов порождения объектов: `$1DCE74`-`$1DD7C2` против `$1D6E38`-`$1DB670`.
+SCENES = (0x1E9272, 0x1E9298, 0x1EA57C, 0x1EA5A2, 0x1EA5BC, 0x1EA5D8,
+          0x1EA992, 0x1EA9AC, 0x1EA9C6, 0x1EA9E0, 0x1EA9FA)
+
+
+def actors_at(a):
+    """Список актёров по адресу: счётчик и записи по 12 байт."""
+    n = U16(a)
+    return [(S16(a + 2 + k * 12), S16(a + 4 + k * 12),
+             U32(a + 6 + k * 12), U32(a + 10 + k * 12)) for k in range(n)]
+
+
+def do_actors(at=None, scale=2):
+    """Актёры сценки в PNG. Без аргумента — все одиннадцать списков."""
+    import sprites as SP
+    SP.PALS = pal(0)
+    for a in ([at] if at else SCENES):
+        placed = []
+        act = actors_at(a)
+        for x, y, sc, _h in act:
+            fr = A.first_frame(sc)
+            if fr is None:
+                continue
+            for q in F.parse(F.U32(F.BASE + fr * 4)) or []:
+                placed.append((q[0], q[1], q[2] + x, q[3] + y, q[4]))
+        if not placed:
+            print("$%06X: %d актёров, рисовать нечего" % (a, len(act)))
+            continue
+        x0, y0, x1, y1 = SP.bounds(placed)
+        w, h = x1 - x0, y1 - y0
+        buf = [None] * (w * h)
+        for q in placed:
+            SP.draw(buf, w, h, -x0, -y0, q)
+        print("$%06X: актёров %d, нарисовано %d"
+              % (a, len(act), sum(1 for x, y, sc, _h in act
+                                  if A.first_frame(sc) is not None)))
+        save("actors_%06X.png" % a, w, h, buf, scale)
 
 
 def do_title(n, scale=2):
@@ -638,6 +684,9 @@ def main():
     if mode == "--scene":
         for n in args or [0]:
             do_scene(n, scale)
+        return 0
+    if mode == "--actors":
+        do_actors(args[0] if args else None, scale)
         return 0
     if mode == "--screen":
         do_screen(args[0] if args else None,
