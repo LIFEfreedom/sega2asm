@@ -9,6 +9,7 @@
     python tools/enemies.py --contact    общий лист: по кадру на вид
     python tools/enemies.py --gen        генераторы: клетка ставит выпускателя
     python tools/enemies.py --code       кого заводит код, а не клетка
+    python tools/enemies.py --who        откуда «кодовые» берутся в уровне
     python tools/enemies.py --level 6    кто водится на уровне
 
 Отдельного списка противников в картридже нет: противник — обычный объект
@@ -717,6 +718,90 @@ def do_code():
                  fmt(p["tbl"], "$%06X")[:34]))
 
 
+CARRY = re.compile(r"move\.l\s+#\$00([0-9A-F]{6})\s*,")
+
+
+def closure(at, thr, depth=10):
+    """Кого корень в итоге приводит в уровень, через любое сохранённое поле.
+
+    Тут обход намеренно широкий: вопрос не «чьи это поля», а «кто вообще
+    вносит эту процедуру в уровень». Поэтому за дугу считается ЛЮБОЕ
+    `move.l #adr,...` с адресом из банка кода — и `+$1E`, и `+$50`, и
+    просто в регистр. Части многочастного босса иначе теряются: им `+$1E`
+    ставят через `a1`/`a2`.
+    """
+    got, frontier = set(), [(at, thr)]
+    for _ in range(depth):
+        nxt = set()
+        for x, th in frontier:
+            for a, _al in walk(x, th):
+                for m in CARRY.finditer(BY.get(a, "")):
+                    v = int(m.group(1), 16)
+                    if CODE[0] <= v < CODE[1] and v not in got:
+                        nxt.add(v)
+        if not nxt:
+            break
+        got |= nxt
+        frontier = [(v, 0) for v in nxt]
+    return got
+
+
+def roots():
+    """Всё, чем уровень вообще может что-то завести."""
+    cells, where = census()
+    out = []
+    for h in sorted(set(k for _c, k in cells)):
+        cs = sorted(c for (c, k) in cells if k == h)
+        lv = sorted(set().union(*[s for (c, k), s in where.items() if k == h]))
+        out.append(("клетка $%06X, коды %s, ур. %s"
+                    % (h, fmt(cs), fmt(lv)), h, 1))
+    seen, tbl = set(), set()
+    for n in range(LEVELS):
+        t20 = U32(record(n) + 0x20)
+        if t20 in seen:
+            continue
+        seen.add(t20)
+        for k in range(256):
+            tbl.add(U32(t20 + k * 4))
+    tbl -= {0x2A526C} | set(k for _c, k in cells)
+    for h in sorted(tbl):
+        if CODE[0] <= h < CODE[1]:
+            out.append(("таблица, клетки не зовут: $%06X" % h, h, 1))
+    procs = {}
+    for n in range(LEVELS):
+        for f in (0x0C, 0x10, 0x14, 0x28, 0x2C, 0x30):
+            v = U32(record(n) + f)
+            if CODE[0] <= v < CODE[1]:
+                procs.setdefault(v, []).append((n, f))
+    for p, lst in sorted(procs.items()):
+        out.append(("уровень %s, поле +$%02X ($%06X)"
+                    % (fmt(sorted(set(n for n, _f in lst))), lst[0][1], p),
+                    p, 0))
+    return out
+
+
+def do_who():
+    """Откуда в уровне берётся каждый «кодовый» противник."""
+    targets = [v for v, _f in code_spawned()]
+    owner = defaultdict(list)
+    for name, h, thr in roots():
+        got = closure(h, thr)
+        for t in targets:
+            if t in got:
+                owner[t].append(name)
+    print("происхождение %d процедур обновления с уроном, которых нет"
+          " в клеточном каталоге" % len(targets))
+    print()
+    lost = 0
+    for t in targets:
+        who = owner.get(t) or []
+        if not who:
+            lost += 1
+        print("$%06X  %s" % (t, "; ".join(who[:3]) if who else "— НЕ ПРИВЯЗАЛОСЬ"))
+    print()
+    print("не привязалось: %d" % lost)
+
+
 def do_contact(scale=2, per_row=6):
     """Общий лист: по одному кадру на вид, в порядке каталога."""
     import frames as F
@@ -768,6 +853,8 @@ def main():
         do_show(int(a[1], 16) if len(a[1]) > 4 else int(a[1]))
     elif a[0] == "--level" and len(a) > 1:
         do_level(int(a[1]))
+    elif a[0] == "--who":
+        do_who()
     elif a[0] == "--gen":
         do_gen()
     elif a[0] == "--code":
