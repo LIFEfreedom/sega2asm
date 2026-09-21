@@ -7,8 +7,13 @@
     python tools/levels.py --map 0     карта уровня целиком
     python tools/levels.py --bg 0      фоновый слой (64x32)
     python tools/levels.py --solid 0   карта с профилем земли и преградами
+    python tools/levels.py --objects 0 карта со спрайтами объектов
     python tools/levels.py --names     названия всех уровней
+    python tools/levels.py --passwords пароли уровней и чит на DEBUG
     python tools/levels.py --title 0   заставка уровня в PNG
+    python tools/levels.py --scene 0   заставка вместе с её актёрами
+    python tools/levels.py --hud       глифы счётчиков HUD
+    python tools/levels.py --hud 1ECC9E 10   произвольная таблица глифов
     make levels LEVEL="--map 0"
 
 Три таблицы по 23 записи идут подряд и держат всё об уровне:
@@ -54,6 +59,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT as out_path
 from paths import rom_bytes
 
+import anim as A
 import frames as F
 import lzss
 import sprites as S
@@ -226,6 +232,37 @@ def title_text(n):
     return out
 
 
+PASSWORDS = 0x1FCB26   # семь записей: слово уровня и указатель на строку
+CHEAT = (0x1EAA27, 0x1EAA2E)   # два пароля-шифра, хранятся со сдвигом +1
+
+
+def do_passwords():
+    """Пароли уровней и двухступенчатый чит, открывающий меню DEBUG.
+
+    Разбор из `$290A3E` и `$290AAE`. Пароль всегда шесть букв A-Z, буфер
+    ввода — `$FF0016`. Для паролей уровней сравнение прямое, для чита
+    строки лежат **со сдвигом на единицу**: код сравнивает введённое плюс
+    один. Совпавший пароль уровня кладёт `слово + 1` в `$FF1B14` и играет
+    звук `$31`; чит ставит `$FF2180`, а `$2908FA` по этому байту берёт не
+    обычный описатель меню `$1FD440`, а `$1FD46E` — тот, где есть DEBUG.
+    """
+    print("пароли уровней, таблица $%06X (семь записей по шесть байт):" % PASSWORDS)
+    print()
+    print("  пароль   уровень  название")
+    for i in range(7):
+        a = PASSWORDS + i * 6
+        lv = U16(a) + 1
+        txt = ROM[U32(a + 2):U32(a + 2) + 6].decode("ascii", "replace")
+        print("  %-8s %2d       %s" % (txt, lv, title_text(lv)))
+    print()
+    print("чит: ввести по очереди два пароля, каждый шесть букв.")
+    for a in CHEAT:
+        print("  $%06X: хранится %s, вводить %s"
+              % (a, ROM[a:a + 6].decode("ascii", "replace"),
+                 "".join(chr(b - 1) for b in ROM[a:a + 6])))
+    print("после второго ставится $FF2180, и в главном меню появляется DEBUG")
+
+
 def do_names():
     print("названия уровней: список букв в `$1FCBAC`, глиф — кадр спрайта,")
     print("скрипт анимации — `$1D6D80 + индекс * 2` (буквы шевелятся)")
@@ -233,6 +270,58 @@ def do_names():
     for n in range(COUNT):
         print(" %2d  $%06X  %2d букв  %s"
               % (n, U32(OBJLISTS + n * 4), len(title(n)), title_text(n)))
+
+
+def scene(n):
+    """Актёры заставки уровня: список из процедуры `$1FCC08`.
+
+    Процедура каждого мира одинакова: `lea <скрипт>,a1; bsr $28E654` и
+    `lea <актёры>,a2; bsr $28E73A`. Второй список и есть расстановка:
+    слово-счётчик, дальше по двенадцать байт — x, y, скрипт анимации,
+    обработчик. Координаты экранные, и почти все актёры начинают за краем
+    (x = -16 или 336), то есть входят в кадр.
+    """
+    at = U32(PROCS + n * 4)
+    leas = []
+    for a in range(at, at + 0x40, 2):
+        if U16(a) in (0x43F9, 0x45F9):      # lea xxx.l,a1 / lea xxx.l,a2
+            leas.append((U16(a), U32(a + 2)))
+        if U16(a) == 0x4E75:
+            break
+    lst = [v for w, v in leas if w == 0x45F9]
+    if not lst:
+        return []
+    a = lst[0]
+    cnt = U16(a)
+    return [(S16(a + 2 + k * 12), S16(a + 4 + k * 12),
+             U32(a + 6 + k * 12), U32(a + 10 + k * 12)) for k in range(cnt)]
+
+
+def do_scene(n, scale=2):
+    """Заставка целиком: буквы названия и актёры на своих местах."""
+    import sprites as SP
+    SP.PALS = pal(n)
+    placed = []
+    for i, x, y in title(n):
+        for q in F.parse(F.U32(F.BASE + i * 4)):
+            placed.append((q[0], q[1], q[2] + x, q[3] + y, q[4]))
+    act = scene(n)
+    for x, y, sc, _h in act:
+        fr = A.first_frame(sc)
+        if fr is None:
+            continue
+        for q in F.parse(F.U32(F.BASE + fr * 4)) or []:
+            placed.append((q[0], q[1], q[2] + x, q[3] + y, q[4]))
+    if not placed:
+        print("уровень %d: рисовать нечего" % n)
+        return
+    x0, y0, x1, y1 = SP.bounds(placed)
+    w, h = x1 - x0, y1 - y0
+    buf = [None] * (w * h)
+    for q in placed:
+        SP.draw(buf, w, h, -x0, -y0, q)
+    print("уровень %d: «%s», актёров %d" % (n, title_text(n), len(act)))
+    save("level%02d_scene.png" % n, w, h, buf, scale)
 
 
 def do_title(n, scale=2):
@@ -317,6 +406,88 @@ def do_solid(n, scale=1):
     save("level%02d_solid.png" % n, w, h, buf, scale)
 
 
+def do_objects(n, scale=1):
+    """Карта, а поверх — спрайты объектов, которые порождают клетки."""
+    import sprites as SP
+    SP.PALS = pal(n)
+    g, p = gfx(n), pal(n)
+    d, pr = g["map_data"], props(g)
+    jump = U32(record(n) + 0x20)
+    mw, mh = struct.unpack_from(">HH", d, 0)
+    mt, t = metatiles(g), g["tiles_data"]
+    w, h = mw * 16, mh * 16
+    buf = [None] * (w * h)
+    for cy in range(mh):
+        for cx in range(mw):
+            off = struct.unpack_from(">H", d, 4 + (cy * mw + cx) * 2)[0]
+            for k, name in enumerate(mt[off // 8]):
+                blit(buf, w, h, t, name, cx * 16 + (k % 2) * 8,
+                     cy * 16 + (k // 2) * 8, p)
+    # приглушаем фон, чтобы объекты читались
+    for i, q in enumerate(buf):
+        if q:
+            buf[i] = (q[0] // 3, q[1] // 3, q[2] // 3, 255)
+    cache, drawn, blank = {}, 0, 0
+    for cy in range(mh):
+        for cx in range(mw):
+            off = struct.unpack_from(">H", d, 4 + (cy * mw + cx) * 2)[0]
+            code = pr[off // 8][2]
+            if not code:
+                continue
+            if code not in cache:
+                sc = A.script_of_any(U32(jump + code * 4))
+                cache[code] = A.first_frame(sc) if sc else None
+            fr = cache[code]
+            if fr is None:
+                blank += 1
+                continue
+            drawn += 1
+            for q in F.parse(F.U32(F.BASE + fr * 4)) or []:
+                SP.draw(buf, w, h, cx * 16 + 8, cy * 16 + 8, q)
+    print("уровень %d: объектов %d, из них нарисовано %d, без кадра %d"
+          % (n, drawn + blank, drawn, blank))
+    save("level%02d_objects.png" % n, w, h, buf, scale)
+
+
+# Глифы счётчиков HUD: запись $80 байт — четыре тайла 2x2, и ВНУТРИ ЗАПИСИ
+# ТАЙЛЫ ИДУТ ПО СТОЛБЦАМ. Размер доказан `$298E6A`: `moveq #31,d7` и
+# `move.l (a2)+,(a3)+` — ровно 128 байт в буфер ОЗУ. Индекс — `$29933A`:
+# значение зажимается в 0..9 и умножается на 128 (`lsl.w #7,d0`).
+# Палитра не установлена, поэтому рисуем серым, как `tileprobe`.
+HUD_STEP = 0x80
+HUD = (
+    (0x1ECC9E, 10, "цифры счётчика, берёт $299344"),
+    (0x1EE99E, 12, "второй набор: цифры парами и значки, берёт $299312"),
+)
+HUD_GREY = [[(v, v, v) for v in (0, 17, 34, 51, 68, 85, 102, 119,
+                                 136, 153, 170, 187, 204, 221, 238, 255)]] * 4
+
+
+def do_hud(base=None, count=None, scale=4):
+    """Таблица глифов HUD в PNG: запись — четыре тайла 2x2 по столбцам.
+
+    Без аргументов проходит по обеим известным таблицам. Число записей у
+    `$1EE99E` взято по виду, а не из кода: сколько их на самом деле, не
+    установлено — потому и вынесено в аргумент.
+    """
+    todo = ([(base, count or 10, "по аргументу")] if base is not None
+            else list(HUD))
+    for at, n, what in todo:
+        blob = ROM[at:at + n * HUD_STEP]
+        if len(blob) < n * HUD_STEP:
+            print("$%06X: за концом ROM" % at)
+            continue
+        w, h = n * 16, 16
+        buf = [None] * (w * h)
+        for i in range(n):
+            for t in range(4):
+                tx, ty = t // 2, t % 2        # по столбцам, не построчно
+                blit(buf, w, h, blob, i * 4 + t,
+                     i * 16 + tx * 8, ty * 8, HUD_GREY)
+        print("$%06X: записей %d по $%02X байт — %s" % (at, n, HUD_STEP, what))
+        save("hud_%06X.png" % at, w, h, buf, scale)
+
+
 def do_bg(n, scale=1):
     g, p = gfx(n), pal(n)
     d = g["bg_data"]
@@ -370,7 +541,10 @@ def main():
         elif a.startswith("--"):
             mode = a
         else:
-            args.append(int(a, 0))
+            try:
+                args.append(int(a, 0))
+            except ValueError:
+                args.append(int(a, 16))   # голый шестнадцатеричный: 1ECC9E
         i += 1
     if mode is None:
         summary()
@@ -391,6 +565,23 @@ def main():
     if mode == "--solid":
         for n in args or [0]:
             do_solid(n, scale)
+        return 0
+    if mode == "--objects":
+        for n in args or [0]:
+            do_objects(n, scale)
+        return 0
+    if mode == "--passwords":
+        do_passwords()
+        return 0
+    if mode == "--scene":
+        for n in args or [0]:
+            do_scene(n, scale)
+        return 0
+    if mode == "--hud":
+        # глифы 16x16, поэтому без явного --scale рисуем крупнее
+        do_hud(args[0] if args else None,
+               args[1] if len(args) > 1 else None,
+               scale if scale != 1 else 4)
         return 0
     if mode == "--names":
         do_names()

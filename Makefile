@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels unlz tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -290,6 +290,18 @@ FRAME ?=
 frames:
 	@$(PYTHON) $(TOOLS_DIR)/frames.py $(FRAME)
 
+# Что в картридже разобрано, а что нет:  make coverage
+#   COVARGS=--raw      сырые тайлы вне системы кадров
+#   COVARGS="--raw 1"  и нарисовать их в PNG
+coverage:
+	@$(PYTHON) $(TOOLS_DIR)/coverage.py $(COVARGS)
+
+# Скрипт анимации объекта Maui Mallard:  make anim ANIM=1D8980
+#   ANIM=--forms — три формы игрока (утка, ниндзя, уменьшенный)
+ANIM ?=
+anim:
+	@$(PYTHON) $(TOOLS_DIR)/anim.py $(ANIM)
+
 # Уровни Maui Mallard: таблица, карты, фон, метатайлы. Нужен только питон.
 #   make levels                    сводка по 23 уровням
 #   make levels LEVEL="--map 0"    карта уровня целиком в PNG
@@ -297,6 +309,10 @@ frames:
 #   make levels LEVEL="--solid 0"  карта с профилем земли и преградами
 #   make levels LEVEL=--names      названия всех уровней
 #   make levels LEVEL="--title 0"  заставка уровня в PNG
+#   make levels LEVEL="--objects 0" карта со спрайтами объектов
+#   make levels LEVEL=--passwords пароли уровней и чит на DEBUG
+#   make levels LEVEL="--scene 7" заставка вместе с актёрами
+#   make levels LEVEL=--hud        глифы счётчиков HUD
 #   make levels LEVEL="--meta 0"   лист метатайлов
 #   make levels LEVEL="--tiles 0"  лист тайлов
 LEVEL ?=
