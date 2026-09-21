@@ -174,7 +174,7 @@ FindTargetWithFilter:
 | `RuleApproachFiltered` `$018310` | ближний | из `a6` вызывающего |
 | `RuleApproachCarcass` `$0185CA` | ближний | падаль |
 | `RuleApproachEnemyCarcass` `$0185E6` | ближний | чужая падаль |
-| `RuleApproachByMask` `$01823C` | ближний | вид вне маски |
+| `RuleBoltFromPredator` `$01823C` | ближний | враг вида **из** маски; шаг в СЛУЧАЙНУЮ сторону |
 | `RuleChaseMovingEnemy` `$018562` | ближний | идущий враг |
 | `RuleChaseMoving` `$018582` | ближний | идущий юнит |
 | `RuleChaseMovingAsSpecies1` `$0185A6` | ближний | идущий, если сам вид 1 |
