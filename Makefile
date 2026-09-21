@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels unlz tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels unlz tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -228,6 +228,14 @@ terrain:
 # Карты этапов: местность 40x40 в PNG и сводка по расстановке
 maps:
 	@$(PYTHON) $(TOOLS_DIR)/maps.py
+
+# Карты миссий настоящими тайлами игры: 123 PNG 1280x1280 со спрайтами
+# юнитов, плюс лист образцов местности. Аргументы — глава и миссия:
+#     make maptex MTARGS="1 5"
+#     make maptex MTARGS=--types
+MTARGS ?=
+maptex:
+	@$(PYTHON) $(TOOLS_DIR)/maptex.py $(MTARGS)
 
 # Карта мира целиком: таблица имён из блоков и метатайлов. Аргумент —
 # адрес набора тайлов, по умолчанию $183CB6.
