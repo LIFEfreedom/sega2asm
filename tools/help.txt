@@ -29,6 +29,7 @@ Dyna Brothers 2 — проект дизассемблирования
   gfx       — графика в out/gfx/*.png
   unitgfx   — как выглядит каждый тип юнита (UARGS=номер типа)
   unitanim  — анимации юнитов по отдельности (UAARGS="5 --split")
+  exportanim— анимации шести видов в раскладке ремейка (EAARGS=--all)
   tileprobe — показать кусок ROM как тайлы 4bpp:  make tileprobe ADDR=020000
   pcm       — сэмплы DAC в WAV
   music     — партитуры песен; sfx — звуковые эффекты

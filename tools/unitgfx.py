@@ -103,13 +103,16 @@ def walk(a, steps=400):
             out.append(W(a))
             a += 3
         elif b == 0xFB:
-            out.append(W(a + 2))
+            out.append(W(a + 2))      # первый слой; второй на +$4
             a += 7
         elif b == 0xFE:
             d = rom[a + 1]
             a += 2 + (d - 256 if d > 127 else d)
         elif b == 0xFF:
-            d = rom[a + 2]
+            # Смещение — ПЕРВЫЙ операнд, второй это счётчик повторов.
+            # Раньше здесь стоял rom[a + 2], и обход уезжал в чужой скрипт:
+            # ленты набирали кадры соседних анимаций (разбор в unitanim.py).
+            d = rom[a + 1]
             a += 3 + (d - 256 if d > 127 else d)
         elif b == 0xFC:
             p = a + 1 + ((a + 1) & 1)
