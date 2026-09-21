@@ -35,7 +35,11 @@ Dyna Brothers 2 — проект дизассемблирования
   z80seq    — скрипты дорожек (Maui Mallard):  make z80seq SOUND=0
   z80render — мелодии Maui Mallard в WAV (нужен компилятор C и make deps)
   z80voice  — записи тембров (Maui Mallard):  make z80voice VOICE=0
-  frames    — таблица кадров спрайтов (Maui Mallard):  make frames FRAME=0
+  sprites   — кадры спрайтов в PNG (Maui Mallard):
+              make sprites SPRITE="--sheet 900 64 --pal 1F6F58"
+  frames    — кадры спрайтов (Maui Mallard):  make frames FRAME=0
+              FRAME=--parts сборные объекты, --sets наборы графики,
+              --descs описатели спрайта
   unpack    — распаковщик блока:  make unpack ADDR=060424
   vectors   — таблица исключений 68000 с нашими именами
   xcheck    — сверка дизассемблера с чужим декодером

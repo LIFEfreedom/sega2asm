@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -273,11 +273,23 @@ z80voice:
 	@$(PYTHON) $(TOOLS_DIR)/z80voice.py $(VOICE)
 
 # Таблица кадров спрайтов в начале картриджа (Maui Mallard).
-#   make frames             сводка
-#   make frames FRAME=0     разбор одного кадра
+#   make frames                 сводка
+#   make frames FRAME=0         разбор одного кадра
+#   make frames FRAME=--parts   вторая половина: сборные объекты
+#   make frames FRAME=--sets    шесть наборов графики
+#   make frames FRAME=--descs   таблица описателей спрайта
 FRAME ?=
 frames:
 	@$(PYTHON) $(TOOLS_DIR)/frames.py $(FRAME)
+
+# Кадры спрайтов Maui Mallard в PNG. Нужен только питон.
+#   make sprites SPRITE="0 1 2"
+#   make sprites SPRITE="--sheet 900 64 --pal 1F6F58"
+#   make sprites SPRITE="--parts 150"
+#   make sprites SPRITE=--pals          палитры, найденные в ROM
+SPRITE ?=
+sprites:
+	@$(PYTHON) $(TOOLS_DIR)/sprites.py $(SPRITE)
 
 # Сэмплы DAC в WAV: четырёхбитная дельта, декодер повторяет главный цикл Z80
 pcm:
