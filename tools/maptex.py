@@ -153,13 +153,38 @@ Y, чтобы ближний перекрывал дальнего — так ж
 | `ice` | 14 | видно глазом: единственная ярко-синяя клетка |
 | `vent` | 20 | жерло; вместе с водой единственные анимированные типы |
 
-**`fire.png` здесь НЕТ, и это не упущение.** Тип 12 — огонь по коду
-(`FireBurnOut`, `FireSpreadToCell`), но его плитка в наборе 0 это обычная
-земля, и в маске анимации `$00078FFF` бита 12 нет. Проверка по тайлам
-подтверждает: анимированные тайлы в наборе 0 берут только типы 19 (вода),
-20 (жерло) и 30 (кромка плато у воды). Значит пламя оригинал рисует не
-плиткой — где именно, не выяснено, и подсовывать вместо него кусок земли
-было бы обманом.
+### Огонь рисуется в обход таблицы метатайлов
+
+Клетка типа 12 в наборе тайлов — это шестнадцать раз тайл `$075`, то есть
+голая земля, и так во всех девяти наборах. Пламени в наборах нет вовсе.
+Рисует его отдельная ветка:
+
+```asm
+DrawCellTiles:                 ; $015B3C
+	cmpi.b	#$14,d0            ; байт карты $14 = 20 — это огонь
+	bne.w	DrawCellTilesPlain
+	bsr.w	DrawFireCell       ; $015D18
+```
+
+`DrawFireCell` собирает клетку 4x4 сам: для каждого тайла берёт либо
+обычную землю `$6075`, либо одну из двух плиток пламени `$0372`/`$0373`.
+Какие места заняты пламенем, решает битовая маска из `FireTilePattern`
+`$015E10` (восемь масок по четыре значащих бита), а выбирает её хеш
+адреса клетки — поэтому узор у каждой клетки свой и от кадра к кадру не
+дрожит.
+
+Плитки пламени **не из набора этапа**: они лежат в VRAM по `$6E40` и
+`$6E60`, сразу под областью спрайтов юнитов (`$374`), и рисуются
+**палитрой ряда 0** — системной, где есть `$B40000`, `$FC2400` и
+`$FCFC00`. В ROM это последние 64 байта блока `SharedTiles` `$010A6C`.
+
+Анимирует их `TickFireTiles` `$00B7EE`: DMA копирует `$6E40` в `$6E60`
+(так что второй тайл отстаёт на кадр), потом выгружает 32 байта из
+`FireTileFrames`, щёлкая смещением между 0 и `$20`. Кадра всего два.
+
+Поэтому `objects/fire.png` — это два тайла 8x8, а не клетка 32x32, и
+рядом кладётся `fire_cell.png`: та же клетка, собранная как её собирает
+игра, для сверки.
 
 **Что поставлено по картинке** и потому может быть неверно: `tree` — тип
 24 (рядом кладутся 25, розовое цветущее, и 26, хвойные); `crack` — тип 13
@@ -683,6 +708,46 @@ def cell_pixels(t, celltab, metatab, tiles, pals, typeof):
     return px
 
 
+SHARED_TILES = 0x010A6C            # общий блок; пламя — последние 64 байта
+FIRE_TILES = 2
+
+
+def export_fire(objects):
+    u"""Две плитки пламени: их в наборах этапа нет, см. шапку."""
+    data = bytes(unpack(ROM, SHARED_TILES)[2])
+    fire = data[-32 * FIRE_TILES:]
+    pal = array_palette(0)                 # имя $0372 -> ряд 0, не ряд этапа
+    w, h = 8 * FIRE_TILES, 8
+    img = [[(0, 0, 0, 0)] * w for _ in range(h)]
+    for t in range(FIRE_TILES):
+        g = fire[t * 32:(t + 1) * 32]
+        for y in range(8):
+            for x in range(8):
+                b = g[y * 4 + (x >> 1)]
+                v = (b >> 4) if x % 2 == 0 else (b & 15)
+                if v:
+                    img[y][t * 8 + x] = pal[v] + (255,)
+    png(os.path.join(objects, "fire.png"), w, h, img, alpha=True)
+
+    # клетка целиком, как её собирает DrawFireCell
+    masks = ROM[0x015E10:0x015E18]
+    cell = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+    for row in range(4):
+        m = masks[row]
+        for col in range(4):
+            if not (m >> col) & 1:
+                continue
+            g = fire[(col % FIRE_TILES) * 32:(col % FIRE_TILES + 1) * 32]
+            for y in range(8):
+                for x in range(8):
+                    b = g[y * 4 + (x >> 1)]
+                    v = (b >> 4) if x % 2 == 0 else (b & 15)
+                    if v:
+                        cell[row * 8 + y][col * 8 + x] = pal[v] + (255,)
+    png(os.path.join(objects, "fire_cell.png"), CELL, CELL, cell, alpha=True)
+    return 2
+
+
 def export_terrain():
     recs = gfx_records()
     palno = record_palette_no(recs)
@@ -697,6 +762,7 @@ def export_terrain():
             uniq.append((key, k))
 
     made = 0
+    made += export_fire(objects)
     for _key, k in uniq:
         rec = recs[k]
         typeof, celltab, metatab = meta_tables(rec)
