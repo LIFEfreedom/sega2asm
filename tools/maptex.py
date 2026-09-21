@@ -186,6 +186,19 @@ DrawCellTiles:                 ; $015B3C
 рядом кладётся `fire_cell.png`: та же клетка, собранная как её собирает
 игра, для сверки.
 
+Карты рисуются с этой веткой: горящая клетка выходит такой же, как в
+игре, включая то, что узор у каждой свой. Хеш взят оттуда же — `a0` при
+входе в `DrawCellTiles` это адрес слова клетки в буфере `$FF9FC6`:
+
+```asm
+	move.l	a0,d4
+	swap	d4
+	add.w	a0,d4          ; и дальше по три бита на строку, lsr.l #4
+```
+
+В исходных картах горящие клетки есть у пяти миссий: гл.8 м.10 (54
+клетки), гл.1 м.28 (35), гл.1 м.39 (11), гл.8 м.1 и м.2 (по две).
+
 **Что поставлено по картинке** и потому может быть неверно: `tree` — тип
 24 (рядом кладутся 25, розовое цветущее, и 26, хвойные); `crack` — тип 13
 (чёрные разломы); `dry_land` — тип 17 (потрескавшаяся сушь, соседний 18
@@ -534,6 +547,8 @@ def draw(cells, rec, mrec, units, path, nosprite=None):
     skipped = 0
 
     cache = {}
+    flames = fire_tiles()
+    sys_pal = array_palette(0)                 # пламя рисуется рядом 0
 
     def block(name):
         u"""8x8 готовых цветов по слову имени; слов на карту немного."""
@@ -562,6 +577,26 @@ def draw(cells, rec, mrec, units, path, nosprite=None):
             b = cells[cy * W + cx]
             if b == 0:                 # см. «Байт 0» в шапке
                 skipped += 1
+                continue
+            if b == FIRE_BYTE:         # огонь идёт мимо таблицы метатайлов
+                f = fire_cell(cy * W + cx, sys_pal, flames)
+                base = celltab[b - 1]
+                for q in range(4):     # под пламенем — та же голая земля
+                    meta = metatab[base[q] & 0x1FF]
+                    for sq in range(4):
+                        bl = block((meta[sq] + 0x6075) & 0xFFFF)
+                        if bl is None:
+                            continue
+                        bx = cx * CELL + (q & 1) * 16 + (sq & 1) * 8
+                        by = cy * CELL + (q >> 1) * 16 + (sq >> 1) * 8
+                        for y in range(8):
+                            px[by + y][bx:bx + 8] = bl[y]
+                for y in range(CELL):
+                    row = px[cy * CELL + y]
+                    src = f[y]
+                    for x in range(CELL):
+                        if src[x] is not None:
+                            row[cx * CELL + x] = src[x]
                 continue
             entry = celltab[b - 1]
             for q in range(4):
@@ -710,6 +745,41 @@ def cell_pixels(t, celltab, metatab, tiles, pals, typeof):
 
 SHARED_TILES = 0x010A6C            # общий блок; пламя — последние 64 байта
 FIRE_TILES = 2
+FIRE_BYTE = 0x14                   # байт карты горящей клетки
+FIRE_PATTERN = 0x015E10            # FireTilePattern: восемь масок
+MAP_BUFFER = 0xFF9FC6              # буфер отрисовки: из его адреса берётся хеш
+
+
+def fire_tiles():
+    u"""Две плитки пламени: [$0372, $0373], по 32 байта."""
+    d = bytes(unpack(ROM, SHARED_TILES)[2])[-32 * FIRE_TILES:]
+    return [d[:32], d[32:]]
+
+
+def fire_cell(idx, pal, tiles2):
+    u"""Клетка огня так, как её строит DrawFireCell `$015D18`."""
+    a0 = MAP_BUFFER + idx * 2
+    d4 = ((a0 & 0xFFFF) << 16) | ((a0 + (a0 & 0xFFFF)) & 0xFFFF)
+    masks = ROM[FIRE_PATTERN:FIRE_PATTERN + 8]
+    px = [[None] * CELL for _ in range(CELL)]
+    flame = 1                                  # первым идёт $0373
+    for row in range(4):
+        m = masks[(d4 & 7)]
+        d4 >>= 4
+        for col in range(4):
+            bit = m & 1
+            m >>= 1
+            if not bit:
+                continue
+            g = tiles2[flame]
+            flame ^= 1
+            for y in range(8):
+                for x in range(8):
+                    b = g[y * 4 + (x >> 1)]
+                    v = (b >> 4) if x % 2 == 0 else (b & 15)
+                    if v:
+                        px[row * 8 + y][col * 8 + x] = pal[v]
+    return px
 
 
 def export_fire(objects):
