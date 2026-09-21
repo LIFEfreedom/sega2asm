@@ -157,6 +157,7 @@ def main():
     for folder, t1, t2, sp, name in SPECIES:
         for t, suffix in ((t1, ""), (t2, "_p2")) if both else ((t1, ""),):
             pal = unitgfx.row_palette(unitgfx.palette_row(t))
+            entries = unitanim.entry_map(t)
             key = folder + suffix
             manifest[key] = {"species": sp, "name": name, "type": t,
                              "palette_row": unitgfx.palette_row(t),
@@ -166,10 +167,11 @@ def main():
                 os.makedirs(d, exist_ok=True)
                 for side, fname in SIDES:
                     try:
-                        seq, loop, ok = unitanim.steps(
-                            unitgfx.script_addr(t, an, side))
+                        seq, loop, ok, nxt = unitanim.steps(
+                            unitgfx.script_addr(t, an, side), entries)
+                        ok = ok and unitanim.frames_fit(t, seq)
                     except Exception:
-                        ok = False
+                        ok, nxt = False, None
                     if not ok or not seq:
                         missing.append((key, anim, fname))
                         continue
@@ -182,6 +184,7 @@ def main():
                         "rom_anim": "$%02X" % an,
                         "rom_facing": side,
                         "loop": loop,
+                        "next": ("$%02X" % nxt[0]) if nxt else None,
                         "columns": cols, "rows": rows,
                         "frame_count": len(words),
                         "frames": [{"frame": w & 0xFF,

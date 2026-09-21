@@ -50,14 +50,34 @@ u"""Анимации юнитов поодиночке: своя полоса к
 У слова кадра младший байт — номер кадра, **бит 8** переключает на общий
 банк вместо своего, **бит 11** отражает по горизонтали.
 
+## Где анимация кончается
+
+Скрипт **не умеет останавливаться**: `RunAnimScript` крутит записи, пока
+не кончится бюджет тактов, и следующий вызов продолжает с того же места.
+Значит одноразовая анимация может кончиться только двумя способами —
+уйти в вечный цикл (переход назад) или **перетечь в другую анимацию**,
+то есть дойти до её входного адреса.
+
+Второе встречается у **1314 лент из 11769**, каждой девятой. Раньше обход
+этого не замечал и утаскивал в ленту кадры продолжения — именно так
+смерть ｽﾃｺﾞ обрастала лишними кадрами. Теперь обход останавливается на
+чужом входе, а куда он вёл, записано в `next` росписи.
+
 ## Пустые ячейки набора
 
-В наборе 29 ячеек, но не у каждого типа заполнены все. У 228 сочетаний
-(тип, анимация, сторона) из 12012 слово смещения ведёт не на скрипт, а в
-середину графики: обход почти сразу натыкается на байт `$F0`…`$F7`,
-которому в таблице команд не соответствует ничего. Такие ячейки здесь
-считаются ПУСТЫМИ и не выводятся вовсе — раньше они давали ленты из
-чужих кадров и посторонних яиц.
+В наборе 29 ячеек, но не у каждого типа заполнены все. Пустая ячейка
+опознаётся двумя признаками, и оба означают, что слово смещения ведёт не
+на скрипт:
+
+1. обход натыкается на байт `$F0`…`$F7`, которому в таблице команд не
+   соответствует ничего — 243 сочетания (тип, анимация, сторона) из 12012;
+2. лента ссылается на **номер кадра за границей банка типа** — ещё
+   несколько сотен. Банк у простых типов крошечный: у гнёзд девять
+   записей, у пустого яйца три, а ячейки `$17`…`$20` у них заполнены
+   мусором.
+
+Затронуты только типы 1…4 (гнёзда), 62…66 и 68 — декорации и части
+ﾒｶﾞｻﾞｳﾙｽ. **У шести видов игрока (типы 5…10) промахов нет ни одного.**
 
 ## Чего здесь нет
 
@@ -105,17 +125,31 @@ def sb(v):
     return v - 256 if v > 127 else v
 
 
-def steps(a):
-    u"""[(слово, длительность)], точка возврата и признак годности.
+def entry_map(t):
+    u"""{адрес входа: (анимация, сторона)} по всему набору типа."""
+    out = {}
+    for an in list(COMMON_ANIMS) + list(OWN_ANIMS):
+        for f in FACINGS:
+            try:
+                out.setdefault(unitgfx.script_addr(t, an, f), (an, f))
+            except Exception:
+                pass
+    return out
 
-    Годность — это «скрипт ни разу не упёрся в байт `$F0`…`$F7`». Такой
-    байт команды не обозначает, и встречается он только там, где ячейка
-    набора не заполнена и слово смещения ведёт в графику.
+
+def steps(a, entries=None):
+    u"""[(слово, длительность)], точка возврата, годность и продолжение.
+
+    Останавливается на входе ЧУЖОЙ анимации: скрипт сам по себе не
+    кончается, и одноразовая анимация перетекает в следующую.
     """
-    out, seen, loop = [], {}, None
+    out, seen, loop, nxt, start = [], {}, None, None, a
     while len(out) < MAX_STEPS:
         if not (0 < a < len(rom) - 8):
-            return out, loop, False
+            return out, loop, False, nxt
+        if entries and a != start and a in entries:
+            nxt = entries[a]
+            break
         if a in seen:
             loop = seen[a]
             break
@@ -140,8 +174,18 @@ def steps(a):
         elif b == 0xF8:
             a += 1
         else:                                 # $F0..$F7 — ячейка пустая
-            return out, loop, False
-    return out, loop, True
+            return out, loop, False, nxt
+    return out, loop, True, nxt
+
+
+def frames_fit(t, seq):
+    u"""Все ли номера кадров попадают в банк: иначе ячейка не заполнена."""
+    own = gfx.table_len(unitgfx.frame_table(t))
+    com = gfx.table_len(L(unitgfx.COMMON_FRAMES))
+    for w, _d in seq:
+        if (w & 0xFF) >= (com if w & 0x100 else own):
+            return False
+    return True
 
 
 def frame_pixels(t, word, pal):
@@ -200,20 +244,22 @@ def anim_rows(t):
     строку: у яйца, смерти и общих анимаций она всегда одна.
     """
     rows = []
+    entries = entry_map(t)
     for an in list(COMMON_ANIMS) + list(OWN_ANIMS):
         groups = collections.OrderedDict()
         for f in FACINGS:
             try:
-                seq, loop, ok = steps(unitgfx.script_addr(t, an, f))
+                seq, loop, ok, nxt = steps(unitgfx.script_addr(t, an, f),
+                                           entries)
             except Exception:
                 continue
-            if not ok:
+            if not ok or not frames_fit(t, seq):
                 continue
-            key = (tuple(seq), loop)
+            key = (tuple(seq), loop, nxt)
             groups.setdefault(key, []).append(f)
-        for (seq, loop), fs in groups.items():
+        for (seq, loop, nxt), fs in groups.items():
             if seq:
-                rows.append((an, fs, list(seq), loop))
+                rows.append((an, fs, list(seq), loop, nxt))
     return rows
 
 
@@ -232,7 +278,7 @@ def sheet(t, rows, pal, path):
     w = cols * FRAME + gap * 2
     h = len(rows) * (FRAME + gap) + gap
     img = [[(24, 24, 28, 255)] * w for _ in range(h)]
-    for i, (_an, _fs, seq, _loop) in enumerate(rows):
+    for i, (_an, _fs, seq, _loop, _nxt) in enumerate(rows):
         oy = gap + i * (FRAME + gap)
         for k, (word, _dur) in enumerate(seq[:SHEET_MAX]):
             f = frame_pixels(t, word, pal)
@@ -294,9 +340,10 @@ def main():
 
         rec = {"bank": "$%06X" % unitgfx.frame_table(t),
                "palette_row": row, "anims": {}}
-        for an, fs, seq, loop in rows:
+        for an, fs, seq, loop, nxt in rows:
             entry = {"facings": fs,
                      "loop": loop,
+                     "next": ("$%02X" % nxt[0]) if nxt else None,
                      "truncated": len(seq) >= MAX_STEPS,
                      "frames": [dict(describe(w), dur=d) for w, d in seq]}
             if entry["truncated"]:
