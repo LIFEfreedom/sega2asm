@@ -23,3 +23,18 @@ AnimStep            = $297010   ; покадровый обход объекто
 AnimScript          = $297074   ; разбор скрипта анимации
 FrameBoxGet         = $2A028A   ; коробка кадра по номеру
 FrameSelect         = $2A0306   ; кадр по номеру от базы $001080
+
+; ── Уровни: таблицы, загрузчик, распаковщик ─────────────────────────────
+; Разбор: docs/mauimallard/graphics.md, инструменты tools/levels.py и lzss.py.
+LzssBit             = $297612   ; один бит потока -> перенос
+LzssBits            = $297622   ; до 32 бит, со склейкой через границу
+LzssUnpack          = $29766A   ; LZSS: литерал 8 бит либо 10+4 бита ссылки
+HeapAlloc           = $296B38   ; сдвинуть указатель кучи $FFFFE1A8
+LevelLoadGfx        = $291012   ; запись графики уровня: тайлы, карта, фон
+LevelSetup          = $2984BC   ; уровень по номеру $FF1B14 -> ОЗУ
+PlaneColumn         = $29135E   ; столбец плоскости из метатайлов
+PaletteFadeTo       = $290C70   ; плавный переход к палитре (a0), 16 кадров
+PaletteFadeStep     = $290CBC   ; шаг перехода, зовётся покадрово
+PaletteFromCram     = $290BB8   ; CRAM -> $FFFFDC40
+PaletteLoad         = $2A58B6   ; 128 байт ROM -> $FFFFDC40
+PaletteToCram       = $2A58C4   ; $FFFFDC40 -> CRAM

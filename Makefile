@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels unlz tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -281,6 +281,21 @@ z80voice:
 FRAME ?=
 frames:
 	@$(PYTHON) $(TOOLS_DIR)/frames.py $(FRAME)
+
+# Уровни Maui Mallard: таблица, карты, фон, метатайлы. Нужен только питон.
+#   make levels                    сводка по 23 уровням
+#   make levels LEVEL="--map 0"    карта уровня целиком в PNG
+#   make levels LEVEL="--bg 6"     фоновый слой
+#   make levels LEVEL="--meta 0"   лист метатайлов
+#   make levels LEVEL="--tiles 0"  лист тайлов
+LEVEL ?=
+levels:
+	@$(PYTHON) $(TOOLS_DIR)/levels.py $(LEVEL)
+
+# Распаковщик LZSS: любой блок по адресу.  make unlz UNLZ=221904
+UNLZ ?=
+unlz:
+	@$(PYTHON) $(TOOLS_DIR)/lzss.py $(UNLZ)
 
 # Кадры спрайтов Maui Mallard в PNG. Нужен только питон.
 #   make sprites SPRITE="0 1 2"
