@@ -14,6 +14,8 @@
     python tools/levels.py --scene 0   заставка вместе с её актёрами
     python tools/levels.py --hud       глифы счётчиков HUD
     python tools/levels.py --hud 1ECC9E 10   произвольная таблица глифов
+    python tools/levels.py --screen    титульный экран и титры
+    python tools/levels.py --screen 1F0194 1EFBFE 1F0612   своя тройка
     make levels LEVEL="--map 0"
 
 Три таблицы по 23 записи идут подряд и держат всё об уровне:
@@ -488,6 +490,66 @@ def do_hud(base=None, count=None, scale=4):
         save("hud_%06X.png" % at, w, h, buf, scale)
 
 
+# Статические экраны: титульный и титры. Грузит их `loc_28D74A` четвёркой
+# ресурсов, все LZSS-сжатые. У распакованной КАРТЫ заголовок — два слова,
+# ширина и высота в клетках, дальше `w*h` слов имени VDP; у ТАЙЛОВ
+# заголовка нет. Размер сходится точно: 64x32 -> 4096, 64x56 -> 7168,
+# 40x404 -> 32320 байт, а `lsr.w #5,d4` в коде даёт те же 518 тайлов.
+# Задник общий у обоих экранов: `a1` и `a3` в двух вызовах совпадают.
+#
+# Палитры взяты из кода: после загрузки экрана идёт `PaletteFadeTo` с
+# `$1F0612` (титульный) и `$1F5BF8` (титры). Для задника это проверяется —
+# ряд 0 там синяя лесенка индексов 7…14, и тайлы используют ровно её.
+# ЧЕГО НЕ УСТАНОВЛЕНО: как слои складываются на экране. Рисуем каждый
+# отдельно и на непрозрачном фоне, а в игре логотип ложится поверх задника
+# с прозрачным цветом 0 и, судя по низкому контрасту, не рядом 0 палитры.
+# Пары «карта — набор» подобраны по вместимости: у семи из девяти размер
+# набора РОВНО равен наибольшему номеру тайла в карте плюс один, у титров
+# запас в один тайл. Палитры взяты из ближайшего `PaletteFadeTo` после
+# площадки карты.
+SCREENS = (
+    (0x1F0D58, 0x1F0692, 0x1F0F30, "заставка «presents DONALD Starring In»"),
+    (0x1F8A8E, 0x1F927A, 0x1F0612, "задник титульного: лучи, лозы, изгородь"),
+    (0x1F0194, 0x1EFBFE, 0x1F0612, "логотип MAUI MALLARD"),
+    (0x1F813A, 0x1F927A, 0x1F6ED8, "тот же задник для меню, без изгороди"),
+    (0x1F2CEC, 0x1F0FB0, 0x1F3A4A, "пальмы и звёздное небо"),
+    (0x1F3270, 0x1F0FB0, 0x1F3A4A, "ночное небо со звёздами, берег и вода"),
+    (0x1F6548, 0x1F6B10, None, "силуэт острова: пальмы и хижины"),
+    (0x1F6850, 0x1F6B10, None, "силуэт острова, второй вариант"),
+    (0x1F3B4A, 0x1F58B8, 0x1F5BF8, "свиток титров"),
+)
+
+
+def do_screen(map_at=None, tiles_at=None, pal_at=None, scale=1):
+    """Статический экран: карта имён поверх своего набора тайлов.
+
+    Без аргументов проходит по всем девяти известным слоям. У карт шириной
+    64 клетки видно на экране 40 — правый край в данных пустой. Слои с
+    палитрой `None` рисуются серым: это силуэты, нарисованные одним цветом,
+    и с настоящей палитрой они выходят почти чёрными.
+    """
+    todo = ([(map_at, tiles_at, pal_at, "по аргументу")] if map_at is not None
+            else list(SCREENS))
+    for m_at, t_at, p_at, what in todo:
+        m = lzss.unpack(m_at)[0]
+        t = lzss.unpack(t_at)[0]
+        pals = S.cram(p_at) if p_at else [[(v, v, v) for v in range(0, 256, 17)]] * 4
+        w, h = struct.unpack_from(">HH", m, 0)
+        buf = [None] * (w * 8 * h * 8)
+        used = set()
+        for ty in range(h):
+            for tx in range(w):
+                o = 4 + (ty * w + tx) * 2
+                if o + 2 > len(m):
+                    continue
+                nm = struct.unpack_from(">H", m, o)[0]
+                used.add(nm & 0x7FF)
+                blit(buf, w * 8, h * 8, t, nm, tx * 8, ty * 8, pals)
+        print("$%06X %dx%d клеток + тайлы $%06X (%d), в ходу номеров %d — %s"
+              % (m_at, w, h, t_at, len(t) // 32, len(used), what))
+        save("screen_%06X.png" % m_at, w * 8, h * 8, buf, scale)
+
+
 def do_bg(n, scale=1):
     g, p = gfx(n), pal(n)
     d = g["bg_data"]
@@ -576,6 +638,11 @@ def main():
     if mode == "--scene":
         for n in args or [0]:
             do_scene(n, scale)
+        return 0
+    if mode == "--screen":
+        do_screen(args[0] if args else None,
+                  args[1] if len(args) > 1 else None,
+                  args[2] if len(args) > 2 else None, scale)
         return 0
     if mode == "--hud":
         # глифы 16x16, поэтому без явного --scale рисуем крупнее

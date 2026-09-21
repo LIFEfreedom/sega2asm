@@ -313,6 +313,7 @@ anim:
 #   make levels LEVEL=--passwords пароли уровней и чит на DEBUG
 #   make levels LEVEL="--scene 7" заставка вместе с актёрами
 #   make levels LEVEL=--hud        глифы счётчиков HUD
+#   make levels LEVEL=--screen     титульный экран и титры
 #   make levels LEVEL="--meta 0"   лист метатайлов
 #   make levels LEVEL="--tiles 0"  лист тайлов
 LEVEL ?=
