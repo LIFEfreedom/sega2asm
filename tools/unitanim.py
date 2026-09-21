@@ -79,7 +79,9 @@ OWN_ANIMS = range(4, 33)           # 29 записей набора
 FACINGS = (0, 2, 4, 6)
 SIDE = 4                           # кадр — 4x4 тайла
 FRAME = SIDE * 8                   # 32 точки
-MAX_STEPS = 64                     # предохранитель на длинный скрипт
+# Предохранитель на длинный скрипт. При 64 обрывались 239 полос из 7122,
+# при 256 — двадцать шесть; такие помечаются в росписи как truncated.
+MAX_STEPS = 256
 
 
 def steps(a):
@@ -184,16 +186,24 @@ def anim_rows(t):
     return rows
 
 
+SHEET_MAX = 48             # кадров в строке листа; полные ленты — в --split
+
+
 def sheet(t, rows, pal, path):
-    u"""Лист типа: строка — одна анимация одной группы сторон."""
+    u"""Лист типа: строка — одна анимация одной группы сторон.
+
+    Ширину задаёт самая длинная полоса, поэтому она подрезана: иначе один
+    скрипт на 256 кадров растягивал бы лист на восемь тысяч точек. Целиком
+    такие ленты лежат в `--split` и в росписи.
+    """
     gap = 2
-    cols = max(len(r[2]) for r in rows)
+    cols = min(SHEET_MAX, max(len(r[2]) for r in rows))
     w = cols * FRAME + gap * 2
     h = len(rows) * (FRAME + gap) + gap
     img = [[(24, 24, 28, 255)] * w for _ in range(h)]
     for i, (_an, _fs, seq, _loop) in enumerate(rows):
         oy = gap + i * (FRAME + gap)
-        for k, (word, _dur) in enumerate(seq):
+        for k, (word, _dur) in enumerate(seq[:SHEET_MAX]):
             f = frame_pixels(t, word, pal)
             if f is None:
                 continue
@@ -232,7 +242,7 @@ def main():
 
     outdir = out_path("units")
     os.makedirs(outdir, exist_ok=True)
-    manifest, drawn, strips = {}, 0, 0
+    manifest, drawn, strips, cut = {}, 0, 0, 0
 
     for t in range(1, N_TYPES + 1):
         if only is not None and t != only:
@@ -256,7 +266,10 @@ def main():
         for an, fs, seq, loop in rows:
             entry = {"facings": fs,
                      "loop": loop,
+                     "truncated": len(seq) >= MAX_STEPS,
                      "frames": [dict(describe(w), dur=d) for w, d in seq]}
+            if entry["truncated"]:
+                cut += 1
             rec["anims"].setdefault("$%02X" % an, []).append(entry)
             if split:
                 d = os.path.join(outdir, "type_%03d" % t)
@@ -274,6 +287,8 @@ def main():
           % (drawn, N_TYPES, len(first)))
     if split:
         print("отдельных полос: %d" % strips)
+    if cut:
+        print("оборвано предохранителем: %d" % cut)
     print("роспись: %s" % os.path.relpath(path, HERE))
     return 0
 
