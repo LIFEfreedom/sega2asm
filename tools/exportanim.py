@@ -2,7 +2,7 @@
 u"""Анимации шести видов в раскладке ремейка Dyna.
 
     python tools/exportanim.py          # шесть видов игрока 1
-    python tools/exportanim.py --all    # плюс те же виды у игрока 2
+    python tools/exportanim.py --all    # все 45 различных наборов
 
 Пишет в `out/<имя>/export/` дерево, которое кладётся прямо в `Content`:
 
@@ -46,6 +46,38 @@ u"""Анимации шести видов в раскладке ремейка 
 | `scout` | 5 ﾌﾟﾃﾗ | 9 |
 | `egg_eater` | 6 ﾋﾟｰﾁｬﾝ | 10 |
 
+## Остальные наборы (`--all`)
+
+Типов 91, но различных наборов анимаций **45**: одна и та же графика
+служит нескольким номерам расстановки. `--all` выводит все сорок пять.
+
+Шесть видов встречаются по нескольку раз — это ростеры: те же ｽﾃｺﾞ и
+ﾄﾘｹﾗ у игрока 2 и в запасных наборах, с другим банком кадров и другим
+рядом палитры. Их папки называются `<вид>_r<тип>`, где тип — номер
+расстановки представителя набора. Отличить ростеры глазом легко: у
+игрока 1 ряд палитры 1, у прочих 2.
+
+Остальные названы по тому, что про них установлено; где имени нет,
+в названии стоит номер вида, а не выдумка:
+
+| папка | вид | что это |
+|---|---|---|
+| `nest_p1`, `nest_p2_a/b/c` | 0 | гнёзда: одно игрока 1 и три разновидности игрока 2 |
+| `species07_unused` | 7 | ни один из четырёх способов создать юнита его не даёт |
+| `species08`, `species09` | 8, 9 | взрослые формы; чьи именно — не установлено |
+| `species16`, `species20` | 16, 20 | имени в ROM нет |
+| `megazaurus_head` | 18 | голова ﾒｶﾞｻﾞｳﾙｽ |
+| `megazaurus_neck`, `_leg_a`, `_leg_b` | 19 | загривок и лапы |
+| `megazaurus_capsule` | 17 | стеклянная капсула с фигурой внутри |
+| `meat` | 26 | падаль и кости |
+| `egg_empty` | 25 | пустое яйцо, 108 штук по картам |
+
+У этих наборов папки анимаций названы по НОМЕРУ (`anim_05`, `anim_0A` и
+так далее), а не `idle`/`walking`: имена ремейка осмысленны только для
+шести видов, а у гнезда ячейка `$0A` это просто ячейка `$0A`. Заодно
+видно, что заполнены у них не все пять: у пустого яйца только `$05`,
+у головы ﾒｶﾞｻﾞｳﾙｽ только `$13` и `$0D`.
+
 ## Время
 
 `Animation` держит ОДНУ задержку на всю анимацию, а в оригинале
@@ -67,6 +99,7 @@ u"""Анимации шести видов в раскладке ремейка 
   ряд 1, то есть цвета игрока 1. У игрока 2 те же кадры в ряду 2 —
   `--all` выводит и их.
 """
+import collections
 import io
 import json
 import math
@@ -88,15 +121,59 @@ from paths import OUT as out_path                            # noqa: E402
 
 FRAME = unitanim.FRAME                 # 32
 
-# папка ремейка -> (тип игрока 1, тип игрока 2, вид, имя)
-SPECIES = (
-    ("pacific",   5, 15, 1, u"ｽﾃｺﾞ"),
-    ("fat",       6, 16, 2, u"ﾄﾘｹﾗ"),
-    ("defender",  7, 17, 3, u"ｱﾛ"),
-    ("hunter",    8, 26, 4, u"ﾃｨﾗﾉ"),
-    ("scout",     9, 19, 5, u"ﾌﾟﾃﾗ"),
-    ("egg_eater", 10, 27, 6, u"ﾋﾟｰﾁｬﾝ"),
-)
+SPECIES_BYTE = 0x01FAEE            # +$1 записи: вид плюс флаги
+
+# вид оригинала -> папка ремейка и имя
+PLAYABLE = {1: ("pacific", u"ｽﾃｺﾞ"), 2: ("fat", u"ﾄﾘｹﾗ"),
+            3: ("defender", u"ｱﾛ"), 4: ("hunter", u"ﾃｨﾗﾉ"),
+            5: ("scout", u"ﾌﾟﾃﾗ"), 6: ("egg_eater", u"ﾋﾟｰﾁｬﾝ")}
+
+# типы игрока 1: у них ряд палитры 1 и они дают папку без суффикса
+PLAYER1 = {1: 5, 2: 6, 3: 7, 4: 8, 5: 9, 6: 10}
+
+# представитель набора -> папка, для всего, что не шестёрка видов
+OTHERS = {
+    1: "nest_p1", 2: "nest_p2_a", 3: "nest_p2_b", 4: "nest_p2_c",
+    11: "species07_unused",
+    12: "species08", 13: "species09",
+    22: "species08_p2", 23: "species09_p2",
+    55: "species16", 56: "megazaurus_head", 58: "species20",
+    62: "megazaurus_neck", 64: "megazaurus_leg_a", 65: "megazaurus_leg_b",
+    66: "megazaurus_capsule",
+    67: "meat", 68: "egg_empty",
+}
+
+
+def species_of(t):
+    return gfx.rom[SPECIES_BYTE + t * 4 + 1] & 0x1F
+
+
+def sets_all():
+    u"""[(папка, представитель, вид, имя)] по всем различным наборам."""
+    seen, out = {}, []
+    for t in range(1, unitgfx.N_TYPES + 1):
+        try:
+            k = unitgfx.signature(t)
+        except Exception:
+            continue
+        if k in seen:
+            continue
+        seen[k] = t
+        sp = species_of(t)
+        if sp in PLAYABLE:
+            folder, name = PLAYABLE[sp]
+            if t != PLAYER1[sp]:
+                folder = "%s_r%d" % (folder, t)
+        else:
+            folder = OTHERS.get(t, "type%03d" % t)
+            name = u"вид %d" % sp
+        out.append((folder, t, sp, name))
+    return out
+
+
+def sets_six():
+    return [(PLAYABLE[sp][0], PLAYER1[sp], sp, PLAYABLE[sp][1])
+            for sp in sorted(PLAYABLE)]
 
 # имя в ремейке -> номер анимации оригинала
 ANIMS = (("idle", 0x05), ("walking", 0x0A), ("dying", 0x1A),
@@ -154,17 +231,20 @@ def main():
     root = os.path.join(out_path("export"), "objects", "units")
     layouts, manifest, made, missing = [], {}, 0, []
 
-    for folder, t1, t2, sp, name in SPECIES:
-        for t, suffix in ((t1, ""), (t2, "_p2")) if both else ((t1, ""),):
+    for key, t, sp, name in (sets_all() if both else sets_six()):
+        if True:
             pal = unitgfx.row_palette(unitgfx.palette_row(t))
             entries = unitanim.entry_map(t)
-            key = folder + suffix
             manifest[key] = {"species": sp, "name": name, "type": t,
                              "palette_row": unitgfx.palette_row(t),
                              "anims": {}}
+            playable = sp in PLAYABLE
             for anim, an in ANIMS:
+                # Имена ремейка осмысленны только у шести видов. У гнезда
+                # или яйца ячейка $0A это не «ходьба», а просто ячейка
+                # $0A, поэтому папка называется по номеру.
+                anim = anim if playable else "anim_%02X" % an
                 d = os.path.join(root, key, anim)
-                os.makedirs(d, exist_ok=True)
                 for side, fname in SIDES:
                     try:
                         seq, loop, ok, nxt = unitanim.steps(
@@ -176,6 +256,7 @@ def main():
                         missing.append((key, anim, fname))
                         continue
                     words = expand(seq)
+                    os.makedirs(d, exist_ok=True)
                     cols, rows = sheet(t, words, pal,
                                        os.path.join(d, fname + ".png"))
                     made += 1
@@ -198,13 +279,15 @@ def main():
         json.dumps(manifest, ensure_ascii=False, indent=1))
 
     cs = [u"// Сгенерировано tools/exportanim.py — записи для",
-          u"// UnitAnimationOverrides в LevelScene.", u""]
+          u"// UnitAnimationOverrides в LevelScene. Только шесть видов",
+          u"// игрока 1: у остальных наборов нет своего UnitType.", u""]
     seen = set()
+    types = {"pacific": "Pacific", "fat": "Fat", "defender": "Defender",
+             "hunter": "Hunter", "scout": "Scout", "egg_eater": "EggEater"}
     for key, anim, fname, cols, rows, n in layouts:
-        base = key[:-3] if key.endswith("_p2") else key
-        ut = {"pacific": "Pacific", "fat": "Fat", "defender": "Defender",
-              "hunter": "Hunter", "scout": "Scout",
-              "egg_eater": "EggEater"}[base]
+        if key not in types:
+            continue
+        ut = types[key]
         dirn = {"top": "Top", "bottom": "Bottom", "right": "Right"}[fname]
         an = {"idle": "IdleAnim", "walking": "WalkingAnim",
               "dying": "DyingAnim", "kicking": "KickingAnim",
@@ -218,9 +301,13 @@ def main():
     io.open(os.path.join(out_path("export"), "layouts.cs"), "w",
             encoding="utf-8", newline="\n").write(u"\n".join(cs) + u"\n")
 
-    print(u"листов: %d -> %s" % (made, os.path.relpath(root, HERE)))
+    print(u"наборов: %d, листов: %d -> %s"
+          % (len(manifest), made, os.path.relpath(root, HERE)))
     if missing:
-        print(u"не нашлось: %s" % ", ".join("%s/%s/%s" % m for m in missing))
+        byset = collections.Counter(m[0] for m in missing)
+        print(u"нет анимации: %d сочетаний; больше всего у %s"
+              % (len(missing),
+                 ", ".join("%s (%d)" % kv for kv in byset.most_common(5))))
     print(u"раскладки: %s" % os.path.relpath(
         os.path.join(out_path("export"), "layouts.cs"), HERE))
     return 0
