@@ -28,6 +28,7 @@ Dyna Brothers 2 — проект дизассемблирования
   maptex    — карты миссий настоящими тайлами и спрайтами (MTARGS="1 5" или --types)
   gfx       — графика в out/gfx/*.png
   unitgfx   — как выглядит каждый тип юнита (UARGS=номер типа)
+  unitanim  — анимации юнитов по отдельности (UAARGS="5 --split")
   tileprobe — показать кусок ROM как тайлы 4bpp:  make tileprobe ADDR=020000
   pcm       — сэмплы DAC в WAV
   music     — партитуры песен; sfx — звуковые эффекты

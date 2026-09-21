@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -228,6 +228,13 @@ terrain:
 # Карты этапов: местность 40x40 в PNG и сводка по расстановке
 maps:
 	@$(PYTHON) $(TOOLS_DIR)/maps.py
+
+# Анимации юнитов поодиночке: своя полоса кадров на анимацию, длительности
+# и точка возврата, плюс units.json для переноса.
+#     make unitanim UAARGS="5 --split"
+UAARGS ?=
+unitanim:
+	@$(PYTHON) $(TOOLS_DIR)/unitanim.py $(UAARGS)
 
 # Карты миссий настоящими тайлами игры: 123 PNG 1280x1280 со спрайтами
 # юнитов, плюс лист образцов местности. Аргументы — глава и миссия:
