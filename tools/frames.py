@@ -3,6 +3,8 @@
 
     python tools/frames.py            сводка
     python tools/frames.py 0 1 2      разбор этих кадров
+    python tools/frames.py --pieces   вторая половина: раскладки спрайта
+    python tools/frames.py --pieces 131
     make frames FRAME=0
 
 С `$000200` идут длинные слова-указатели. Каждый ведёт на **список
@@ -37,6 +39,10 @@ except Exception:
 
 ROM = rom_bytes()
 BASE = int(os.environ.get("MM_FRAME_TABLE", "000200"), 16)
+# С этого места таблица меняет смысл: дальше не списки передач, а
+# раскладки — из каких кусков сложить спрайт на экране.
+PIECES = 0x002F00
+TAB_END = 0x003898
 U16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
 U32 = lambda o: struct.unpack_from(">I", ROM, o)[0]
 
@@ -97,8 +103,70 @@ def summary():
     print("похоже на список адресов внутри самой таблицы кадров")
 
 
+def pieces(v):
+    """Раскладка: слово «сколько кусков», слово-ссылка, дальше по 4 байта."""
+    n = U16(v)
+    if not (1 <= n <= 64):
+        return None
+    out = []
+    for k in range(n):
+        o = v + 4 + k * 4
+        y = struct.unpack_from(">b", ROM, o)[0]
+        x = struct.unpack_from(">b", ROM, o + 1)[0]
+        out.append((y, x, U16(o + 2)))
+    return out
+
+
+def show_pieces(i):
+    at = PIECES + i * 4
+    v = U32(at)
+    items = pieces(v)
+    print("раскладка %d: указатель в $%06X -> $%06X, ссылка $%04X"
+          % (i, at, v, U16(v + 2)))
+    if items is None:
+        print("  на раскладку не похоже: %s"
+              % " ".join("%02X" % b for b in ROM[v:v + 16]))
+        return
+    for y, x, w in items:
+        print("    y %+4d  x %+4d  тайл $%03X, ряд палитры %d%s%s"
+              % (y, x, w & 0x7FF, (w >> 13) & 3,
+                 ", отражён по горизонтали" if w & 0x0800 else "",
+                 ", по вертикали" if w & 0x1000 else ""))
+
+
+def pieces_summary():
+    n = (TAB_END - PIECES) // 4
+    cnt = collections.Counter()
+    bad = 0
+    names = []
+    for i in range(n):
+        items = pieces(U32(PIECES + i * 4))
+        if items is None:
+            bad += 1
+            continue
+        cnt[len(items)] += 1
+        names += [w for _y, _x, w in items]
+    print("раскладок %d (с $%06X по $%06X), не разобралось %d"
+          % (n, PIECES, TAB_END, bad))
+    print("кусков всего %d; в раскладке их от %d до %d"
+          % (len(names), min(cnt), max(cnt)))
+    print("ни одного слова с битом 15 и ни одного номера тайла >= $800: %s"
+          % ("да" if not any(w & 0x8000 or (w & 0x7FF) >= 0x800 for w in names)
+             else "НЕТ"))
+    rows = collections.Counter((w >> 13) & 3 for w in names)
+    print("ряды палитры: %s" % dict(sorted(rows.items())))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if "--pieces" in sys.argv:
+        if args:
+            for a in args:
+                show_pieces(int(a, 0))
+                print()
+        else:
+            pieces_summary()
+        return 0
     if not args:
         summary()
         return 0
