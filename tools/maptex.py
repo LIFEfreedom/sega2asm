@@ -60,8 +60,38 @@ u"""Карты миссий настоящими тайлами игры.
   запуска к запуску разные, и воспроизводить их бессмысленно.
 - **Анимация.** `SeedAnimatedTiles` `$0214D2` раздаёт клеткам случайную
   фазу; здесь всегда нулевая.
-- **Юниты** нарисованы точками цветами миникарты (`MinimapTypeColours`
-  `$00A2DC`), а не спрайтами.
+- **Кадр юнита взят первый.** Спрайты рисуются, но анимация стоит на
+  первом кадре своей последовательности.
+
+## Юниты
+
+Спрайт юнита — ровно `4x4` тайла, то есть 32x32 точки, то есть одна
+клетка карты. Ставится он в свою клетку без смещения: `+$4` и `+$5`
+записи юнита при расстановке обнулены.
+
+Какую анимацию включить, говорит **байт позы** расстановки. `LoadPlacement`
+`$01EA12` разбирает его длинной цепочкой сравнений, и каждая ветка кладёт
+номер анимации в `+$7` записи юнита:
+
+| поза | сколько в данных | что зовётся | анимация |
+|---|---:|---|---|
+| 0 | 619 | `EnterWalkStateNormal` | `$0A` при чётном направлении, `$0B` при нечётном |
+| 1 | 237 | `EnterNestPose` | `$06` |
+| 3 | 153 | `BeginHatchStages` | `$05` |
+| 7 | 108 | `EnterIdleFacing` | `$05` |
+| 4 | 60 | `UnitDieOnCell` -> `MakeCarcass` | `$20`, а у декора (бит 5 `+$C`) `$06` |
+| 8 | 17 | то же плюс бит 4 `+$11` | `$20` / `$06` |
+| 2 | 10 | `EnterIdleFacing` | `$05` |
+
+Остальных поз (`$05`, `$06`, `$09`, `$0A`, `$0B`, `$0C`) разбор ждёт, но в
+данных нет ни одной.
+
+Направление берётся из тех же трёх бит слова расстановки; таблица
+скриптов индексируется ЧЁТНЫМ направлением (`facing & ~1`), а нечётность
+уже учтена выбором анимации. Палитра — ряд из `UnitPaletteRow` `$015156`.
+Нулевой цвет у спрайтов прозрачен, и рисуются они в порядке возрастания
+Y, чтобы ближний перекрывал дальнего — так же, как их сортирует сама игра
+(`UpdateUnitScreenPos`, ключ `+$3 * 32 + +$5`).
 
 ## Лист образцов
 
@@ -93,7 +123,8 @@ except Exception:
     pass
 
 from unpack import unpack                                    # noqa: E402
-from gfx import png                                          # noqa: E402
+from gfx import png, columnwise, table_len                   # noqa: E402
+from gfx import L as gfx_L                                   # noqa: E402
 from paths import OUT as out_path, rom_bytes                 # noqa: E402
 
 ROM = rom_bytes()
@@ -108,7 +139,7 @@ CHAPTERS = 0x060400        # ChapterTable
 MREC = 0x5C                # описание миссии
 TYPE_TO_TILE = 0x020454    # data_165: тип -> плитка
 PAL_ARRAY = 0x00F784       # data_99
-MINIMAP_COLOURS = 0x00A2DC
+UNIT_PALETTE_ROW = 0x015156  # тип минус один -> ряд CRAM
 
 W = H = 40
 CELL = 32                  # точек на клетку: 2x2 метатайла по 2x2 тайла
@@ -236,7 +267,7 @@ def autotile(cells):
 
 
 def placement(a):
-    u"""[(x, y, тип)] расстановки; разбор тот же, что в maps.py."""
+    u"""[(x, y, направление, тип, поза)] расстановки."""
     out = []
     if not (0x100000 <= a < len(ROM) - 4):
         return out
@@ -244,12 +275,77 @@ def placement(a):
         v = U16(a)
         if v & 0x8000:
             break
-        out.append(((v >> 9) & 0x3F, v & 0x3F, ROM[a + 2]))
+        out.append(((v >> 9) & 0x3F, v & 0x3F, (v >> 6) & 7,
+                    ROM[a + 2], ROM[a + 3]))
         a += 4
     return out
 
 
-def draw(cells, rec, mrec, units, path):
+SPECIES_BYTE = 0x01FAEE    # +$1 записи: вид плюс флаги, бит 5 — декор
+
+
+def is_decor(t):
+    return bool(ROM[SPECIES_BYTE + t * 4 + 1] & 0x20)
+
+
+def pose_anim(t, pose, facing):
+    u"""Номер анимации по байту позы; см. таблицу в шапке."""
+    if pose == 0:
+        return 0x0B if facing & 1 else 0x0A
+    if pose == 1:
+        return 0x06
+    if pose in (2, 3, 7):
+        return 0x05
+    if pose in (4, 8):
+        return 0x06 if is_decor(t) else 0x20
+    return 0x0A
+
+
+def unit_sprite(t, pose, facing, pal_rows):
+    u"""32x32 цветов, None вместо прозрачного; None, если кадра нет."""
+    import unitgfx
+    anim = pose_anim(t, pose, facing)
+    try:
+        words = unitgfx.walk(unitgfx.script_addr(t, anim, facing & ~1))
+    except Exception:
+        return None
+    if not words:
+        return None
+    w = words[0]
+    tbl = (gfx_L(unitgfx.COMMON_FRAMES) if w & 0x100
+           else unitgfx.frame_table(t))
+    idx = w & 0xFF
+    n = table_len(tbl)
+    if not n or idx >= n:
+        return None
+    p = gfx_L(tbl + 4 * idx)
+    if not (0 < p < 0x200000):
+        return None
+    try:
+        data = columnwise(bytes(unpack(ROM, p)[2]))
+    except Exception:
+        return None
+    pal = pal_rows[ROM[UNIT_PALETTE_ROW + t - 1] & 3]
+    hf = bool(w & 0x800)
+    out = [[None] * 32 for _ in range(32)]
+    for ty in range(4):
+        for tx in range(4):
+            tile = data[(ty * 4 + tx) * 32:(ty * 4 + tx + 1) * 32]
+            if len(tile) < 32:
+                continue
+            for y in range(8):
+                row = out[ty * 8 + y]
+                for x in range(8):
+                    b = tile[y * 4 + (x >> 1)]
+                    v = (b >> 4) if x % 2 == 0 else (b & 15)
+                    if v:
+                        row[31 - (tx * 8 + x) if hf else tx * 8 + x] = pal[v]
+    return out
+
+
+def draw(cells, rec, mrec, units, path, nosprite=None):
+    if nosprite is None:
+        nosprite = set()
     _typeof, celltab, metatab = meta_tables(rec)
     tiles = tileset(rec)
     pals = [array_palette(0), array_palette(mrec[0x28]),
@@ -302,16 +398,21 @@ def draw(cells, rec, mrec, units, path):
                     for y in range(8):
                         px[by + y][bx:bx + 8] = b[y]
 
-    for ux, uy, ut in units:
+    # ближний перекрывает дальнего: рисуем сверху вниз
+    for ux, uy, ud, ut, upose in sorted(units, key=lambda u: (u[1], u[0])):
         if not (0 <= ux < W and 0 <= uy < H):
             continue
-        c = ROM[MINIMAP_COLOURS + ut - 1] if 1 <= ut <= 51 else 0xFF
-        col = pals[0][c >> 4]
-        cx0, cy0 = ux * CELL + CELL // 2, uy * CELL + CELL // 2
-        for dy in range(-5, 6):
-            for dx in range(-5, 6):
-                if abs(dx) + abs(dy) <= 5:
-                    px[cy0 + dy][cx0 + dx] = col
+        spr = unit_sprite(ut, upose, ud, pals)
+        if spr is None:
+            nosprite.add(ut)
+            continue
+        ox, oy = ux * CELL, uy * CELL
+        for y in range(32):
+            dst = px[oy + y]
+            src = spr[y]
+            for x in range(32):
+                if src[x] is not None:
+                    dst[ox + x] = src[x]
 
     png(path, W * CELL, H * CELL, px)
     return skipped
@@ -409,6 +510,7 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     by_rec = collections.defaultdict(list)
+    nosprite = set()
     drawn = skipped_total = 0
     for c, m, r in missions():
         if want and (c, m) != want:
@@ -430,9 +532,12 @@ def main():
         if rec_no >= len(recs):
             continue
         by_rec[rec_no].append("гл.%d м.%d" % (c, m))
-        name = "ch%d_m%02d_stage%03d.png" % (c, m, st)
+        # этап в имени — ИНДЕКС StageTable, то есть байт +$3 минус один:
+        # так имя совпадает со stage_NNN.png от tools/maps.py
+        name = "ch%d_m%02d_stage%03d.png" % (c, m, st - 1)
         skipped_total += draw(cells, recs[rec_no], r,
-                              placement(pl), os.path.join(outdir, name))
+                              placement(pl), os.path.join(outdir, name),
+                              nosprite)
         drawn += 1
 
     print("нарисовано карт: %d -> %s"
@@ -441,6 +546,8 @@ def main():
         return 0
     print("клеток с байтом 0 (записи нет, не нарисованы): %d"
           % skipped_total)
+    if nosprite:
+        print("типы без кадра: %s" % sorted(nosprite))
 
     doc = os.path.join(HERE, "docs", "game-tilesets.md")
     f = io.open(doc, "w", encoding="utf-8", newline="\n")
