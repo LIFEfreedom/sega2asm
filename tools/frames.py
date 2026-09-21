@@ -104,8 +104,14 @@ def summary():
 
 
 def pieces(v):
-    """Раскладка: слово «сколько кусков», слово-ссылка, дальше по 4 байта."""
+    """Раскладка: слово «сколько кусков», слово-ссылка, дальше по 4 байта.
+
+    Счётчик 0 — законная запись: рисовать нечего, и вся она занимает
+    четыре байта. Таких восемь, идут подряд.
+    """
     n = U16(v)
+    if n == 0:
+        return []
     if not (1 <= n <= 64):
         return None
     out = []
@@ -127,6 +133,9 @@ def show_pieces(i):
         print("  на раскладку не похоже: %s"
               % " ".join("%02X" % b for b in ROM[v:v + 16]))
         return
+    if not items:
+        print("  пусто: рисовать нечего, запись занимает четыре байта")
+        return
     for y, x, w in items:
         print("    y %+4d  x %+4d  тайл $%03X, ряд палитры %d%s%s"
               % (y, x, w & 0x7FF, (w >> 13) & 3,
@@ -139,15 +148,19 @@ def pieces_summary():
     cnt = collections.Counter()
     bad = 0
     names = []
+    empty = 0
     for i in range(n):
         items = pieces(U32(PIECES + i * 4))
         if items is None:
             bad += 1
             continue
+        if not items:
+            empty += 1
+            continue
         cnt[len(items)] += 1
         names += [w for _y, _x, w in items]
-    print("раскладок %d (с $%06X по $%06X), не разобралось %d"
-          % (n, PIECES, TAB_END, bad))
+    print("раскладок %d (с $%06X по $%06X): пустых %d, не разобралось %d"
+          % (n, PIECES, TAB_END, empty, bad))
     print("кусков всего %d; в раскладке их от %d до %d"
           % (len(names), min(cnt), max(cnt)))
     print("ни одного слова с битом 15 и ни одного номера тайла >= $800: %s"
