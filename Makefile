@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -271,6 +271,13 @@ z80render:
 VOICE ?=
 z80voice:
 	@$(PYTHON) $(TOOLS_DIR)/z80voice.py $(VOICE)
+
+# Таблица кадров спрайтов в начале картриджа (Maui Mallard).
+#   make frames             сводка
+#   make frames FRAME=0     разбор одного кадра
+FRAME ?=
+frames:
+	@$(PYTHON) $(TOOLS_DIR)/frames.py $(FRAME)
 
 # Сэмплы DAC в WAV: четырёхбитная дельта, декодер повторяет главный цикл Z80
 pcm:
