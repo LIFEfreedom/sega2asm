@@ -4,6 +4,7 @@ u"""Карты миссий настоящими тайлами игры.
     make maptex                     # все 123 миссии
     make maptex MTARGS="1 5"        # только глава 1, миссия 5
     make maptex MTARGS=--types      # лист образцов местности
+    make maptex MTARGS=--export     # местность в раскладке ремейка
 
 `maps.py` рисует карту клетками по восемь точек, одним усреднённым цветом
 на клетку. Здесь она собирается так же, как её собирает сама игра: байт
@@ -127,6 +128,54 @@ Y, чтобы ближний перекрывал дальнего — так ж
 наборов. За тип берётся его первый байт карты, то есть самый обычный его
 вид без кромок. Имён у типов в ROM нет, и это единственный способ
 увидеть, что за ними стоит.
+
+## Экспорт местности (`--export`)
+
+Ремейк рисует растительность и прочие мелочи карты **объектами поверх
+плитки**, а в оригинале это сами типы местности. Клетка там и там 32x32,
+так что перенос прямой. Пишется в `out/<имя>/export/`:
+
+    objects/grass.png, flowers.png, thorns.png   — сетка 2x2, стадии роста
+    objects/stone.png, fire.png, dried_dirt.png,
+    tree.png, crack.png, dry_land.png            — по одной картинке
+    terrain/set<N>/type_<NN>.png                 — все 32 типа по всем девяти наборам
+
+**Что подтверждено кодом**, а не глазом:
+
+| имя ремейка | тип | откуда известно |
+|---|---|---|
+| `grass` | 1, 2, 3, 4 | `GrowGrassStage` растит «пока тип не 4», `SeedGrass` ставит 1 |
+| `flowers` | 5, 6, 7 | `GrowFlowerStage`, «стадии 5…7» |
+| `thorns` | 21, 22, 23 | `GrowOrShrinkThorn` работает ровно с 21/22/23 |
+| `stone` | 10 | `LavaCoolToStone`: лава 11 остывает в 10 |
+| `dried_dirt` | 18 | `FireBurnOut` переводит выгоревшую клетку в 18 |
+| `water` | 19 | кромку ей достраивает `BuildMapEdgeCodes`, и она анимирована |
+| `ice` | 14 | видно глазом: единственная ярко-синяя клетка |
+| `vent` | 20 | жерло; вместе с водой единственные анимированные типы |
+
+**`fire.png` здесь НЕТ, и это не упущение.** Тип 12 — огонь по коду
+(`FireBurnOut`, `FireSpreadToCell`), но его плитка в наборе 0 это обычная
+земля, и в маске анимации `$00078FFF` бита 12 нет. Проверка по тайлам
+подтверждает: анимированные тайлы в наборе 0 берут только типы 19 (вода),
+20 (жерло) и 30 (кромка плато у воды). Значит пламя оригинал рисует не
+плиткой — где именно, не выяснено, и подсовывать вместо него кусок земли
+было бы обманом.
+
+**Что поставлено по картинке** и потому может быть неверно: `tree` — тип
+24 (рядом кладутся 25, розовое цветущее, и 26, хвойные); `crack` — тип 13
+(чёрные разломы); `dry_land` — тип 17 (потрескавшаяся сушь, соседний 18
+выглядит так же, но он занят выгоревшей землёй).
+
+У цветов и колючек стадий в оригинале **три**, а ремейк ждёт четыре
+(`GrowState`: Nothing, Small, Medium, Big). Три ложатся в ячейки 1…3, а
+нулевая остаётся пустой: «только что посеянного» цветка в оригинале нет,
+клетка сразу становится типом 5. У травы стадий ровно четыре, и они
+ложатся без натяжки.
+
+**Набор графики меняет смысл.** Тип 27 в первом наборе это зелёный куб, а
+в четвёртом — каменный истукан. Одиночные картинки взяты из набора 0
+(его берут 22 миссии), а `terrain/set<N>/` даёт все девять, чтобы было из
+чего выбрать.
 
 ## Байт 0 читает мимо таблицы
 
@@ -593,8 +642,108 @@ def type_sheet(recs, path, scale=2):
     return cols
 
 
+# Имя ремейка -> типы оригинала. Стадии идут в ячейки сетки по порядку.
+STAGED = (("grass", (1, 2, 3, 4)),
+          ("flowers", (None, 5, 6, 7)),
+          ("thorns", (None, 21, 22, 23)))
+SINGLE = (("stone", 10), ("dried_dirt", 18), ("dry_land", 17),
+          ("crack", 13), ("tree", 24), ("tree_pink", 25),
+          ("tree_fir", 26), ("water", 19), ("ice", 14),
+          ("vent", 20), ("lava", 11))
+
+
+def cell_pixels(t, celltab, metatab, tiles, pals, typeof):
+    u"""32x32 цветов клетки типа t, или None если такого типа в наборе нет."""
+    b = None
+    for k in range(255, 0, -1):
+        if typeof[k] == t:
+            b = k
+    if b is None:
+        return None
+    entry = celltab[b - 1]
+    px = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+    for q in range(4):
+        meta = metatab[entry[q] & 0x1FF]
+        for sx in range(4):
+            name = (meta[sx] + 0x6075) & 0xFFFF
+            g = tiles.get(name & 0x7FF)
+            if g is None:
+                continue
+            p = pals[(name >> 13) & 3]
+            hf, vf = (name >> 11) & 1, (name >> 12) & 1
+            bx = (q & 1) * 16 + (sx & 1) * 8
+            by = (q >> 1) * 16 + (sx >> 1) * 8
+            for y in range(8):
+                yy = 7 - y if vf else y
+                for x in range(8):
+                    xx = 7 - x if hf else x
+                    v = g[yy * 4 + (xx >> 1)]
+                    px[by + y][bx + x] = p[(v >> 4) if xx % 2 == 0
+                                           else (v & 15)] + (255,)
+    return px
+
+
+def export_terrain():
+    recs = gfx_records()
+    palno = record_palette_no(recs)
+    root = out_path("export")
+    objects = os.path.join(root, "objects")
+    os.makedirs(objects, exist_ok=True)
+
+    uniq = []
+    for k, rec in enumerate(recs):
+        key = rec[0x1C0:0x1C8]
+        if key not in [u[0] for u in uniq]:
+            uniq.append((key, k))
+
+    made = 0
+    for _key, k in uniq:
+        rec = recs[k]
+        typeof, celltab, metatab = meta_tables(rec)
+        tiles = tileset(rec)
+        pals = [array_palette(0), array_palette(1), array_palette(3),
+                rec_palette(rec, palno.get(k, 0))]
+        d = os.path.join(root, "terrain", "set%d" % k)
+        os.makedirs(d, exist_ok=True)
+        cells = {}
+        for t in range(32):
+            px = cell_pixels(t, celltab, metatab, tiles, pals, typeof)
+            if px is None:
+                continue
+            cells[t] = px
+            png(os.path.join(d, "type_%02d.png" % t), CELL, CELL, px,
+                alpha=True)
+            made += 1
+        if k != 0:
+            continue
+        # именованные картинки — из набора 0
+        for name, stages in STAGED:
+            w = h = CELL * 2
+            img = [[(0, 0, 0, 0)] * w for _ in range(h)]
+            for i, t in enumerate(stages):
+                if t is None or t not in cells:
+                    continue
+                ox, oy = (i % 2) * CELL, (i // 2) * CELL
+                for y in range(CELL):
+                    img[oy + y][ox:ox + CELL] = cells[t][y]
+            png(os.path.join(objects, name + ".png"), w, h, img, alpha=True)
+            made += 1
+        for name, t in SINGLE:
+            if t not in cells:
+                continue
+            png(os.path.join(objects, name + ".png"), CELL, CELL, cells[t],
+                alpha=True)
+            made += 1
+
+    print(u"местность: %d картинок, наборов %d -> %s"
+          % (made, len(uniq), os.path.relpath(root, HERE)))
+    return 0
+
+
 def main():
     args = sys.argv[1:]
+    if "--export" in args:
+        return export_terrain()
     want = None
     if args and args[0] == "--types":
         recs = gfx_records()
