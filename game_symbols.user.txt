@@ -1151,10 +1151,10 @@ InputForMode5                 = $004872   ; ветвление по режиму
                              ; Отдельный вопрос — bset #7 в $251A: индекс становится отрицательным
 InputForMode26                = $004A4A   ; короткий шаг курсора. Режимы 2 и 6
 ClampToRangeStep20            = $004800   ; свод числа в диапазон, шаг $20
-ScreenDrawPlayerCounts        = $055C56   ; Р±Р°Р№С‚С‹ +$6 Рё +$7 СЃРѕСЃС‚РѕСЏРЅРёСЏ РёРіСЂРѕРєР° 1 вЂ” РїРѕРіРѕР»РѕРІСЊРµ РїРѕ РіСЂСѓРїРїР°Рј
-ScreenSizeByWord2             = $05D9A6   ; СЃР»РѕРІРѕ +$2 Р·Р°РїРёСЃРё: 9 РґР°С‘С‚ 32, РёРЅР°С‡Рµ РґСЂСѓРіРёРµ С‡РёСЃР»Р°
-ScreenPushRecordArgs          = $05D8EA   ; СЃР»РѕРІРѕ +$2, d0, d1 Рё Р°РґСЂРµСЃ +$1A Р·Р°РїРёСЃРё РЅР° СЃС‚РµРє
-ScreenReadWordAndJump         = $05B8C6   ; СЃР»РѕРІРѕ (a0) Рё РїРµСЂРµС…РѕРґ РІ $05B492
+ScreenDrawPlayerCounts        = $055C56   ; байты +$6 и +$7 состояния игрока 1 — поголовье по группам
+ScreenSizeByWord2             = $05D9A6   ; слово +$2 записи: 9 даёт 32, иначе другие числа
+ScreenPushRecordArgs          = $05D8EA   ; слово +$2, d0, d1 и адрес +$1A записи на стек
+ScreenReadWordAndJump         = $05B8C6   ; слово (a0) и переход в $05B492
 TestPhaseMask    = $02AEB8   ; btst фазы $FFE0B3 в маске d7: правило
                              ; работает только в перечисленных фазах
 DrawStatusLine   = $00A7FC   ; 25 ссылок. План B, адрес $E000 или $E01A
@@ -1183,26 +1183,26 @@ UploadSpritesFrom1D64 = $0564CE ; 20 ссылок. Трап $FF04 шлёт $FF1D
 ;
 ; По категориям: VdpWrite 26, Palette 21, LoadGfx 18, MakeStruct 17, Buffer 14, Decompress 13, Helper 12, Table 10, Sound 9, Args 7, State 7, Units 7, FrameWait 7, ObjRecords 6, Scroll 6, ClearPlanes 4, Input 3, Random 3, Text 2, SpriteList 1, Timer 1
 
-ScreenLoadSetByArg            = $05017A   ; РЅРѕРјРµСЂ РЅР°Р±РѕСЂР° Р±РµСЂС‘С‚СЃСЏ РёР· СЃР»РѕРІР° $8(a6)
-ScreenUnpackByArg             = $050230   ; СЂР°СЃРїР°РєРѕРІРєР° РЅР°Р±РѕСЂР° РїРѕ СЃР»РѕРІСѓ $8(a6)
-ScreenUnpack17755C            = $050290   ; СЂР°СЃРїР°РєРѕРІРєР° $17755C РІ GameState
+ScreenLoadSetByArg            = $05017A   ; номер набора берётся из слова $8(a6)
+ScreenUnpackByArg             = $050230   ; распаковка набора по слову $8(a6)
+ScreenUnpack17755C            = $050290   ; распаковка $17755C в GameState
 ObjPlaceFromScript           = $0503B4   ; 132 инстр, 0 ссылок
                                ; идёт к ObjectRecords[$C(a5)] шагом $5A, читает пару байт п
                                ; о указателю $6(a5) в +$74/+$76 и берёт +$44 объекта минус 
                                ; $80 — то есть ставит объект по координатам из скрипта
 ObjWalkRecords               = $05056E   ; 74 инстр, 1 ссылок
                                ; тот же обход записей объектов
-AnimScrollByWord80            = $050678   ; РїСЂРѕРєСЂСѓС‚РєР° РїРѕ СЃР»РѕРІСѓ +$80 Р·Р°РїРёСЃРё a5; РѕС‚СЂРёС†Р°С‚РµР»СЊРЅРѕРµ РїСЂРѕРїСѓСЃРєР°РµС‚СЃСЏ
-ScreenWriteRowByArgs          = $0506E2   ; СЃС‚СЂРѕРєР° РІ VDP, РґР»РёРЅР° РёР· СЃР»РѕРІР° $E(a6)
+AnimScrollByWord80            = $050678   ; прокрутка по слову +$80 записи a5; отрицательное пропускается
+ScreenWriteRowByArgs          = $0506E2   ; строка в VDP, длина из слова $E(a6)
 UploadNameRows                 = $050714   ; выгрузить +$E строк по $28 слов из +$8 трапом $FF04: источник
                              ; шагает на $50, адрес в таблице имён — на $80
-ScreenFillSixAtFF0568         = $05074E   ; С€РµСЃС‚СЊ Р·Р°РїРёСЃРµР№ СЃ $FF0568
+ScreenFillSixAtFF0568         = $05074E   ; шесть записей с $FF0568
 BuildFourSprites               = $0507FA   ; четыре записи спрайта подряд по образцу data_284: первое слово
                              ; каждой — общий Y из +$C, остальные три из таблицы; байт +$E
                              ; дописывается в последнюю
-ScreenWriteToFF1D64           = $050844   ; РІС‹РІРѕРґ РІ Р±СѓС„РµСЂ $FF1D64 РїРѕ СЃР»РѕРІСѓ $8(a6)
-ScreenLoadIntoGameState       = $050870   ; Р·Р°РіСЂСѓР·РєР° РІ GameState
-ScreenUnpackPtrArg            = $051052   ; СЂР°СЃРїР°РєРѕРІРєР° РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
+ScreenWriteToFF1D64           = $050844   ; вывод в буфер $FF1D64 по слову $8(a6)
+ScreenLoadIntoGameState       = $050870   ; загрузка в GameState
+ScreenUnpackPtrArg            = $051052   ; распаковка по указателю $8(a6)
 BuildSpriteEntries           = $051B54   ; 18 инстр, 3 ссылок
                                ; пишет по четыре слова в SpriteListBuffer из таблицы (a0)+,
                                ;  прибавляя d1 к первому и d0 к четвёртому — Y и X
@@ -1221,26 +1221,26 @@ WriteFourWordsC              = $051D44   ; 28 инстр, 1 ссылок
                                ; то же, третий вариант
 WriteFourWordsD              = $051DA8   ; 28 инстр, 1 ссылок
                                ; то же, четвёртый вариант
-ScreenWriteWordArg            = $051E0E   ; Р·Р°РїРёСЃСЊ СЃР»РѕРІР° $8(a6)
+ScreenWriteWordArg            = $051E0E   ; запись слова $8(a6)
 FrameStepAtE110              = $051EC4   ; 52 инстр, 1 ссылок
                                ; кадр: вызвать колбэк $FF4414, перестроить список видимых, 
                                ; сыграть звук из $FF4304; вывод по адресу $E110
 FrameStepAtE138              = $051F94   ; 52 инстр, 1 ссылок
                                ; то же, адрес $E138
-ScreenBuildFromData285        = $0520F8   ; Р·Р°РїРёСЃСЊ СЃС†РµРЅС‹ СЃРѕР±РёСЂР°РµС‚СЃСЏ РїРѕ С‚Р°Р±Р»РёС†Рµ data_285
+ScreenBuildFromData285        = $0520F8   ; запись сцены собирается по таблице data_285
 FrameStepAtE0E0              = $052150   ; 55 инстр, 1 ссылок
                                ; то же, адрес $E0E0
 FrameStepAtE138b             = $052226   ; 87 инстр, 1 ссылок
                                ; то же, адрес $E138, длиннее
 UploadCramLines123             = $05239C   ; собрать 48 слов через GfxHelper_052414 (три захода) и
                              ; выгрузить их в CRAM с адреса $0020 — строки 1, 2 и 3
-ScreenFadeLocal128            = $0523D8   ; С€Р°Рі РїР°Р»РёС‚СЂС‹ С‡РµСЂРµР· Р»РѕРєР°Р»СЊРЅС‹Р№ Р±СѓС„РµСЂ РЅР° 128 Р±Р°Р№С‚
+ScreenFadeLocal128            = $0523D8   ; шаг палитры через локальный буфер на 128 байт
 DarkenPaletteByStep            = $052414   ; шестнадцать цветов темнеют на величину из data_290 по номеру
                              ; шага +$8: из каждой тетрады вычитается своё, ниже нуля не
                              ; уходит. Тот же приём, что в DarkenPaletteRow, только шаг
                              ; берётся из таблицы, а не из индекса
 UnpackToScratch                = $05247C   ; распаковать источник +$8 трапом $FF10 в буфер $FF0564
-ScreenStepByArgWord           = $0524B2   ; СЃР»РѕРІРѕ $8(a6) РІРµРґС‘С‚ С€Р°Рі
+ScreenStepByArgWord           = $0524B2   ; слово $8(a6) ведёт шаг
 PlayFrameSequence              = $052566   ; проигрыватель сценок: +$8 повторов, внутри каждого +$10
                              ; кадров ожидания (кадр = вызов FrameCallbackPtr, сборка
                              ; спрайтов, отложенный звук трапом $FF2F, VDPWaitVBlank,
@@ -1248,7 +1248,7 @@ PlayFrameSequence              = $052566   ; проигрыватель сцен
                              ; RebaseNameWords и ветка по номеру
 RebaseNameWords                = $052606   ; пересчитать +$C слов имени по адресу +$8: маска $1FFF,
                              ; тайлы до $FF сдвигаются на базу +$E, остальные на $8680
-ScreenStepByArgPtr            = $052644   ; СѓРєР°Р·Р°С‚РµР»СЊ $A(a6) РІРµРґС‘С‚ С€Р°Рі
+ScreenStepByArgPtr            = $052644   ; указатель $A(a6) ведёт шаг
 BuildSpriteList                = $05267C   ; собрать записи спрайтов из описания кадра: Y плюс +$1A,
                              ; байт связки растёт по счётчику, атрибут — биты отражения из
                              ; +$10 через XOR плюс палитра и приоритет, X плюс +$18.
@@ -1256,94 +1256,94 @@ BuildSpriteList                = $05267C   ; собрать записи спр�
 TickAndDrawAnim                = $052724   ; шаг анимации: убавить таймер кадра +$8 записи, на нуле
                              ; сдвинуть номер кадра +$A на два (с возвратом в ноль по
                              ; признаку конца) и перезарядить таймер; затем BuildSpriteList
-ScreenAnyButtonPressed        = $052C16   ; Р±РёС‚ 7 InputState РёР»Рё $FF0041 вЂ” РЅР°Р¶Р°С‚Р° Р»СЋР±Р°СЏ РєРЅРѕРїРєР°
-ScreenPaletteStepA            = $052D58   ; С‚СЂР°Рї $FF21 Рё С€Р°Рі РїР°Р»РёС‚СЂС‹
-ScreenPaletteStepB            = $052F46   ; Р±Р»РёР·РЅРµС† ScreenPaletteStepA
-ScreenPaletteByWordD0         = $053140   ; СЃР»РѕРІРѕ d0 Р»РѕР¶РёС‚СЃСЏ РІ Р»РѕРєР°Р»СЊРЅС‹Рµ РґРІР° Р±Р°Р№С‚Р° Рё РІРµРґС‘С‚ РїР°Р»РёС‚СЂСѓ
-ScreenPaletteFromData295      = $05324A   ; С‚СЂР°Рї $FF32 Рё С‚Р°Р±Р»РёС†Р° data_295
-ScreenPaletteFromArgPtr       = $0532C6   ; РїР°Р»РёС‚СЂР° РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenBranchByPtrRange        = $0533B6   ; СѓРєР°Р·Р°С‚РµР»СЊ a0 РјРµРЅСЊС€Рµ $0536C0 вЂ” РѕРґРЅР° РІРµС‚РєР°, РёРЅР°С‡Рµ РґСЂСѓРіР°СЏ
+ScreenAnyButtonPressed        = $052C16   ; бит 7 InputState или $FF0041 — нажата любая кнопка
+ScreenPaletteStepA            = $052D58   ; трап $FF21 и шаг палитры
+ScreenPaletteStepB            = $052F46   ; близнец ScreenPaletteStepA
+ScreenPaletteByWordD0         = $053140   ; слово d0 ложится в локальные два байта и ведёт палитру
+ScreenPaletteFromData295      = $05324A   ; трап $FF32 и таблица data_295
+ScreenPaletteFromArgPtr       = $0532C6   ; палитра по указателю $8(a6)
+ScreenBranchByPtrRange        = $0533B6   ; указатель a0 меньше $0536C0 — одна ветка, иначе другая
 DrawStoryScreen          = $0539E0   ; распаковать блок по указателю в $FF2564 и разобрать
                              ; как сценарий экрана: номера блоков, палитра, ScreenBig
-ScreenRecordFromData297       = $053B40   ; Р°РґСЂРµСЃ Р·Р°РїРёСЃРё data_297 РїРѕ СЃРјРµС‰РµРЅРёСЋ $8(a6)
-ScreenUnpackFromData297       = $053B50   ; СЂР°СЃРїР°РєРѕРІРєР° Р·Р°РїРёСЃРё data_297
+ScreenRecordFromData297       = $053B40   ; адрес записи data_297 по смещению $8(a6)
+ScreenUnpackFromData297       = $053B50   ; распаковка записи data_297
 LoadSceneGfxSet                = $053EC4   ; набор графики сцены по номеру: запись 20 байт в таблице
                              ; $053C58. +$10 распаковывается в $FF3564 и превращается в
                              ; список анимаций по адресу $FF5564, +$0 распаковывается в
                              ; $FF0564 и уходит в VRAM ($1000 байт), +$4 — туда же плюс
                              ; $2000 ($800 байт). Возвращает +$8 записи
-ScreenPlaySong19              = $054506   ; РїРµСЃРЅСЏ $19 С‚СЂР°РїРѕРј $FF30 Рё С€Р°Рі РїР°Р»РёС‚СЂС‹
+ScreenPlaySong19              = $054506   ; песня $19 трапом $FF30 и шаг палитры
 ScrollTextRows                 = $05472A   ; прокрутка текста: список строк (+$8) сперва распаковывается
                              ; в тайлы, потом строки выезжают снизу — VSRAM растёт по кадру,
                              ; очередная строка дорисовывается через ScreenCommon. Выход по
                              ; ReadDPadDirection == 4
-ScreenFadeWaitFrame           = $054940   ; РєР°РґСЂ РѕР¶РёРґР°РЅРёСЏ Рё С€Р°Рі Р·Р°С‚СѓС…Р°РЅРёСЏ
+ScreenFadeWaitFrame           = $054940   ; кадр ожидания и шаг затухания
 PlayTwoPhaseAnim               = $0549CE   ; экран с двухфазной анимацией: сперва большая картинка через
                              ; ScreenBig, дальше каждый кадр собирается список спрайтов.
                              ; До кадра +$10 берётся первый набор, после — второй; кадр
                              ; анимации меняется раз в три прохода и упирается в пятый.
                              ; Выход по ReadDPadDirection == 4
-ScreenBranchByArg1            = $054C98   ; СЃР»РѕРІРѕ $8(a6) СЂР°РІРЅРѕ 1 вЂ” СЃРІРѕСЏ РІРµС‚РєР°
-ScreenClear22                 = $055224   ; РѕР±РЅСѓР»РёС‚СЊ 22 СЌР»РµРјРµРЅС‚Р°
-ScreenWorkBufferIfD0          = $05523E   ; РїСЂРё РЅРµРЅСѓР»РµРІРѕРј d0 СЂР°Р±РѕС‚Р°С‚СЊ СЃ GfxWorkBuffer
-ScreenEveryFourthFrame        = $05530E   ; СЃР»РѕРІРѕ $8(a6) РєСЂР°С‚РЅРѕ С‡РµС‚С‹СЂС‘Рј вЂ” РёРґС‚Рё РґР°Р»СЊС€Рµ
-ScreenStepPushArg             = $05539C   ; СЃР»РѕРІРѕ $8(a6) РїРµСЂРµРґР°С‘С‚СЃСЏ РґР°Р»СЊС€Рµ РїРѕ СЃС‚РµРєСѓ
-ScreenClearPlanes             = $055406   ; С‚СЂР°РїС‹ $FF21, $FF22, $FF29 вЂ” С‡РёСЃС‚РєР° СЃР»РѕС‘РІ
-ScreenStepByArg8              = $055452   ; СЃР»РѕРІРѕ $8(a6) РІ d0 Рё РґР°Р»СЊС€Рµ
-ScreenWriteGameState          = $05555E   ; РІС‹РІРѕРґ РёР· GameState
-ScreenBranchByArg1b           = $0555E4   ; СЃР»РѕРІРѕ $8(a6) СЂР°РІРЅРѕ 1 вЂ” СЃРІРѕСЏ РІРµС‚РєР°
+ScreenBranchByArg1            = $054C98   ; слово $8(a6) равно 1 — своя ветка
+ScreenClear22                 = $055224   ; обнулить 22 элемента
+ScreenWorkBufferIfD0          = $05523E   ; при ненулевом d0 работать с GfxWorkBuffer
+ScreenEveryFourthFrame        = $05530E   ; слово $8(a6) кратно четырём — идти дальше
+ScreenStepPushArg             = $05539C   ; слово $8(a6) передаётся дальше по стеку
+ScreenClearPlanes             = $055406   ; трапы $FF21, $FF22, $FF29 — чистка слоёв
+ScreenStepByArg8              = $055452   ; слово $8(a6) в d0 и дальше
+ScreenWriteGameState          = $05555E   ; вывод из GameState
+ScreenBranchByArg1b           = $0555E4   ; слово $8(a6) равно 1 — своя ветка
 DrawTwoDigitNumber             = $055706   ; двузначное число: делится на десять, к каждой цифре
                              ; прибавляется база тайлов $D0, ноль в старшем разряде
                              ; заменяется на пустой тайл 1
-ScreenStepByArg14             = $055798   ; СЃР»РѕРІРѕ $14(a6) РїРµСЂРµРґР°С‘С‚СЃСЏ РґР°Р»СЊС€Рµ
-ScreenLoadToWorkBuffer4E      = $0557F4   ; Р·Р°РіСЂСѓР·РєР° РІ GfxWorkBuffer СЃРѕ СЃРјРµС‰РµРЅРёРµРј $4E
-ScreenRebuildMapTiles         = $055886   ; BuildTerrainMapTiles Рё СЃРѕС‚РЅСЏ Р·Р°РїРёСЃРµР№ GameState
-ScreenUnpack196EFC            = $0558D2   ; СЂР°СЃРїР°РєРѕРІРєР° $196EFC, 14 Р±Р°Р№С‚ Р»РѕРєР°Р»СЊРЅС‹С…
-ScreenStepByArgA              = $0559C4   ; СЃР»РѕРІРѕ $A(a6) РІРµРґС‘С‚ С€Р°Рі
-ScreenWriteByArgC             = $055D08   ; СЃР»РѕРІРѕ $C(a6) РІРµРґС‘С‚ РІС‹РІРѕРґ
-ScreenStepFromGameState       = $055E28   ; С€Р°Рі РїРѕ РґР°РЅРЅС‹Рј GameState
-ScreenLoadToWorkBuffer        = $055E92   ; Р·Р°РіСЂСѓР·РєР° РІ GfxWorkBuffer
-ScreenLoadByArg1              = $055F3A   ; СЃР»РѕРІРѕ $8(a6) СЂР°РІРЅРѕ 1 вЂ” СЃРІРѕР№ РЅР°Р±РѕСЂ
-ScreenLoadIntoGameStateB      = $056008   ; РІС‚РѕСЂРѕР№ Р·Р°РіСЂСѓР·С‡РёРє РІ GameState
-ScreenBuildByArg12            = $05609A   ; СЃР»РѕРІРѕ $12(a6) РІРµРґС‘С‚ СЃР±РѕСЂРєСѓ Р·Р°РїРёСЃРё
-ScreenScrollSum1012           = $056116   ; СЃСѓРјРјР° СЃР»РѕРІ +$10 Рё +$12 GfxWorkBuffer РґР°С‘С‚ РїСЂРѕРєСЂСѓС‚РєСѓ
-ScreenBuildFromArgPtr         = $056180   ; Р·Р°РїРёСЃСЊ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
+ScreenStepByArg14             = $055798   ; слово $14(a6) передаётся дальше
+ScreenLoadToWorkBuffer4E      = $0557F4   ; загрузка в GfxWorkBuffer со смещением $4E
+ScreenRebuildMapTiles         = $055886   ; BuildTerrainMapTiles и сотня записей GameState
+ScreenUnpack196EFC            = $0558D2   ; распаковка $196EFC, 14 байт локальных
+ScreenStepByArgA              = $0559C4   ; слово $A(a6) ведёт шаг
+ScreenWriteByArgC             = $055D08   ; слово $C(a6) ведёт вывод
+ScreenStepFromGameState       = $055E28   ; шаг по данным GameState
+ScreenLoadToWorkBuffer        = $055E92   ; загрузка в GfxWorkBuffer
+ScreenLoadByArg1              = $055F3A   ; слово $8(a6) равно 1 — свой набор
+ScreenLoadIntoGameStateB      = $056008   ; второй загрузчик в GameState
+ScreenBuildByArg12            = $05609A   ; слово $12(a6) ведёт сборку записи
+ScreenScrollSum1012           = $056116   ; сумма слов +$10 и +$12 GfxWorkBuffer даёт прокрутку
+ScreenBuildFromArgPtr         = $056180   ; запись по указателю $8(a6)
 ClearNameBlockCB80             = $0561B0   ; обнулить $280 байт таблицы имён с адреса $CB80 через DMA
                              ; (трап $FF03) — восемь строк по сорок
 DrawTextOverlay                = $056202   ; строка в буфер $FF1D64 трапом $FF24, затем непустые слова
                              ; накладываются поверх подложки в GameState и всё вместе
                              ; выводится ScreenCommon по адресу $CB94
-ScreenBuildFromArgPtrC        = $056288   ; Р·Р°РїРёСЃСЊ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $C(a6)
+ScreenBuildFromArgPtrC        = $056288   ; запись по указателю $C(a6)
 DrawMissionBrief         = $056310   ; вывести пять строк напутствия; номер миссии в
                              ; $8(a6), корень выбирается байтом +$0 состояния
 LoadObjectScripts        = $056454   ; раздать слотам объектов указатели на скрипты
                              ; сценки; записи до нулевого слова
-ScreenObjRecordsWrap          = $0564F0   ; РїРµСЂРµС…РѕРґРЅРёРє РІ ScreenObjRecords
-ScreenObjRecords              = $0564FC   ; СЂР°Р·РјРµС‚РєР° Р·Р°РїРёСЃРµР№ РѕР±СЉРµРєС‚РѕРІ СЃ +$6C, РїРµСЂРІРѕРµ РїРѕР»Рµ $FFFFFFFF
-ScreenPickByD3Nibble          = $056742   ; Р±РёС‚С‹ 4вЂ¦5 d3 РІС‹Р±РёСЂР°СЋС‚ РІР°СЂРёР°РЅС‚
-ScreenStepByRecord3E40        = $0569A8   ; СЃР»РѕРІР° +$3E Рё +$40 Р·Р°РїРёСЃРё РїРµСЂРµРґР°СЋС‚СЃСЏ РІ ScreenStepByArg8
-ScreenFadeStep43              = $056B70   ; ScreenFadeSteps СЃ РїР°СЂР°РјРµС‚СЂРѕРј ($0004, $0003)
-ScreenFadeStep23              = $056B84   ; С‚Рѕ Р¶Рµ СЃ ($0002, $0003)
-ScreenFadeSteps               = $056B98   ; Р·РІСѓРє $95 Рё С€Р°РіРё РїР°Р»РёС‚СЂС‹ РїРѕ РїР°СЂРµ С‡РёСЃРµР» РІ d1
-ScreenAnimFromData318         = $056C2E   ; РєР°РґСЂ РѕР¶РёРґР°РЅРёСЏ Рё С‚Р°Р±Р»РёС†Р° data_318
-ScreenScroll30FramesA         = $056C9A   ; 30 РєР°РґСЂРѕРІ РїСЂРѕРєСЂСѓС‚РєРё
-ScreenScroll30FramesB         = $056D38   ; Р±Р»РёР·РЅРµС† ScreenScroll30FramesA
-ScreenPushWorkBuffer04        = $056DD6   ; РґР»РёРЅРЅС‹Рµ СЃР»РѕРІР° +$0 Рё +$4 GfxWorkBuffer РЅР° СЃС‚РµРє
-ScreenPushWorkBufferC         = $056E0C   ; РґР»РёРЅРЅРѕРµ СЃР»РѕРІРѕ +$C GfxWorkBuffer Рё С‡РёСЃР»Рѕ 3 РЅР° СЃС‚РµРє
-ScreenPushWorkBuffer04b       = $056E28   ; РІС‚РѕСЂРѕР№ С‚Р°РєРѕР№ Р¶Рµ С‚РѕР»РєР°С‚РµР»СЊ +$0 Рё +$4
-ScreenPushWorkBuffer04c       = $056E62   ; С‚СЂРµС‚РёР№ С‚Р°РєРѕР№ Р¶Рµ
-ScreenPaletteFrom0536A0       = $056E9C   ; РєР°РґСЂ РѕР¶РёРґР°РЅРёСЏ Рё РїР°Р»РёС‚СЂР° $0536A0
-ScreenTickWorkBuffer          = $056F08   ; РєР°РґСЂ РѕР¶РёРґР°РЅРёСЏ Рё СЂР°Р·Р±РѕСЂ GfxWorkBuffer
-ScreenTickWithArg15           = $056F84   ; РєР°РґСЂ РѕР¶РёРґР°РЅРёСЏ Рё С‡РёСЃР»Рѕ $0F РЅР° СЃС‚РµРє
-ScreenPushWorkBuffer04d       = $056FBA   ; С‡РµС‚РІС‘СЂС‚С‹Р№ С‚Р°РєРѕР№ Р¶Рµ
-ScreenPushWorkBuffer04e       = $056FF0   ; РїСЏС‚С‹Р№ С‚Р°РєРѕР№ Р¶Рµ
-ScreenWriteByA5WordA          = $057026   ; СЃР»РѕРІРѕ +$A Р·Р°РїРёСЃРё a5 РІРµРґС‘С‚ РІС‹РІРѕРґ
+ScreenObjRecordsWrap          = $0564F0   ; переходник в ScreenObjRecords
+ScreenObjRecords              = $0564FC   ; разметка записей объектов с +$6C, первое поле $FFFFFFFF
+ScreenPickByD3Nibble          = $056742   ; биты 4…5 d3 выбирают вариант
+ScreenStepByRecord3E40        = $0569A8   ; слова +$3E и +$40 записи передаются в ScreenStepByArg8
+ScreenFadeStep43              = $056B70   ; ScreenFadeSteps с параметром ($0004, $0003)
+ScreenFadeStep23              = $056B84   ; то же с ($0002, $0003)
+ScreenFadeSteps               = $056B98   ; звук $95 и шаги палитры по паре чисел в d1
+ScreenAnimFromData318         = $056C2E   ; кадр ожидания и таблица data_318
+ScreenScroll30FramesA         = $056C9A   ; 30 кадров прокрутки
+ScreenScroll30FramesB         = $056D38   ; близнец ScreenScroll30FramesA
+ScreenPushWorkBuffer04        = $056DD6   ; длинные слова +$0 и +$4 GfxWorkBuffer на стек
+ScreenPushWorkBufferC         = $056E0C   ; длинное слово +$C GfxWorkBuffer и число 3 на стек
+ScreenPushWorkBuffer04b       = $056E28   ; второй такой же толкатель +$0 и +$4
+ScreenPushWorkBuffer04c       = $056E62   ; третий такой же
+ScreenPaletteFrom0536A0       = $056E9C   ; кадр ожидания и палитра $0536A0
+ScreenTickWorkBuffer          = $056F08   ; кадр ожидания и разбор GfxWorkBuffer
+ScreenTickWithArg15           = $056F84   ; кадр ожидания и число $0F на стек
+ScreenPushWorkBuffer04d       = $056FBA   ; четвёртый такой же
+ScreenPushWorkBuffer04e       = $056FF0   ; пятый такой же
+ScreenWriteByA5WordA          = $057026   ; слово +$A записи a5 ведёт вывод
 TickSceneObjects               = $05718C   ; шаг объектов сцены: у каждого из +$2(a5) записей по $5A байт
                              ; строятся спрайты, а выбранный (+$C) ещё и двигается — по X
                              ; через таймер +$4A с периодом +$48 и шагом +$49, по Y через
                              ; +$4E с +$4C и +$4D. Оси независимы, поэтому траектория
                              ; получается ступенчатой
-ScreenLoadByByte56            = $057272   ; Р±Р°Р№С‚ +$56 Р·Р°РїРёСЃРё a1; $FF РѕР·РЅР°С‡Р°РµС‚ В«РЅРµС‡РµРіРѕ РіСЂСѓР·РёС‚СЊВ»
+ScreenLoadByByte56            = $057272   ; байт +$56 записи a1; $FF означает «нечего грузить»
 AllocTileSlot                 = $057310   ; занять слот плиток: пять байт с +$67(a5) — битовая карта
                              ; СОРОКА слотов по 16 тайлов, номер слота даёт адрес VRAM
                              ; (слот*16 + $374)*32. Освобождают через bclr в $6C(a5).
@@ -1353,49 +1353,49 @@ FadeOutUntilMusicEnds          = $05737A   ; затемнять палитру �
                              ; между ними +$18 кадров, и крутиться, ПОКА драйвер не скажет,
                              ; что музыка кончилась: байт $A01C14 читается через захват шины
                              ; Z80. Потом ещё несколько кадров и трап $FF2E
-ScreenStepFromFF1D64          = $05741E   ; СЂР°Р·Р±РѕСЂ Р±СѓС„РµСЂР° $FF1D64
-ScreenClearPlanesA            = $0574FC   ; С‚СЂР°РїС‹ $FF21, $FF22, $FF29
-ScreenClearPlanesB            = $05759A   ; С‚Рѕ Р¶Рµ РїР»СЋСЃ GfxWorkBuffer
+ScreenStepFromFF1D64          = $05741E   ; разбор буфера $FF1D64
+ScreenClearPlanesA            = $0574FC   ; трапы $FF21, $FF22, $FF29
+ScreenClearPlanesB            = $05759A   ; то же плюс GfxWorkBuffer
 CopyBlockToEE5C              = $0576B4   ; 107 инстр, 2 ссылок
                                ; копирование блока в $FFEE5C, близнец следующей
 CopyBlockToEE5Cb             = $0577F4   ; 102 инстр, 12 ссылок
                                ; близнец предыдущей, 12 ссылок
-ScreenBuildRecords            = $057924   ; СЃР±РѕСЂРєР° Р·Р°РїРёСЃРµР№, СЃС‡С‘С‚С‡РёРє РІ d5
-ScreenUnpackToArgC            = $0579A8   ; СЂР°СЃРїР°РєРѕРІРєР° $8(a6) РїРѕ Р°РґСЂРµСЃСѓ $C(a6)
-ScreenWalkTableArg8           = $0579CE   ; РѕР±С…РѕРґ С‚Р°Р±Р»РёС†С‹ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenPaletteTrapFF32         = $057BF8   ; С‚СЂР°Рї $FF32 Рё 14 Р±Р°Р№С‚ Р»РѕРєР°Р»СЊРЅС‹С…
-ScreenDrawWorldMapA           = $057E7C   ; WorldMap, WorldBlocks Рё WorldMetatiles РЅР° СЃС‚РµРє
-ScreenDrawWorldMapB           = $057EEC   ; Р±Р»РёР·РЅРµС† ScreenDrawWorldMapA
-ScreenDrawWorldMapC           = $057F76   ; С‚СЂРµС‚РёР№ С‚Р°РєРѕР№ Р¶Рµ
-ScreenDrawWorldMapD           = $058054   ; С‡РµС‚РІС‘СЂС‚С‹Р№ С‚Р°РєРѕР№ Р¶Рµ
-ScreenFillWorkBufferDDDD      = $058112   ; СЃР»РѕРІР°РјРё $DDDD РѕС‚ +$10 GfxWorkBuffer
-ScreenScrollBig               = $0581D6   ; РїСЂРѕРєСЂСѓС‚РєР° СЃ 88 Р±Р°Р№С‚Р°РјРё Р»РѕРєР°Р»СЊРЅС‹С…
-ScreenClearVramD800           = $058AD0   ; РѕР±РЅСѓР»РёС‚СЊ VRAM СЃ $D800
+ScreenBuildRecords            = $057924   ; сборка записей, счётчик в d5
+ScreenUnpackToArgC            = $0579A8   ; распаковка $8(a6) по адресу $C(a6)
+ScreenWalkTableArg8           = $0579CE   ; обход таблицы по указателю $8(a6)
+ScreenPaletteTrapFF32         = $057BF8   ; трап $FF32 и 14 байт локальных
+ScreenDrawWorldMapA           = $057E7C   ; WorldMap, WorldBlocks и WorldMetatiles на стек
+ScreenDrawWorldMapB           = $057EEC   ; близнец ScreenDrawWorldMapA
+ScreenDrawWorldMapC           = $057F76   ; третий такой же
+ScreenDrawWorldMapD           = $058054   ; четвёртый такой же
+ScreenFillWorkBufferDDDD      = $058112   ; словами $DDDD от +$10 GfxWorkBuffer
+ScreenScrollBig               = $0581D6   ; прокрутка с 88 байтами локальных
+ScreenClearVramD800           = $058AD0   ; обнулить VRAM с $D800
 CopyTileBlockStrided           = $058CFC   ; переложить 32 строки по четыре длинных слова из (a0) в (a1),
                              ; каждые +$10 строк дёргая $058D5C; приёмник переходит на
                              ; следующую полосу каждые $20 байт
-ScreenWriteToFF2C00           = $058D86   ; РІС‹РІРѕРґ РІ Р±СѓС„РµСЂ $FF2C00
-ScreenStepIfWord79E           = $058E46   ; СЃР»РѕРІРѕ +$79E GfxWorkBuffer РЅРµ РѕС‚СЂРёС†Р°С‚РµР»СЊРЅРѕ вЂ” С€Р°Рі
-ScreenDrawBoxA000             = $058E84   ; СЂР°РјРєР° $2A РЅР° $0D РѕС‚ РёРјРµРЅРё $A000
-ScreenUnpack18C740            = $058EEC   ; РѕР±РЅСѓР»РёС‚СЊ VRAM $D000 Рё СЂР°СЃРїР°РєРѕРІР°С‚СЊ $18C740
-ScreenUnpackFiveToC400        = $058F6E   ; РїСЏС‚СЊ РЅР°Р±РѕСЂРѕРІ РїРѕРґСЂСЏРґ РЅР°С‡РёРЅР°СЏ СЃ VRAM $C400
-ScreenUnpack18CD1C            = $059006   ; СЂР°СЃРїР°РєРѕРІРєР° $18CD1C РІ GameState
-ScreenDrawBox6000             = $059070   ; СЂР°РјРєР° $28 РЅР° $0C РѕС‚ РёРјРµРЅРё $6000
-ScreenStepWithD0One           = $0590BA   ; С€Р°Рі СЃ d0 = 1
-ScreenBuildFromArgPtrB        = $059242   ; Р·Р°РїРёСЃСЊ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
+ScreenWriteToFF2C00           = $058D86   ; вывод в буфер $FF2C00
+ScreenStepIfWord79E           = $058E46   ; слово +$79E GfxWorkBuffer не отрицательно — шаг
+ScreenDrawBoxA000             = $058E84   ; рамка $2A на $0D от имени $A000
+ScreenUnpack18C740            = $058EEC   ; обнулить VRAM $D000 и распаковать $18C740
+ScreenUnpackFiveToC400        = $058F6E   ; пять наборов подряд начиная с VRAM $C400
+ScreenUnpack18CD1C            = $059006   ; распаковка $18CD1C в GameState
+ScreenDrawBox6000             = $059070   ; рамка $28 на $0C от имени $6000
+ScreenStepWithD0One           = $0590BA   ; шаг с d0 = 1
+ScreenBuildFromArgPtrB        = $059242   ; запись по указателю $8(a6)
 UnpackTilesToVram              = $05927E   ; распаковать +$8 трапом $FF10 в $FF0564 и выгрузить оттуда
                              ; +$E тайлов (по 32 байта) в VRAM по адресу +$C
-ScreenUnpackArg8              = $0592B2   ; СЂР°СЃРїР°РєРѕРІРєР° РїРѕ РґР»РёРЅРЅРѕРјСѓ СЃР»РѕРІСѓ $8(a6)
-ScreenWriteFromArgPtrA        = $059324   ; РІС‹РІРѕРґ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $A(a6)
+ScreenUnpackArg8              = $0592B2   ; распаковка по длинному слову $8(a6)
+ScreenWriteFromArgPtrA        = $059324   ; вывод по указателю $A(a6)
 DrawTileRun16                  = $059384   ; шестнадцать подряд идущих тайлов начиная с $027D + (арг & 15)
                              ; * 16 в буфер GameState, дальше ScreenCommon; бит 7 байта +$B
                              ; переключает палитру и отступ
-ScreenScrollFrom18DD4C        = $0593F8   ; СѓРєР°Р·Р°С‚РµР»СЊ $0018DD4C РІ GfxWorkBuffer Рё РїСЂРѕРєСЂСѓС‚РєР°
-ScreenPaletteTrapFF32B        = $05962C   ; С‚СЂР°РїС‹ $FF32 Рё $FF22, РїР°СЂР°РјРµС‚СЂ $1C
-ScreenStepWorkBufferA         = $05968E   ; С€Р°Рі РїРѕ GfxWorkBuffer
-ScreenStepWorkBufferB         = $0596CA   ; Р±Р»РёР·РЅРµС† ScreenStepWorkBufferA
-ScreenBuildFromArgPtrD        = $059706   ; Р·Р°РїРёСЃСЊ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6), РєРѕСЂРѕС‚РєРёР№ РІР°СЂРёР°РЅС‚
-ScreenUnpack1873DA            = $059776   ; СЂР°СЃРїР°РєРѕРІРєР° $1873DA, 132 Р±Р°Р№С‚Р° Р»РѕРєР°Р»СЊРЅС‹С…
+ScreenScrollFrom18DD4C        = $0593F8   ; указатель $0018DD4C в GfxWorkBuffer и прокрутка
+ScreenPaletteTrapFF32B        = $05962C   ; трапы $FF32 и $FF22, параметр $1C
+ScreenStepWorkBufferA         = $05968E   ; шаг по GfxWorkBuffer
+ScreenStepWorkBufferB         = $0596CA   ; близнец ScreenStepWorkBufferA
+ScreenBuildFromArgPtrD        = $059706   ; запись по указателю $8(a6), короткий вариант
+ScreenUnpack1873DA            = $059776   ; распаковка $1873DA, 132 байта локальных
 RunScreenUntilInput            = $059A02   ; крутить кадры экрана (ScreenPerTurn плюс выгрузка спрайтов),
                              ; пока ReadDPadDirection не вернёт 4 или выгрузка не ответит
                              ; «кончилось»
@@ -1404,73 +1404,73 @@ ScrollWorldMap                 = $059A3A   ; прокрутка карты ми�
                              ; WorldBlocks и WorldMetatiles. План $E000 (не $C000, как на
                              ; заставке), палитра 3. Выход по ReadDPadDirection == 4 или
                              ; когда выгрузка спрайтов ответит «кончилось»
-ScreenBuildAtFFF05C           = $059F4A   ; Р·Р°РїРёСЃСЊ РІ Р±СѓС„РµСЂРµ $FFF05C
-ScreenStepAtFFF05C            = $059FB2   ; С€Р°Рі РїРѕ Р±СѓС„РµСЂСѓ $FFF05C
-ScreenLoadByArgC              = $05A02E   ; РґР»РёРЅРЅРѕРµ СЃР»РѕРІРѕ $C(a6) РІРµРґС‘С‚ Р·Р°РіСЂСѓР·РєСѓ
-ScreenBuildLocal128           = $05A096   ; СЃР±РѕСЂРєР° РІ Р»РѕРєР°Р»СЊРЅРѕРј Р±СѓС„РµСЂРµ РЅР° 128 Р±Р°Р№С‚
+ScreenBuildAtFFF05C           = $059F4A   ; запись в буфере $FFF05C
+ScreenStepAtFFF05C            = $059FB2   ; шаг по буферу $FFF05C
+ScreenLoadByArgC              = $05A02E   ; длинное слово $C(a6) ведёт загрузку
+ScreenBuildLocal128           = $05A096   ; сборка в локальном буфере на 128 байт
 UploadSelectedPalettes         = $05A0D6   ; собрать четыре палитры в стек и выгрузить трапом $FF20 только
                              ; те, чей бит взведён в +$1A
-ScreenDrawFromData268b        = $05A114   ; СЃР»РѕРІРѕ $8(a6) Рё d7 РёРЅРґРµРєСЃРёСЂСѓСЋС‚ С‚Р°Р±Р»РёС†Сѓ, РєР°Рє Сѓ MapScreenDrawFromData268
-ScreenUnpack183CB6            = $05A176   ; СЂР°СЃРїР°РєРѕРІРєР° $183CB6 РІ $FF3564
+ScreenDrawFromData268b        = $05A114   ; слово $8(a6) и d7 индексируют таблицу, как у MapScreenDrawFromData268
+ScreenUnpack183CB6            = $05A176   ; распаковка $183CB6 в $FF3564
 DrawWorldMapWindow       = $05A1D0   ; собрать окно 11x8 карты мира: карта блоков,
                              ; блок -> метатайл, метатайл -> четыре тайла
-ScreenWriteFromArgPtrB        = $05A33C   ; РІС‹РІРѕРґ РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $A(a6)
-ScreenUnpack1873FA            = $05A3E4   ; СЂР°СЃРїР°РєРѕРІРєР° $1873FA, 80 Р±Р°Р№С‚ Р»РѕРєР°Р»СЊРЅС‹С…
-ScreenVdpBurstWrite           = $05A914   ; РїРѕС‚РѕРє РІ VDP_CTRL С‡РµСЂРµР· a4
-ScreenSetLineScroll           = $05A93C   ; Р°РІС‚РѕРёРЅРєСЂРµРјРµРЅС‚ 4 Рё РїРѕСЃС‚СЂРѕС‡РЅР°СЏ РїСЂРѕРєСЂСѓС‚РєР° СЃ $50C2
-ScreenWorkBufferStepA         = $05AAB2   ; С€Р°Рі РїРѕ GfxWorkBuffer, 4 Р±Р°Р№С‚Р° Р»РѕРєР°Р»СЊРЅС‹С…
-ScreenWorkBufferStepB         = $05AAC8   ; Р±Р»РёР·РЅРµС† ScreenWorkBufferStepA
-ScreenCallBank04              = $05ACA8   ; ScreenFromBank04 СЃ РЅСѓР»С‘Рј
-ScreenResetHScrollD000        = $05AE62   ; РѕР±С‰Р°СЏ РїСЂРѕРєСЂСѓС‚РєР° Рё РѕР±РЅСѓР»РµРЅРёРµ VRAM $D000
-ScreenWriteData336            = $05B24E   ; $30 Р·Р°РїРёСЃРµР№ data_336 РѕС‚ РёРјРµРЅРё $3320
-ScreenFillBox3380             = $05B418   ; Р·Р°Р»РёРІРєР° СЃР»РѕРІР°РјРё $1111 РѕС‚ $3380
-ScreenStepIfBitFC1            = $05B4B0   ; Р±РёС‚ 1 Р±Р°Р№С‚Р° +$FC Р·Р°РїРёСЃРё a5 СЂРµС€Р°РµС‚ РІРµС‚РєСѓ
+ScreenWriteFromArgPtrB        = $05A33C   ; вывод по указателю $A(a6)
+ScreenUnpack1873FA            = $05A3E4   ; распаковка $1873FA, 80 байт локальных
+ScreenVdpBurstWrite           = $05A914   ; поток в VDP_CTRL через a4
+ScreenSetLineScroll           = $05A93C   ; автоинкремент 4 и построчная прокрутка с $50C2
+ScreenWorkBufferStepA         = $05AAB2   ; шаг по GfxWorkBuffer, 4 байта локальных
+ScreenWorkBufferStepB         = $05AAC8   ; близнец ScreenWorkBufferStepA
+ScreenCallBank04              = $05ACA8   ; ScreenFromBank04 с нулём
+ScreenResetHScrollD000        = $05AE62   ; общая прокрутка и обнуление VRAM $D000
+ScreenWriteData336            = $05B24E   ; $30 записей data_336 от имени $3320
+ScreenFillBox3380             = $05B418   ; заливка словами $1111 от $3380
+ScreenStepIfBitFC1            = $05B4B0   ; бит 1 байта +$FC записи a5 решает ветку
 MenuCellAddress                = $05B5DC   ; адрес пункта меню в таблице имён: сетка на 6 или 8 столбцов
                              ; (бит 1 байта +$FC), база $C790 или $C788, строка $280,
                              ; столбец 8, плюс +$A на четыре
-ScreenUnpack196AD4            = $05B638   ; СЂР°СЃРїР°РєРѕРІРєР° $196AD4 РІ $FF0564
-ScreenPushA5Pair              = $05B72A   ; СѓРєР°Р·Р°С‚РµР»Рё +$2 Рё +$60 Р·Р°РїРёСЃРё a5 РЅР° СЃС‚РµРє
-ScreenStepByArgPtr8           = $05B7D6   ; С€Р°Рі РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenBranchByC2or14          = $05B8DE   ; СЃР»РѕРІРѕ +$C Р·Р°РїРёСЃРё a1 СЂР°РІРЅРѕ 2 РёР»Рё $E вЂ” СЃРІРѕРё РІРµС‚РєРё
-ScreenBranchByC2or14b         = $05B96A   ; С‚Рѕ Р¶Рµ, РЅРѕ СЃ Р·Р°РіСЂСѓР·РєРѕР№ СѓРєР°Р·Р°С‚РµР»СЏ
-ScreenBranchByA2C5            = $05B9EA   ; СЃР»РѕРІРѕ +$C Р·Р°РїРёСЃРё a2 СЂР°РІРЅРѕ 5, РїРѕС‚РѕРј РїСЂРѕРІРµСЂРєР° a1
-ScreenBranchByA08             = $05BA88   ; СЃР»РѕРІРѕ +$8 Р·Р°РїРёСЃРё a0 СЂР°РІРЅРѕ 9 РёР»Рё $10
-ScreenTickRecordA0            = $05BBA8   ; СЃС‡С‘С‚С‡РёРє +$6 Р·Р°РїРёСЃРё a0; РЅР° РЅСѓР»Рµ СЃРјРѕС‚СЂРёС‚ +$C
+ScreenUnpack196AD4            = $05B638   ; распаковка $196AD4 в $FF0564
+ScreenPushA5Pair              = $05B72A   ; указатели +$2 и +$60 записи a5 на стек
+ScreenStepByArgPtr8           = $05B7D6   ; шаг по указателю $8(a6)
+ScreenBranchByC2or14          = $05B8DE   ; слово +$C записи a1 равно 2 или $E — свои ветки
+ScreenBranchByC2or14b         = $05B96A   ; то же, но с загрузкой указателя
+ScreenBranchByA2C5            = $05B9EA   ; слово +$C записи a2 равно 5, потом проверка a1
+ScreenBranchByA08             = $05BA88   ; слово +$8 записи a0 равно 9 или $10
+ScreenTickRecordA0            = $05BBA8   ; счётчик +$6 записи a0; на нуле смотрит +$C
 BuildObjectSprites             = $05BC68   ; четыре записи спрайта из объекта (a2): X = +$18 плюс два раза
                              ; +$42, Y = +$16 плюс два раза +$48, атрибут — биты отражения
                              ; +$46 вместе с +$4, а смещения углов берутся из таблицы
                              ; data_344, выбранной теми же битами отражения
-ScreenStepByArgPtrC           = $05BDA6   ; С€Р°Рі РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $C(a6)
-ScreenLoadByArgPtr8           = $05BF1A   ; Р·Р°РіСЂСѓР·РєР° РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenWalkRecordArg8          = $05D3F0   ; РѕР±С…РѕРґ Р·Р°РїРёСЃРё РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
+ScreenStepByArgPtrC           = $05BDA6   ; шаг по указателю $C(a6)
+ScreenLoadByArgPtr8           = $05BF1A   ; загрузка по указателю $8(a6)
+ScreenWalkRecordArg8          = $05D3F0   ; обход записи по указателю $8(a6)
 ToggleObjectFrame              = $05D48E   ; шаг анимации объекта: убавить таймер +$20 подзаписи, на нуле
                              ; переключить бит 0 в +$5C и выбрать базу тайлов $3F20 либо
                              ; на $1000 больше по +$10
-ScreenWriteRecordArg8         = $05D51E   ; РІС‹РІРѕРґ Р·Р°РїРёСЃРё РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenWalkData348             = $05D570   ; РѕР±С…РѕРґ С‚Р°Р±Р»РёС†С‹ data_348
-ScreenStepRegsOnly            = $05D5F6   ; С€Р°Рі, РІСЃС‘ РІ СЂРµРіРёСЃС‚СЂР°С… d1вЂ¦d4
-ScreenWriteIfWordA            = $05D622   ; СЃР»РѕРІРѕ +$A Р·Р°РїРёСЃРё a1 СЂРµС€Р°РµС‚, С‡С‚Рѕ РІС‹РІРѕРґРёС‚СЊ
+ScreenWriteRecordArg8         = $05D51E   ; вывод записи по указателю $8(a6)
+ScreenWalkData348             = $05D570   ; обход таблицы data_348
+ScreenStepRegsOnly            = $05D5F6   ; шаг, всё в регистрах d1…d4
+ScreenWriteIfWordA            = $05D622   ; слово +$A записи a1 решает, что выводить
 LoadObjectGraphics             = $05D6C8   ; по трёхбайтному описателю загрузить ассет трапом $FF08 в
                              ; локальную запись, прогнать её скрипт нужное число раз
                              ; ($FF09), распаковать +$24 в GameState и выгрузить 256 слов в
                              ; VRAM по номеру тайла +$8
-ScreenBranchByWordAPair       = $05D72C   ; СЃР»РѕРІР° +$A Сѓ a1 Рё a2 РІС‹Р±РёСЂР°СЋС‚ РІРµС‚РєСѓ
-ScreenPickFromData350         = $05D904   ; РјР»Р°РґС€РёРµ РґРІР° Р±РёС‚Р° d0 РёРЅРґРµРєСЃРёСЂСѓСЋС‚ data_350
-ScreenUnpack0440DE            = $05D9CE   ; СЂР°СЃРїР°РєРѕРІРєР° $0440DE РІ $FF0564
-ScreenWrite15FromTable        = $05DA78   ; 15 Р·Р°РїРёСЃРµР№ С‚Р°Р±Р»РёС†С‹ $05DB28 РІ GameState
-ScreenWriteWorkBufferPair     = $05DB60   ; СѓРєР°Р·Р°С‚РµР»Рё +$2 Рё +$60 GfxWorkBuffer
-ScreenBuildShortArg8          = $05DE42   ; РєРѕСЂРѕС‚РєР°СЏ СЃР±РѕСЂРєР° РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenUnpackRecordArg8        = $05DEA2   ; СЂР°СЃРїР°РєРѕРІРєР° Р·Р°РїРёСЃРё РїРѕ СѓРєР°Р·Р°С‚РµР»СЋ $8(a6)
-ScreenWalkRecordArg8b         = $05DF3A   ; РІС‚РѕСЂРѕР№ РѕР±С…РѕРґ Р·Р°РїРёСЃРё РїРѕ $8(a6)
+ScreenBranchByWordAPair       = $05D72C   ; слова +$A у a1 и a2 выбирают ветку
+ScreenPickFromData350         = $05D904   ; младшие два бита d0 индексируют data_350
+ScreenUnpack0440DE            = $05D9CE   ; распаковка $0440DE в $FF0564
+ScreenWrite15FromTable        = $05DA78   ; 15 записей таблицы $05DB28 в GameState
+ScreenWriteWorkBufferPair     = $05DB60   ; указатели +$2 и +$60 GfxWorkBuffer
+ScreenBuildShortArg8          = $05DE42   ; короткая сборка по указателю $8(a6)
+ScreenUnpackRecordArg8        = $05DEA2   ; распаковка записи по указателю $8(a6)
+ScreenWalkRecordArg8b         = $05DF3A   ; второй обход записи по $8(a6)
 CountEnemyUnitsNear            = $05DF6E   ; окно 6x6 клеток от курсора, слоты до 107
-ScreenReadUnitMapCellA        = $05DFF0   ; РєР»РµС‚РєР° d0 РєР°СЂС‚С‹ СЋРЅРёС‚РѕРІ
+ScreenReadUnitMapCellA        = $05DFF0   ; клетка d0 карты юнитов
 CountOwnUnitsNear              = $05E060   ; то же окно, слоты от 148
-ScreenReadUnitMapCellB        = $05E0E2   ; Р±Р»РёР·РЅРµС† ScreenReadUnitMapCellA
+ScreenReadUnitMapCellB        = $05E0E2   ; близнец ScreenReadUnitMapCellA
 FindDensestCluster             = $05E152   ; разложить всех юнитов, прошедших фильтр (a6), по сетке 8x8
                              ; (координаты делятся на 5), найти самую населённую ячейку и
                              ; вернуться к её координатам на карте; дальше случайная ветка
                              ; из четырёх
-ScreenScanP2Units             = $05E232   ; РѕР±С…РѕРґ Р·РѕРЅС‹ РёРіСЂРѕРєР° 2 (UnitRecords+$1BC0)
+ScreenScanP2Units             = $05E232   ; обход зоны игрока 2 (UnitRecords+$1BC0)
 
 FrameCallbackPtr = $FF4414   ; покадровый колбэк, только movea.l + jsr (a0)
 PendingSfxId     = $FF4304   ; запрос звукового эффекта
