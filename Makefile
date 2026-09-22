@@ -255,6 +255,7 @@ maptex:
 # Сценки между миссиями: заголовок блока, скрипты актёров и реплики.
 #     make cutscene CSARGS=3       только одна сценка
 #     make cutscene CSARGS=--back  четыре фона в PNG
+#     make cutscene CSARGS="--play 0"  проиграть сценку в GIF
 CSARGS ?=
 cutscene:
 	@$(PYTHON) $(TOOLS_DIR)/cutscene.py $(CSARGS)

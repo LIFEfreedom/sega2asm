@@ -4,6 +4,7 @@ u"""Сценки между миссиями: заголовок блока, с�
     make cutscene                   # все 15 сценок
     make cutscene CSARGS=3          # только сценка 3
     make cutscene CSARGS=--back     # четыре фона в PNG
+    make cutscene CSARGS="--play 0" # проиграть сценку 0 в GIF
 
 ## Где они и когда играют
 
@@ -105,12 +106,44 @@ u"""Сценки между миссиями: заголовок блока, с�
 `tools/packedtext.py` в [game-cutscenes.md](../docs/game-cutscenes.md), но
 там он лежит плоским списком, без привязки к тому, кто говорит.
 
+## Проигрывание (`--play`)
+
+`--play K` прогоняет сценку кадр в кадр и пишет GIF. Порядок тот же, что
+у `ScreenObjRecords`: сперва у каждого живого актёра выполняются команды
+до первой останавливающей (коды 0, 1, 2 и 8 кончают кадр, коды 3…7 идут
+дальше в том же), потом всем убавляются счётчики и применяется шаг.
+Спрайт берётся из `unitanim` по тройке (`$3E`, `$40`, `$42`), палитра —
+по `$59`, место — `$44`/`$46` минус `$80`.
+
+Экран режется до полосы, где что-то есть: пейзаж лежит с точки 56 по
+152, а текстовое окно игры сюда не переносится, и пустой чёрный низ
+незачем.
+
+**Одно расхождение с игрой, и оно намеренное:** команда «реплика» в игре
+ждёт кнопку, здесь держится 90 кадров (меняется третьим аргументом).
+Поэтому длительность целиком моя, а не игровая; всё остальное — по
+счётчикам ROM.
+
+## Что подтвердил прогон
+
+Три проверки, и ни одна не «выглядит правдоподобно»:
+
+- все **2984** командных слова во всех пятнадцати блоках попали в девять
+  рабочих кодов, ни одного в пустые;
+- каждый из **67** скриптов кончается ровно там, где начинается рамка
+  текстового окна, — зазор ноль байт во всех пятнадцати;
+- при прогоне ни одна сценка не зависла на точке встречи, и в каждой
+  число выполненных команд «реплика» **в точности** равно числу записей
+  текста в блоке. Всего 196 на 196.
+
+Последнее заодно говорит, что `$0503B4` берёт записи ПО ПОРЯДКУ: иначе
+совпадение пятнадцать раз подряд было бы случайностью.
+
 ## Чего здесь нет
 
-Порядок «какая реплика к какой команде» не выведен: код 2 подкоманда 1
-не несёт номера, а зовёт `$0503B4`, и тот берёт следующую запись сам.
-Кто именно говорит — тоже: `$C(a5)` получает номер актёра, но связь
-проверяется только запуском.
+Кто именно говорит, по-прежнему не выведено: номер актёра кладётся в
+`$C(a5)`, но что с ним делает `$0503B4` — не разобрано, и проверяется
+только запуском. Поэтому в `--play` реплики не рисуются.
 """
 import collections
 import io
@@ -127,7 +160,7 @@ except Exception:
     pass
 
 from unpack import unpack                                    # noqa: E402
-from gfx import png                                          # noqa: E402
+from gfx import png, gif                                     # noqa: E402
 from paths import OUT as out_path, rom_bytes                 # noqa: E402
 from dumptext import dec                                     # noqa: E402
 
@@ -171,6 +204,12 @@ def sbyte(v):
     return v - 0x100 if v & 0x80 else v
 
 
+def _every(arg):
+    u"""Старший байт слова шага — задержка: шаг раз в (N + 1) кадров."""
+    n = (arg >> 8) & 0xFF
+    return u" раз в %d кадра" % (n + 1) if n else u""
+
+
 def command(word):
     u"""Слово скрипта -> (код, человеческая запись)."""
     op, arg = word >> 12, word & 0x0FFF
@@ -193,9 +232,9 @@ def command(word):
         sub = (arg >> 8) & 3
         return op, u"%s = %d" % (FIELDS[sub], arg & 0xFF)
     if op == 4:
-        return op, u"шаг X = %+d" % sbyte(arg)
+        return op, u"шаг X = %+d%s" % (sbyte(arg), _every(arg))
     if op == 5:
-        return op, u"шаг Y = %+d" % sbyte(arg)
+        return op, u"шаг Y = %+d%s" % (sbyte(arg), _every(arg))
     if op == 6:
         return op, u"X = %d" % (arg - 0x80)
     if op == 7:
@@ -214,6 +253,25 @@ def command(word):
             return op, u"ждать текст"
         return op, u"ожидание: подкоманда %d" % sub
     return op, u"пусто (код %X)" % op
+
+
+def actor_brief(one):
+    u"""«тип 17; палитра 2; анимации 6, 10, 19…» — по командам кода 3."""
+    seen = {0: [], 1: [], 2: [], 3: []}
+    for _o, w, _t in one:
+        if w >> 12 == 3:
+            sub, v = (w >> 8) & 3, w & 0xFF
+            if v not in seen[sub]:
+                seen[sub].append(v)
+    bits = []
+    if seen[0]:
+        bits.append(u"тип %s" % u"/".join(str(v) for v in seen[0]))
+    if seen[3]:
+        bits.append(u"палитра %s" % u"/".join(str(v) for v in seen[3]))
+    if seen[1]:
+        bits.append(u"анимации %s"
+                    % u", ".join(str(v) for v in sorted(seen[1])))
+    return u"; ".join(bits) or u"без типа"
 
 
 def actors(d, start, count):
@@ -254,18 +312,23 @@ def lines(d, start):
     return out
 
 
-def backdrop(k, path):
-    u"""Фон сценки k в PNG: двенадцать строк тайлами записи графики."""
+def stage(k):
+    u"""(запись графики, палитры, номер фона) сценки k."""
     import maptex
-    d = block(k)
-    grec, _frame, scr, _txt, _n = header(d)
+    grec, _frame, scr, _txt, _n = header(block(k))
     rec = maptex.gfx_records()[grec]
-    names = bytes(unpack(ROM, U32(CUT_SCREENS + scr * 4))[2])
-    tiles = maptex.tileset(rec)
     pals = [maptex.array_palette(0), maptex.array_palette(1),
             maptex.array_palette(3), maptex.rec_palette(rec, 0)]
+    return rec, pals, scr
+
+
+def backdrop_indexes(rec, scr):
+    u"""Фон НОМЕРАМИ цветов: [строка][столбец], 320x96."""
+    import maptex
+    names = bytes(unpack(ROM, U32(CUT_SCREENS + scr * 4))[2])
+    tiles = maptex.tileset(rec)
     w, h = COLS * 8, SCREEN_ROWS * 8
-    img = [[(0, 0, 0)] * w for _ in range(h)]
+    px = [bytearray(w) for _ in range(h)]
     for r in range(SCREEN_ROWS):
         for c in range(COLS):
             n = struct.unpack_from(">H", names, (r * COLS + c) * 2)[0]
@@ -273,17 +336,258 @@ def backdrop(k, path):
             g = tiles.get(n & 0x7FF)
             if g is None:
                 continue
-            p = pals[(n >> 13) & 3]
+            row0 = ((n >> 13) & 3) * 16
             hf, vf = (n >> 11) & 1, (n >> 12) & 1
             for y in range(8):
                 sy = 7 - y if vf else y
-                row = img[r * 8 + y]
+                row = px[r * 8 + y]
                 for x in range(8):
                     sx = 7 - x if hf else x
                     v = g[sy * 4 + (sx >> 1)]
-                    row[c * 8 + x] = p[(v >> 4) if sx % 2 == 0 else (v & 15)]
-    png(path, w, h, img)
+                    row[c * 8 + x] = row0 + ((v >> 4) if sx % 2 == 0
+                                             else (v & 15))
+    return px
+
+
+def backdrop(k, path):
+    u"""Фон сценки k в PNG: двенадцать строк тайлами записи графики."""
+    rec, pals, scr = stage(k)
+    flat = [c for row in pals for c in row]
+    px = backdrop_indexes(rec, scr)
+    png(path, COLS * 8, SCREEN_ROWS * 8,
+        [[flat[v] for v in row] for row in px])
     return scr
+
+
+SCREEN_W, SCREEN_H = 320, 224
+BACK_Y = 56                # фон с седьмой строки: $C380 - $C000 = 7 x $80
+SPRITE_BIAS = 0x80         # у спрайтов VDP начало экрана в $80
+TALK_FRAMES = 90           # сколько держать реплику; в игре ждут кнопку
+PLAY_LIMIT = 20000         # предохранитель от незакрывшегося ожидания
+
+
+class Actor(object):
+    u"""Запись актёра: те поля `$5A`-байтной записи, что трогает скрипт."""
+
+    def __init__(self, pc):
+        self.pc, self.alive = pc, True
+        self.wait = 0                       # $50
+        self.parked = False                 # бит 3: «дошёл», ждёт остальных
+        self.looped = False                 # бит 2
+        self.kind = self.anim = self.face = self.pal = 0   # $3E $40 $42 $59
+        self.x = self.y = 1                 # $44 $46
+        self.stepx = self.stepy = 0         # $48 $4C: задержка и шаг
+        self.cntx = self.cnty = 0           # $4A $4E
+        self.seq, self.idx, self.timer = None, 0, 0
+
+    def word(self):
+        return self.seq[self.idx][0] if self.seq else None
+
+
+def _load_anim(a):
+    import unitanim, unitgfx
+    try:
+        addr = unitgfx.script_addr(a.kind, a.anim, a.face)
+        seq, loop, ok, _nxt = unitanim.steps(addr, unitanim.entry_map(a.kind))
+    except Exception:
+        seq, loop, ok = [], None, False
+    a.seq = seq if (ok and seq) else None
+    a.loop_to = loop or 0
+    a.idx, a.timer = 0, (seq[0][1] if a.seq else 0)
+
+
+def _advance(a):
+    if not a.seq:
+        return
+    if a.idx + 1 < len(a.seq):
+        a.idx += 1
+    elif a.looped or a.loop_to:
+        a.idx = a.loop_to
+    a.timer = a.seq[a.idx][1]
+
+
+def _rest(a):
+    u"""Сколько кадров до конца одноразовой анимации."""
+    if not a.seq:
+        return 1
+    return max(1, a.timer + sum(d for _w, d in a.seq[a.idx + 1:]))
+
+
+def step_actor(a, d, ctx):
+    u"""Выполнить команды до первой останавливающей, как `$056668`."""
+    while a.alive:
+        w = struct.unpack_from(">H", d, a.pc)[0]
+        a.pc += 2
+        op, arg = w >> 12, w & 0x0FFF
+        if op == 0:
+            a.alive = False
+            return
+        if op == 3:                         # мгновенные: сразу следующая
+            sub, v = (arg >> 8) & 3, arg & 0xFF
+            if sub == 0:
+                a.kind = v
+            elif sub == 1:
+                a.anim = v
+            elif sub == 2:
+                a.face = v
+            else:
+                a.pal = v & 3
+            continue
+        if op == 4:
+            a.stepx, a.cntx = arg, 0
+            continue
+        if op == 5:
+            a.stepy, a.cnty = arg, 0
+            continue
+        if op == 6:
+            a.x = arg
+            continue
+        if op == 7:
+            a.y = arg
+            continue
+        if op == 1:                         # останавливающие: кадр кончился
+            a.looped = bool(arg & 0x0F00)
+            _load_anim(a)
+            for _ in range(arg & 0xFF):
+                _advance(a)
+            return
+        if op == 2:
+            if ((arg >> 8) & 0x0F) == 1:
+                a.wait = ctx["talk"]
+                ctx["said"] += 1
+            return
+        if op == 8:
+            sub = (arg >> 8) & 7
+            if sub == 0:
+                a.wait = arg & 0xFF
+            elif sub == 1:
+                a.parked, a.wait = True, 1
+                ctx["arrived"] += 1
+            elif sub == 2:
+                if ctx["arrived"] < ctx["total"] - 1:
+                    a.pc -= 2               # откат на слово, как в игре
+                else:
+                    for b in ctx["all"]:
+                        b.parked = False
+                    ctx["arrived"] = 0
+            elif sub == 3 and not a.looped:
+                a.wait = _rest(a)
+            return
+        return                              # коды 9…F — пусто
+
+
+def play(k, path, talk=TALK_FRAMES, scale=1):
+    u"""Проиграть сценку k и записать GIF.
+
+    Кадр в кадр повторяет `ScreenObjRecords`: сперва у каждого живого
+    актёра выполняются команды до первой останавливающей, потом всем
+    убавляются счётчики и применяется шаг. Разница одна и она названа:
+    команда «реплика» в игре ждёт кнопку, здесь — `talk` кадров.
+    """
+    import unitanim
+    d = block(k)
+    _grec, _frame, scr, txt, n = header(d)
+    rec, pals, _scr = stage(k)
+    flat = [c for row in pals for c in row]
+
+    base = bytearray(SCREEN_W * SCREEN_H)
+    for y, row in enumerate(backdrop_indexes(rec, scr)):
+        o = (BACK_Y + y) * SCREEN_W
+        base[o:o + SCREEN_W] = row
+
+    scripts, _end = actors(d, 0x0A, n)
+    acts = [Actor(one[0][0]) for one in scripts]
+    ctx = {"all": acts, "total": n, "arrived": 0, "said": 0, "talk": talk}
+
+    cache = {}
+
+    def sprite(a):
+        w = a.word()
+        if w is None:
+            return None
+        key = (a.kind, w, a.pal)
+        if key not in cache:
+            pal = [a.pal * 16 + i for i in range(16)]
+            cache[key] = unitanim.frame_pixels(a.kind, w, pal)
+        return cache[key]
+
+    # обрезка: экран 320x224, но восстановлена только полоса пейзажа —
+    # текстовое окно игры сюда не переносится, и пустой чёрный низ незачем
+    band = [BACK_Y, BACK_Y + SCREEN_ROWS * 8]
+    frames, delays, held = [], [], 0
+    for _tick in range(PLAY_LIMIT):
+        for a in acts:                      # проход первый: скрипты
+            if a.alive and not a.wait:
+                step_actor(a, d, ctx)
+        for a in acts:                      # проход второй: счётчики и шаг
+            if not a.alive:
+                continue
+            if a.timer > 0:
+                a.timer -= 1
+            elif a.seq:
+                _advance(a)
+            if not a.parked and a.wait:
+                a.wait -= 1
+            if a.cntx:
+                a.cntx -= 1
+            else:
+                a.cntx = a.stepx >> 8
+                a.x = (a.x + sbyte(a.stepx)) & 0xFFFF
+            if a.cnty:
+                a.cnty -= 1
+            else:
+                a.cnty = a.stepy >> 8
+                a.y = (a.y + sbyte(a.stepy)) & 0xFFFF
+
+        px = bytearray(base)
+        for a in acts:
+            if not a.alive:
+                continue
+            spr = sprite(a)
+            if spr is None:
+                continue
+            ox, oy = a.x - SPRITE_BIAS, a.y - SPRITE_BIAS
+            if 0 <= oy < SCREEN_H:
+                band[0] = min(band[0], oy)
+            if 0 < oy + 32 <= SCREEN_H:
+                band[1] = max(band[1], oy + 32)
+            for sy in range(32):
+                dy = oy + sy
+                if not (0 <= dy < SCREEN_H):
+                    continue
+                line, o = spr[sy], dy * SCREEN_W
+                for sx in range(32):
+                    dx = ox + sx
+                    if 0 <= dx < SCREEN_W and line[sx] is not None:
+                        px[o + dx] = line[sx]
+        frames.append(px)
+        held += 1
+        if not any(a.alive for a in acts):
+            break
+
+    y0, y1 = max(0, band[0]), min(SCREEN_H, band[1])
+    h = y1 - y0
+    if h < SCREEN_H:
+        cut = []
+        for f in frames:
+            cut.append(f[y0 * SCREEN_W:y1 * SCREEN_W])
+        frames = cut
+    delays = [2] * len(frames)              # такт 1/60 -> две сотых
+    kept = gif(path, SCREEN_W, h, flat, frames, delays)
+    say = lines(d, txt)
+    print(u"сценка %d: актёров %d, кадров %d (в файле %d), %.1f с, "
+          u"реплик показано %d из %d, полоса y %d…%d, %d Кб -> %s"
+          % (k, n, len(frames), kept, len(frames) / 60.0,
+             ctx["said"], len(say), y0, y1,
+             (os.path.getsize(path) + 1023) // 1024,
+             os.path.relpath(path, HERE)))
+    return 0
+
+
+def do_play(k, talk):
+    d = out_path("cutscene")
+    os.makedirs(d, exist_ok=True)
+    return play(k, os.path.join(d, "scene_%d.gif" % k), talk)
 
 
 def do_backdrops():
@@ -321,7 +625,8 @@ def report(f, only=None):
         for i, one in enumerate(acts):
             for _o, w, _t in one:
                 ops[w >> 12] += 1
-            p(u"### Актёр %d — %d команд\n\n" % (i, len(one)))
+            p(u"### Актёр %d (%s) — %d команд\n\n"
+              % (i, actor_brief(one), len(one)))
             p(u"```\n")
             for o, w, t in one:
                 p(u"+%03X  %04X  %s\n" % (o, w, t))
@@ -341,6 +646,10 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == "--back":
         return do_backdrops()
+    if args and args[0] == "--play":
+        k = int(args[1]) if len(args) > 1 else 0
+        talk = int(args[2]) if len(args) > 2 else TALK_FRAMES
+        return do_play(k, talk)
     only = int(args[0]) if args else None
 
     doc = os.path.join(HERE, "docs", "game-cutscene-scripts.md")
