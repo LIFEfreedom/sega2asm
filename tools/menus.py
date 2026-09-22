@@ -3,6 +3,7 @@ u"""Меню команд: картинки, пункты, переходы и �
 
     make menus                  # восемь меню в PNG плюс сводка
     make menus MNARGS=--plain   # без разметки пунктов
+    make menus MNARGS=--hud     # подложка панели, три варианта
 
 ## Восемь меню
 
@@ -95,6 +96,11 @@ MENU_NAMES = 0x0496F0      # CommandMenuNames
 COLS, ROWS = 10, 7         # картинка меню в тайлах
 ITEM = 10                  # байт на пункт
 MASK_FIELD = 0x3C          # слово на команду в описании миссии
+HUD_NAMES = 0x01170C       # три подложки панели по 732 байта
+HUD_TILES = 0x0111AA       # тайлы панели, база — тайл $256
+HUD_COLS, HUD_ROWS = 13, 28
+HUD_STRIDE = 4 + HUD_COLS * HUD_ROWS * 2
+HUD_BASE = 0x8256          # к слову имени прибавляется это
 MREC = 0x5C
 CHAPTERS = 0x060400
 DIRS = (u"вверх", u"вверх-вправо", u"вправо", u"вниз-вправо",
@@ -210,8 +216,72 @@ def draw(k, path, scale=4, plain=False):
     return n
 
 
+def hud(vi, path, toff=0, scale=3):
+    u"""Подложка панели: 13 столбцов на 28 строк.
+
+    Слово имени из `$01170C` маскируется `$18FF` и к нему прибавляется
+    `$8256`, то есть номер тайла задаётся младшим байтом, а база — начало
+    блока `$0111AA`. Прямоугольник вверху пуст не по ошибке: там место
+    миникарты, её наполняет `BuildTerrainMapTiles` тайлами с `$290`.
+    """
+    import maptex
+    names = bytes(unpack(ROM, HUD_NAMES)[2])
+    src = bytes(unpack(ROM, HUD_TILES)[2])
+    pal = maptex.array_palette(0)
+    w, h = HUD_COLS * 8, HUD_ROWS * 8
+    px = [[(0, 0, 0)] * w for _ in range(h)]
+    base = vi * HUD_STRIDE + 4
+    for r in range(HUD_ROWS):
+        for c in range(HUD_COLS):
+            o = base + (r * HUD_COLS + c) * 2
+            if o + 2 > len(names):
+                continue
+            n = ((struct.unpack_from(">H", names, o)[0] & 0x18FF)
+                 + HUD_BASE) & 0xFFFF
+            t = (n & 0x7FF) - 0x256
+            g = src[toff + t * 32:toff + (t + 1) * 32]
+            if len(g) < 32:
+                continue
+            hf, vf = (n >> 11) & 1, (n >> 12) & 1
+            for y in range(8):
+                sy = 7 - y if vf else y
+                row = px[r * 8 + y]
+                for x in range(8):
+                    sx = 7 - x if hf else x
+                    b = g[sy * 4 + (sx >> 1)]
+                    v = (b >> 4) if sx % 2 == 0 else (b & 15)
+                    row[c * 8 + x] = pal[v]
+    W, H = w * scale, h * scale
+    img = [[(0, 0, 0)] * W for _ in range(H)]
+    for y in range(h):
+        for x in range(w):
+            col = px[y][x]
+            for ky in range(scale):
+                row = img[y * scale + ky]
+                for kx in range(scale):
+                    row[x * scale + kx] = col
+    png(path, W, H, img)
+
+
+def do_hud():
+    d = out_path("menus")
+    os.makedirs(d, exist_ok=True)
+    names = bytes(unpack(ROM, HUD_NAMES)[2])
+    n = len(names) // HUD_STRIDE
+    for vi in range(n):
+        toff = 0 if vi == 0 else 0x740
+        p = os.path.join(d, "hud_%d.png" % vi)
+        hud(vi, p, toff)
+        print(u"подложка %d (тайлы со смещения $%03X) -> %s"
+              % (vi, toff, os.path.relpath(p, HERE)))
+    print(u"панелей в $%06X: %d по %d байт" % (HUD_NAMES, n, HUD_STRIDE))
+    return 0
+
+
 def main():
     args = sys.argv[1:]
+    if "--hud" in args:
+        return do_hud()
     plain = "--plain" in args
     d = out_path("menus")
     os.makedirs(d, exist_ok=True)
