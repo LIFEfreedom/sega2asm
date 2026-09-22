@@ -85,9 +85,90 @@ def lines(a, b):
     return out
 
 
+
+# Описатели меню. Разбор формата — docs/mauimallard/engine.md.
+MENUS = [
+    (0x1FD440, u"главное меню"),
+    (0x1FD46E, u"оно же с отладкой ($FF2180)"),
+    (0x1FD4AA, u"настройки"),
+]
+SETTINGS = 0xFFFD78          # блок настроек: $FFFFFD78 + индекс
+
+
+def _string(a):
+    """Строка с нулём на конце -> (текст, адрес за нулём)."""
+    s = a
+    while ROM[a]:
+        a += 1
+    return "".join(chr(c) for c in ROM[s:a]), a + 1
+
+
+def menu(at):
+    """Описатель -> список пунктов.
+
+    Формат читается из `$297514`: байт-счётчик, на пункт столбец, строка,
+    ASCII с нулём и байт кода. Длины операндов взяты у четырёх
+    обработчиков из таблицы `bra.w` с `$297578`.
+    """
+    a = at
+    n = ROM[a]
+    a += 1
+    out = []
+    for _k in range(n):
+        row, col = ROM[a], ROM[a + 1]      # сначала СТРОКА, потом столбец
+        a += 2
+        text, a = _string(a)
+        act = ROM[a]
+        a += 1
+        arg = {}
+        if act == 0:                       # запустить процедуру
+            a += a & 1                     # выровнять
+            arg["proc"] = int.from_bytes(ROM[a:a + 4], "big")
+            a += 4
+        elif act == 1:                     # выбор из списка
+            arg["setting"] = ROM[a]
+            cnt = ROM[a + 1]
+            a += 2
+            arg["choices"] = []
+            for _j in range(cnt):
+                s, a = _string(a)
+                arg["choices"].append(s)
+        elif act == 2:                     # показать число
+            arg["setting"] = ROM[a]
+            a += 2
+        elif act == 3:                     # число плюс процедура
+            arg["setting"] = ROM[a]
+            arg["proc"] = int.from_bytes(ROM[a + 2:a + 6], "big")
+            a += 6
+        out.append((col, row, text, act, arg))
+    return out, a
+
+
+def do_menus():
+    for at, name in MENUS:
+        items, end = menu(at)
+        print(u"=== $%06X  %s  пунктов %d, конец $%06X"
+              % (at, name, len(items), end))
+        for col, row, text, act, arg in items:
+            where = (u"по центру" if col & 0x80 else u"столбец %2d" % col)
+            line = u"  строка %-2d %-11s %-12s код %d" % (
+                row, where, text.strip(), act)
+            if "setting" in arg:
+                line += u"  настройка $%06X" % (SETTINGS + arg["setting"])
+            if "proc" in arg:
+                line += u"  -> $%06X" % arg["proc"]
+            if "choices" in arg:
+                line += u"  [%s]" % u", ".join(c.strip()
+                                               for c in arg["choices"])
+            print(line)
+        print()
+
 def main():
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     rs = runs()
+    if arg == "--menus":
+        do_menus()
+        return
     if arg == "--extent":
         lo = min(a for a, _b in rs)
         hi = max(b for _a, b in rs)
