@@ -588,6 +588,7 @@ def do_sheet(only=None, scale=2, per_row=8):
             print("$%06X: кадров не нашлось" % r["h"])
             continue
         SP.PALS = L.pal(r["levels"][0])
+        row = species_row(r["h"])
         got = []
         for i in fr:
             if len(got) >= 32:
@@ -611,7 +612,7 @@ def do_sheet(only=None, scale=2, per_row=8):
             ox = (k % per_row) * cw + 1 - b[0]
             oy = (k // per_row) * ch + 1 - b[1]
             for p in pieces:
-                SP.draw(buf, w, h, ox, oy, p)
+                SP.draw(buf, w, h, ox, oy, p, row)
         path = os.path.join(d, "enemy_%03d_%06X.png" % (r["codes"][0], r["h"]))
         SP.png(path, w, h, buf, scale)
         made += 1
@@ -807,6 +808,29 @@ def do_who():
     print("не привязалось: %d" % lost)
 
 
+ROW27 = re.compile(r"move\.b\s+#\$0?([0-9A-F]+),\$27\(a0\)")
+
+
+def species_row(h):
+    """Ряд палитры, если вид его НАВЯЗЫВАЕТ полем `+$27`.
+
+    Обычно ряд берут из кадра (биты 13-14 имени куска), но `$296216`
+    умеет его подменить: `andi.w #$9FFF,d1` стирает ряд из кадра и
+    подставляет `(+$27 - 1) << 13`. Делается это, только если
+    `+$27` не ноль — при нуле `subq.b #1` даёт `$FF`, `tst.b` видит
+    минус, и подмена пропускается.
+    """
+    for a, alien in walk(h, 1):
+        if alien:
+            continue
+        m = ROW27.search(BY.get(a, ""))
+        if m:
+            v = int(m.group(1), 16)
+            if v:
+                return v - 1
+    return None
+
+
 def blank_frame(pieces):
     """Кусок из одних нулей — кадр пустой: объект есть, а рисовать нечего.
 
@@ -849,7 +873,7 @@ def do_contact(scale=2, per_row=6):
         ox = (k % per_row) * cw + 2 - b[0]
         oy = (k // per_row) * ch + 2 - b[1]
         for p in pieces:
-            SP.draw(buf, w, h, ox, oy, p)
+            SP.draw(buf, w, h, ox, oy, p, species_row(r["h"]))
     d = out_path("gfx")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "enemies_contact.png")
