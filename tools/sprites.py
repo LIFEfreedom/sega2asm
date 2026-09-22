@@ -19,8 +19,9 @@
 Палитру кадр не хранит: в имени куска только ряд CRAM (0-3), а сами
 цвета игра грузит отдельно — 128 байт (все четыре ряда) из ROM в
 `$FFFFDC40` процедурой `$2A58B6`, оттуда в CRAM `$2A58C4`. Палитры уровней
-лежат в поле `+$00` записи уровня (`--level`), заставка и меню красятся
-`$1F6F58` и `$1FB158`.
+лежат в поле `+$00` записи уровня (`--level`), а вне уровня блок грузит
+сам экран перед отрисовкой — см. `--pals`, где каждый блок сведён
+с тем местом кода, которое его грузит.
 
 Для объектов НА УРОВНЕ связь полная: блок один на уровень (выбора у объекта
 нет), ряд — биты 13-14 имени куска, значит пара «уровень + кадр» задаёт
@@ -68,6 +69,51 @@ def find_pals(least=12):
         else:
             a += 2
     return out
+
+
+
+def loaders(window=8):
+    """Где палитру ГРУЗЯТ: `lea $ADDR,a0`, а следом вызов загрузчика.
+
+    Ищется по разобранному коду, а не по данным, поэтому список
+    самоподдерживающийся: появится новый вызов — появится и строка.
+    """
+    import bisect
+    import re as _re
+    import enemies as _E
+    lea = _re.compile(r"^(?:lea|movea\.l)\s+[(#]?\$([0-9A-F]{6,8})\)?\.?l?,a0")
+    call = _re.compile(r"(?:bsr\.w|jsr)\s+\(?(PaletteFadeTo|PaletteLoad)")
+    addrs = sorted(_E.BY)
+    out = {}
+    for i, a in enumerate(addrs):
+        m = lea.match(_E.BY[a])
+        if not m:
+            continue
+        for b in addrs[i + 1:i + 1 + window]:
+            t = _E.BY[b]
+            c = call.search(t)
+            if c:
+                out.setdefault(int(m.group(1), 16) & 0xFFFFFF,
+                               []).append((a, c.group(1)))
+                break
+            if ",a0" in t or "(a0)" in t:
+                break          # a0 переписали — эта пара не считается
+    return out
+
+
+def level_pals():
+    """Блоки, на которые ссылается поле `+$00` записи уровня."""
+    out = {}
+    for i in range(23):
+        r = struct.unpack_from(">I", ROM, 0x1FCB50 + 4 * i)[0]
+        out.setdefault(struct.unpack_from(">I", ROM, r)[0], []).append(i)
+    return out
+
+
+def check_block(base, n=64):
+    """Сколько слов из 64 не проходят правило `0BGR`, и сколько их разных."""
+    ws = [struct.unpack_from(">H", ROM, base + 2 * j)[0] for j in range(n)]
+    return sum(1 for v in ws if v & 0xF111), len(set(ws))
 
 
 def tile(dst, src, ox, oy, pal, w, h):
@@ -243,10 +289,41 @@ def main():
 
     if mode == "--pals":
         pals = find_pals()
-        print("палитр по правилу 0BGR: %d (по 128 байт, четыре ряда)" % len(pals))
-        print("игра грузит $1F6F58 и $1FB158 — это меню и заставка")
-        for a in pals:
-            print("  $%06X" % a)
+        used = loaders()
+        lvl = level_pals()
+        print(u"палитр по правилу 0BGR: %d (по 128 байт, четыре ряда)"
+              % len(pals))
+        print(u"из них ГРУЗЯТ %d, и ещё %d блоков код грузит мимо находок"
+              % (sum(1 for a in pals if any(abs(a - u) <= 4 for u in used)),
+                 sum(1 for u in used if not any(abs(a - u) <= 4 for a in pals))))
+        print()
+        print(u"| блок | негодных слов | разных | грузят из |")
+        print(u"|---|---|---|---|")
+        for a in sorted(set(list(used) + list(lvl) + pals)):
+            near = [u for u in used if abs(a - u) <= 4]
+            if a >= len(ROM):
+                print(u"| `$%06X` | — | — | %s (адрес в ОЗУ: блок уровня) |"
+                      % (a, u", ".join(u"$%06X %s" % (x, k)
+                                       for x, k in used[a])))
+                continue
+            if a in pals and a not in used and a not in lvl and (
+                    any(abs(a - u) <= 4 for u in used)
+                    or any(abs(a - u) <= 4 for u in lvl)):
+                continue          # та же палитра, найденная со сдвигом
+            bad, uniq = check_block(a)
+            who = used.get(a)
+            lv = lvl.get(a)
+            if who:
+                src = u", ".join(u"$%06X %s" % (x, k) for x, k in who)
+                if lv:
+                    src += (u"; он же у уровня %s"
+                            % u", ".join(str(x) for x in lv))
+            elif lv:
+                src = (u"запись уровня `+$00`: %s"
+                       % u", ".join(str(x) for x in lv))
+            else:
+                src = u"*никто*"
+            print(u"| `$%06X` | %d | %d | %s |" % (a, bad, uniq, src))
         return 0
     if mode == "--sheet":
         render_sheet(args[0] if args else 0, args[1] if len(args) > 1 else 64,
