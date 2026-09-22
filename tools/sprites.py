@@ -111,9 +111,18 @@ def level_pals():
 
 
 def check_block(base, n=64):
-    """Сколько слов из 64 не проходят правило `0BGR`, и сколько их разных."""
+    """Три числа: негодных слов, разных значений и ДЛИННЕЙШИЙ повтор.
+
+    Повтор важен: правило `0BGR` дёшево проходится на рядах `$0000`
+    и `$0EEE`, которых в картридже много, так что блок с длинным
+    повтором — скорее графика или набивка, чем палитра.
+    """
     ws = [struct.unpack_from(">H", ROM, base + 2 * j)[0] for j in range(n)]
-    return sum(1 for v in ws if v & 0xF111), len(set(ws))
+    run = best = 1
+    for j in range(1, n):
+        run = run + 1 if ws[j] == ws[j - 1] else 1
+        best = max(best, run)
+    return sum(1 for v in ws if v & 0xF111), len(set(ws)), best
 
 
 def tile(dst, src, ox, oy, pal, w, h):
@@ -297,12 +306,12 @@ def main():
               % (sum(1 for a in pals if any(abs(a - u) <= 4 for u in used)),
                  sum(1 for u in used if not any(abs(a - u) <= 4 for a in pals))))
         print()
-        print(u"| блок | негодных слов | разных | грузят из |")
-        print(u"|---|---|---|---|")
+        print(u"| блок | негодных | разных | длиннейший повтор | грузят из |")
+        print(u"|---|---|---|---|---|")
         for a in sorted(set(list(used) + list(lvl) + pals)):
             near = [u for u in used if abs(a - u) <= 4]
             if a >= len(ROM):
-                print(u"| `$%06X` | — | — | %s (адрес в ОЗУ: блок уровня) |"
+                print(u"| `$%06X` | — | — | — | %s (адрес в ОЗУ: блок уровня) |"
                       % (a, u", ".join(u"$%06X %s" % (x, k)
                                        for x, k in used[a])))
                 continue
@@ -310,7 +319,7 @@ def main():
                     any(abs(a - u) <= 4 for u in used)
                     or any(abs(a - u) <= 4 for u in lvl)):
                 continue          # та же палитра, найденная со сдвигом
-            bad, uniq = check_block(a)
+            bad, uniq, run = check_block(a)
             who = used.get(a)
             lv = lvl.get(a)
             if who:
@@ -322,8 +331,15 @@ def main():
                 src = (u"запись уровня `+$00`: %s"
                        % u", ".join(str(x) for x in lv))
             else:
-                src = u"*никто*"
-            print(u"| `$%06X` | %d | %d | %s |" % (a, bad, uniq, src))
+                known = [x for x in list(used) + list(lvl)
+                         if x < len(ROM) and 0 < abs(a - x) < 128]
+                src = (u"*никто*; накладывается на $%06X" % known[0]
+                       if known else u"*никто*")
+            print(u"| `$%06X` | %d | %d | %d | %s |"
+                  % (a, bad, uniq, run, src))
+        print()
+        print(u"Длиннейший повтор НЕ отличает палитру от данных: у"
+              u" загружаемого `$1F80BA` он 48.")
         return 0
     if mode == "--sheet":
         render_sheet(args[0] if args else 0, args[1] if len(args) > 1 else 64,
