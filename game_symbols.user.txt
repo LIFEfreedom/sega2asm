@@ -3012,7 +3012,15 @@ HasEnemySpecies4               = $024C5A   ; то же по блоку прот�
 HasOwnSpecies6                 = $024C86   ; байт +$5 своего блока — вид 6
 HasEnemySpecies6               = $024CB2   ; байт +$5 блока противника
 CountOwnUnitsTotal             = $024CDE   ; сумма пяти байт переписи своего блока — сколько всего юнитов
-SubmenuAvailWeather            = $024D1A   ; команда 2, ｼｾﾞﾝ: CanAffordWatering, ливень, буря, засуха, молния, метеорит
+CommandAvailProcs              = $024B52   ; девять слов, смещения относительно себя, индекс —
+                             ; НОМЕР КОМАНДЫ (нулевая запись не в ходу). Команды 1, 3 и 4
+                             ; ведут на SubmenuAvailAll, остальные на свои. Процедура
+                             ; ставит 1 в байт пункта при выполненном условии; маска
+                             ; миссии потом кладёт $FF поверх, и грей даёт только $FF.
+                             ; Разбор по пунктам — docs/game-menus.md
+SubmenuAvailWeather            = $024D1A   ; команда 2, ｼｾﾞﾝ, СЕМЬ пунктов: CanAffordWatering,
+                             ; HeavyRain, Storm, Drought, Quake, Lightning, Meteor.
+                             ; Прежний комментарий пропускал землетрясение
 SubmenuAvailEggs               = $024D78   ; команда 5, яйца: CanAffordEgg1, Egg2, Egg5, Egg4, Egg6, Egg3
 SubmenuAvailPlants             = $024DCA   ; команда 6, растения: CanAffordPlant1, Plant2, Plant4, Plant3
 SubmenuAvailRemodel            = $024E04   ; команда 7, ｶｲｿﾞｳ: CanAffordRemodel1, 2, 5, 4 и остальные
