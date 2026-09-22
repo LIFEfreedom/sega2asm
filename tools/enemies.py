@@ -589,10 +589,13 @@ def do_sheet(only=None, scale=2, per_row=8):
             continue
         SP.PALS = L.pal(r["levels"][0])
         got = []
-        for i in fr[:32]:
+        for i in fr:
+            if len(got) >= 32:
+                break
             pieces = F.parse(F.U32(F.BASE + i * 4))
-            got.append((i, pieces, SP.bounds(pieces)) if pieces
-                       else (i, None, None))
+            if not pieces or blank_frame(pieces):
+                continue
+            got.append((i, pieces, SP.bounds(pieces)))
         vis = [g for g in got if g[1]]
         if not vis:
             print("$%06X: кадры не разбираются" % r["h"])
@@ -804,6 +807,20 @@ def do_who():
     print("не привязалось: %d" % lost)
 
 
+def blank_frame(pieces):
+    """Кусок из одних нулей — кадр пустой: объект есть, а рисовать нечего.
+
+    Так сделан, например, кадр 1067: один кусок 8x8 с полностью нулевым
+    источником и коробкой `(-16, 16, -8, 7)` в `+4`. То есть объект
+    невидим, но попадать по нему можно.
+    """
+    for d, _name, _x, _y, src in pieces or ():
+        n = (U16(d + 2) // 8) * (U16(d + 4) // 8)
+        if any(ROM[src:src + n * 32]):
+            return False
+    return True
+
+
 def do_contact(scale=2, per_row=6):
     """Общий лист: по одному кадру на вид, в порядке каталога."""
     import frames as F
@@ -816,7 +833,7 @@ def do_contact(scale=2, per_row=6):
         pieces = None
         for i in fr:
             pieces = F.parse(F.U32(F.BASE + i * 4))
-            if pieces:
+            if pieces and not blank_frame(pieces):
                 break
         got.append((r, pieces, SP.bounds(pieces) if pieces else None))
     vis = [g for g in got if g[1]]
