@@ -7,6 +7,7 @@ u"""Сценки между миссиями: заголовок блока, с�
     make cutscene CSARGS="--play 0" # проиграть сценку 0 в GIF
     make cutscene CSARGS=--story    # 152 сюжетных экрана
     make cutscene CSARGS="--story 7"  # скрипт одного из них
+    make cutscene CSARGS=--captions # титры всех экранов в PNG
 
 ## Где они и когда играют
 
@@ -105,22 +106,42 @@ u"""Сценки между миссиями: заголовок блока, с�
 - **`2.1`, реплика** (только сценки): запись `<ширина><строк>{строка,0}`,
   разбирает `SceneOpenBubble`, знак — один тайл 8x8 в пузыре;
 - **`2.4`, титр** (только сюжетные экраны): СЛОВО-СМЕЩЕНИЕ до текста,
-  считая от себя; печатает `ScreenWriteByA5WordA` `$057026`.
+  считая от себя; печатает `CaptionWriteStep` `$057026`.
 
 Поэтому `lines()` на сюжетных блоках находит ноль записей, хотя данные там
 есть: формат другой. Проверка «зазор ноль» это не задевает — она про то,
 где список начинается, а не что в нём.
 
 Титр устроен совсем иначе, чем пузырь: **знак занимает 2x2 тайла**, то
-есть 16x16 точек. Слово текста даёт номер первого тайла, дальше кладутся
-`+2`, `+1`, `+3` — два слова в строку и две строки. Столбец идёт от 3 до
-`$25` шагом 2, строка шагом 2, глифы подгружаются по знаку в VRAM `$4720`
-через `CopyBlockToEE5Cb`. Слово 1 пропускает клетку, слово 0 гасит
-`$C100` на `$180` слов и возвращает `$12(a5)` в ноль. Пауза 2 кадра на
-знак, `$1E` = 30 в конце строки.
+есть 16x16 точек. Номер тайла считается от МЕСТА, а не от знака —
+`$1F5 + (столбец-3)*2 + (строка-3)*34`, — потому что графику знака
+подгружают в эти самые тайлы прямо перед выводом. Столбец идёт от 3 до
+`$25` шагом 2 (17 знаков в строку), строка шагом 2. Слово 1 пропускает
+клетку, слово 0 гасит `$C100` на `$180` слов и возвращает `$12(a5)` в
+ноль. Пауза 2 кадра на знак, `$1E` = 30 в конце строки.
 
-Сами тексты титров инструмент пока не выписывает: нужен разбор того
-блока глифов, откуда их берёт `CopyBlockToEE5Cb`.
+## Шрифт титров: 16x16 и с иероглифами (`--captions`)
+
+Слово титра — это **`номер блока << 4 | номер глифа`**. Блок берётся из
+таблицы `$18F362` (280 входов, ровно до первого блока `$18F7C2`) и
+распаковывается ровно в 512 байт: 16 глифов по 32 байта, то есть 16 строк
+по два байта, **один бит на точку**. `CaptionExpand1bpp` `$0579CE`
+разворачивает каждый ниббл в слово 4bpp по таблице `data_321`, красит
+единицы в `$5E(a5)`, нули в `$60(a5)` — у сценарных экранов это `$2222` и
+`$DDDD`, цвета 2 и 13 ряда палитры.
+
+Это **второй шрифт игры и совсем другой**: у пузыря знак 8x8 и только
+полуширинная кана, здесь 16x16 и полноценная японская письменность с
+иероглифами, латиницей и цифрами.
+
+`--captions` выкладывает все титры картинками в
+`out/dynabrothers2/cutscene/captions`: по файлу на блок плюс лист
+`glyphs.png` со всеми различными глифами и `glyphs.txt` с их словами.
+
+Счёт: **2820 титров, 44035 клеток, 805 различных глифов** из 200 блоков
+таблицы; наибольший встреченный номер блока 279 при 280 входах — граница
+таблицы этим и подтверждена. Число записей в списке титров сошлось с
+числом команд `2.4` во всех 152 блоках.
 
 ## Актёры
 
@@ -189,7 +210,7 @@ u"""Сценки между миссиями: заголовок блока, с�
 | 1 | **реплика**: `$C(a5) = номер актёра`, `$12(a5) = 1`, вызов `SceneOpenBubble` `$0503B4` |
 | 2 | текстовое окно: заводит `SceneWindowSlide` `$050678` на `$68` кадров и гонит по плану B тринадцать строк с `$E380`, по строке за восемь кадров. Аргумент 0 кладёт в `$84(a5)` `-$50` и в `$82(a5)` `$3C0`, иначе `+$50` и ноль — то есть выезд наверх или вниз. Что это «показать» и «убрать» — видно по употреблению: на пятнадцать сценок ровно по одной паре, `$201` всегда перед первой репликой, `$200` всегда последней командой |
 | 3 | эффект по таблице `$0568AE` на шестнадцать входов; скрипты зовут только вход 1 — `SceneFadePalettes` `$056C2E`, четырнадцать шагов палитры |
-| 4 | **титр**: `$12(a5) = 2`, и кадр уходит в `ScreenWriteByA5WordA` `$057026` — печать подписи внизу экрана. Скрипты сюжетных экранов берут его три тысячи раз, сценки — ни разу |
+| 4 | **титр**: `$12(a5) = 2`, и кадр уходит в `CaptionWriteStep` `$057026` — печать подписи внизу экрана. Скрипты сюжетных экранов берут его три тысячи раз, сценки — ни разу |
 | 5 | взять блок сюжета из `StoryBlockTable`; в сценках не встречается |
 | 6 | музыка трапом `$FF30`; в сценках не встречается |
 
@@ -452,6 +473,72 @@ def story_header(d):
     """
     w = lambda o: struct.unpack_from(">H", d, o)[0]
     return (w(0) // 4, w(2), w(4), w(6), 8 + w(8), w(10))
+
+
+CAPTION_GLYPHS = 0x18F362  # 280 указателей на блоки по 16 глифов
+CAP_COL0, CAP_COLN, CAP_ROW0 = 3, 0x25, 3   # начальный столбец, предел, строка
+
+_CAPBLOCK = {}
+
+
+def caption_glyph(word):
+    u"""32 байта глифа титра: 16 строк по два байта, один бит на точку.
+
+    Слово титра — это `номер блока << 4 | номер глифа`. Блок берётся из
+    таблицы `$18F362` (280 входов) и распаковывается ровно в 512 байт, то
+    есть 16 глифов по 32 байта. `CaptionExpand1bpp` `$0579CE` потом
+    разворачивает каждый ниббл в слово 4bpp по таблице `data_321`,
+    окрашивая единицы в `$5E(a5)`, нули в `$60(a5)` — у сценарных экранов
+    это `$2222` и `$DDDD`, то есть цвета 2 и 13.
+    """
+    blk, idx = word >> 4, word & 0x0F
+    if blk not in _CAPBLOCK:
+        _CAPBLOCK[blk] = bytes(
+            unpack(ROM, U32(CAPTION_GLYPHS + blk * 4))[2])
+    return _CAPBLOCK[blk][idx * 32:(idx + 1) * 32]
+
+
+def captions(d, txt, count):
+    u"""[[слово]] — count титров по списку слов-смещений с txt.
+
+    Курсор `$6(a5)` тут тот же, что у реплик, но формат другой: слово —
+    смещение до потока титра, считая от себя самого. Поток кончается
+    нулевым словом, слово 1 пропускает клетку.
+    """
+    out, o = [], txt
+    for _ in range(count):
+        p = o + struct.unpack_from(">H", d, o)[0]
+        one = []
+        while p + 1 < len(d):
+            w = struct.unpack_from(">H", d, p)[0]
+            p += 2
+            if w == 0:
+                break
+            one.append(w)
+        out.append(one)
+        o += 2
+    return out
+
+
+def caption_cells(words):
+    u"""[(столбец, строка, слово)] — раскладка титра, как в `$057026`."""
+    out, col, row = [], CAP_COL0, CAP_ROW0
+    for w in words:
+        if w != 1:
+            out.append(((col - CAP_COL0) // 2, (row - CAP_ROW0) // 2, w))
+        col += 2
+        if col >= CAP_COLN:
+            col, row = CAP_COL0, row + 2
+    return out
+
+
+def blit_glyph(px, g, bx, by, on, off):
+    u"""Глиф 16x16 в точки: бит 1 — цвет on, бит 0 — off."""
+    for r in range(16):
+        w = struct.unpack_from(">H", g, r * 2)[0]
+        line = px[by + r]
+        for b in range(16):
+            line[bx + b] = on if w & (0x8000 >> b) else off
 
 
 def sbyte(v):
@@ -1152,12 +1239,13 @@ def do_story(which=None):
           % (a, n, u", ".join(u"`$%06X`" % b for b in blocks)))
     ops, kinds, sfx, music = (collections.Counter(), collections.Counter(),
                               collections.Counter(), collections.Counter())
-    tot_act = tot_cmd = gaps = 0
+    tot_act = tot_cmd = tot_cap = gaps = 0
     p(u"\n## Блоки\n\n")
     p(u"Фон — номер в `data_297` `$053BA4`, где 45 таблиц имён "
       u"по 2240 байт.\n\n")
     p(u"| № | адрес | байт | фон | графика | палитры | актёров "
-      u"| команд | зазор |\n|---|---|---|---|---|---|---|---|---|\n")
+      u"| команд | титров | зазор |\n"
+      u"|---|---|---|---|---|---|---|---|---|---|\n")
     for i, a in enumerate(addrs):
         d = story_block(a)
         unp, gfx, p0, p1, txt, n = story_header(d)
@@ -1177,8 +1265,11 @@ def do_story(which=None):
                     sfx[arg & 0xFF] += 1
                 if op == 2 and ((arg >> 8) & 0x0F) == 6:
                     music[arg & 0xFF] += 1
-        p(u"| %d | `$%06X` | %d | %d | %d | %d, %d | %d | %d | %d |\n"
-          % (i, a, len(d), unp, gfx, p0, p1, n, cmds, txt - end))
+        caps = sum(1 for one in acts for _o, w, _t in one
+                   if w >> 12 == 2 and (w >> 8) & 0x0F == 4)
+        tot_cap += caps
+        p(u"| %d | `$%06X` | %d | %d | %d | %d, %d | %d | %d | %d | %d |\n"
+          % (i, a, len(d), unp, gfx, p0, p1, n, cmds, caps, txt - end))
     p(u"\n## Что в них есть\n\n")
     p(u"Блоков %d, актёров %d, командных слов %d. Блоков, где скрипты\n"
       u"кончаются не там, где начинается список реплик: **%d**.\n\n"
@@ -1187,6 +1278,9 @@ def do_story(which=None):
       % u", ".join(u"%X — %d" % kv for kv in sorted(ops.items())))
     p(u"Типы юнитов, которых заводят: %s.\n\n"
       % u", ".join(u"%d (x%d)" % kv for kv in sorted(kinds.items())))
+    p(u"Титров %d, и число записей в списке сошлось с числом команд «титр»\n"
+      u"во всех 152 блоках. Картинками: `make cutscene "
+      u"CSARGS=--captions`.\n\n" % tot_cap)
     p(u"Звуки: %s. Музыка: %s.\n\n"
       % (u", ".join(u"%d = %s (x%d)" % (k, sfx_command(k), v)
                     for k, v in sorted(sfx.items())) or u"нет",
@@ -1196,6 +1290,68 @@ def do_story(which=None):
     print(u"блоков %d, актёров %d, команд %d, блоков с зазором %d"
           % (len(addrs), tot_act, tot_cmd, gaps))
     print(u"сводка: %s" % os.path.relpath(doc, HERE))
+    return 0
+
+
+CAP_W, CAP_CELL, CAP_GAP = 17, 16, 4
+CAP_PAL = [(0x10, 0x10, 0x18), (0xE8, 0xE8, 0xD8), (0x40, 0x40, 0x50)]
+
+
+def do_captions():
+    u"""Титры всех сценарных экранов в PNG плюс лист различных глифов."""
+    out = os.path.join(out_path("cutscene"), "captions")
+    os.makedirs(out, exist_ok=True)
+    seen, order = {}, []
+    files = rows_tot = caps_tot = 0
+    for i, a in enumerate(story_blocks()):
+        d = story_block(a)
+        _b, _g, _p0, _p1, txt, n = story_header(d)
+        acts, _end = actors(d, 0x0C, n)
+        count = sum(1 for one in acts for _o, w, _t in one
+                    if w >> 12 == 2 and (w >> 8) & 0x0F == 4)
+        if not count:
+            continue
+        caps = captions(d, txt, count)
+        laid = [caption_cells(c) for c in caps]
+        heights = [max((r for _c, r, _w in one), default=0) + 1
+                   for one in laid]
+        h = sum(x * CAP_CELL for x in heights) + CAP_GAP * (len(laid) - 1)
+        w = CAP_W * CAP_CELL
+        px = [bytearray([2]) * w for _ in range(h)]
+        y = 0
+        for one, hh in zip(laid, heights):
+            for col, row, word in one:
+                g = caption_glyph(word)
+                if word not in seen:
+                    seen[word] = g
+                    order.append(word)
+                blit_glyph(px, g, col * CAP_CELL, y + row * CAP_CELL, 0, 1)
+            y += hh * CAP_CELL + CAP_GAP
+            rows_tot += hh
+        caps_tot += len(caps)
+        png(os.path.join(out, "story_%03d.png" % i), w, h,
+            [[CAP_PAL[v] for v in row] for row in px])
+        files += 1
+    cols = 32
+    rows = (len(order) + cols - 1) // cols
+    px = [bytearray([2]) * (cols * CAP_CELL) for _ in range(rows * CAP_CELL)]
+    for k, word in enumerate(order):
+        blit_glyph(px, seen[word], (k % cols) * CAP_CELL,
+                   (k // cols) * CAP_CELL, 0, 1)
+    sheet = os.path.join(out, "glyphs.png")
+    png(sheet, cols * CAP_CELL, rows * CAP_CELL,
+        [[CAP_PAL[v] for v in row] for row in px])
+    with io.open(os.path.join(out, "glyphs.txt"), "w",
+                 encoding="utf-8", newline="\n") as f:
+        f.write(u"# Различные глифы титров, в порядке первой встречи\n")
+        f.write(u"# лист glyphs.png, %d столбцов; слово = блок<<4 | глиф\n"
+                % cols)
+        for k, word in enumerate(order):
+            f.write(u"%4d  %04X  блок %3d глиф %2d\n"
+                    % (k, word, word >> 4, word & 0x0F))
+    print(u"титров %d в %d файлах, строк текста %d, разных глифов %d"
+          % (caps_tot, files, rows_tot, len(order)))
+    print(u"лист: %s" % os.path.relpath(sheet, HERE))
     return 0
 
 
@@ -1258,6 +1414,8 @@ def main():
         return do_play(k)
     if args and args[0] == "--story":
         return do_story(int(args[1]) if len(args) > 1 else None)
+    if args and args[0] == "--captions":
+        return do_captions()
     only = int(args[0]) if args else None
 
     doc = os.path.join(HERE, "docs", "game-cutscene-scripts.md")
