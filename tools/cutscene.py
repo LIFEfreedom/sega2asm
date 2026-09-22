@@ -106,6 +106,33 @@ u"""Сценки между миссиями: заголовок блока, с�
 `tools/packedtext.py` в [game-cutscenes.md](../docs/game-cutscenes.md), но
 там он лежит плоским списком, без привязки к тому, кто говорит.
 
+## Пузырь реплики
+
+Рисует его `$0503B4`, и это НЕ строка внизу экрана, а пузырь над
+говорящим. Ширина — тот самый первый байт записи реплики; левый столбец
+считается от X актёра:
+
+```asm
+	move.w	$44(a1),d4
+	subi.w	#$0080,d4
+	lsr.w	#3,d4          ; в клетки по восемь точек
+	addq.w	#1,d4          ; столбец хвостика, но не меньше двух
+	...
+	cmpi.w	#$0027,d3      ; если правый край за 39-м столбцом —
+	...                    ; прижать пузырь к краю
+```
+
+Строки в таблице имён: 19 — хвостик (`$C980`), 20 — верхняя кромка,
+с 21-й через одну текст (`$CA82`), потом нижняя кромка. То есть на строку
+текста приходится ДВЕ строки таблицы имён, а знак — один тайл 8x8.
+
+Текст выводится по знаку в кадр (`$05056E` ставит `$A(a5) = 1`), в конце
+строки пауза `$18` кадров. Байты гоняются через трап `$FF24` и
+`CharToTileTable`, а глифы лежат в `FontTiles` `$010322`.
+
+**Кодировка полуширинная, а глифы хираганные:** `ｾｯｼｬﾊ` выходит на экран
+как `せっしゃは`. Катакана в выгрузках текста — транслитерация.
+
 ## Проигрывание (`--play`)
 
 `--play K` прогоняет сценку кадр в кадр и пишет GIF. Порядок тот же, что
@@ -289,8 +316,8 @@ def actors(d, start, count):
     return out, o
 
 
-def lines(d, start):
-    u"""[(ширина, [строки])] — список реплик."""
+def lines(d, start, raw=False):
+    u"""[(ширина, [строки])] — список реплик; raw отдаёт сырые байты."""
     out, o = [], start
     while o + 1 < len(d):
         width, n = d[o], d[o + 1]
@@ -302,7 +329,7 @@ def lines(d, start):
             e = o
             while e < len(d) and d[e]:
                 e += 1
-            got.append(dec(d[o:e]))
+            got.append(d[o:e] if raw else dec(d[o:e]))
             o = e + 1
         out.append((width, got))
         if o < len(d) and d[o] == 0:
@@ -359,11 +386,68 @@ def backdrop(k, path):
     return scr
 
 
+FONT_TILES = 0x010322      # FontTiles: 5440 байт, три блока
+CHAR_TO_TILE = 0x00F8A8    # CharToTileSource: 256 слов, код -> номер тайла
+# (смещение в распакованном блоке, первый номер тайла, сколько тайлов)
+FONT_BLOCKS = ((0x0000, 0x002, 54), (0x06C0, 0x038, 61),
+               (0x0E60, 0x780, 55))
+BUBBLE_ROW = 19            # $C980: ($C980 - $C000) / 128
+TEXT_ROW = 21              # $CA82, и дальше через строку
+
 SCREEN_W, SCREEN_H = 320, 224
 BACK_Y = 56                # фон с седьмой строки: $C380 - $C000 = 7 x $80
 SPRITE_BIAS = 0x80         # у спрайтов VDP начало экрана в $80
 TALK_FRAMES = 90           # сколько держать реплику; в игре ждут кнопку
 PLAY_LIMIT = 20000         # предохранитель от незакрывшегося ожидания
+
+
+_FONT = {}
+
+
+def font_glyphs():
+    u"""{номер тайла: 32 байта} — графика шрифта из `FontTiles` `$010322`."""
+    if not _FONT:
+        d = bytes(unpack(ROM, FONT_TILES)[2])
+        for off, first, count in FONT_BLOCKS:
+            for i in range(count):
+                o = off + i * 32
+                _FONT[first + i] = d[o:o + 32]
+    return _FONT
+
+
+def line_tiles(raw):
+    u"""Байты строки -> номера тайлов, как `BiosParseString` `$00172A`.
+
+    `$40` переключает размер шрифта и сам ничего не печатает; в поднятом
+    состоянии коды `$A6`…`$DD` уменьшаются на `$40` и попадают в крупный
+    диапазон. `$2A` — экранирование, здесь просто пропускается.
+    """
+    out, big = [], False
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        i += 1
+        if c == 0x40:
+            big = not big
+            continue
+        if c == 0x2A:
+            i += 1
+            continue
+        if big and 0xA6 <= c <= 0xDD:
+            c -= 0x40
+        out.append(struct.unpack_from(">H", ROM, CHAR_TO_TILE + c * 2)[0])
+    return out
+
+
+def bubble_box(x, width):
+    u"""(левый столбец, столбец хвостика) — по `$0503B4`."""
+    tail = max(2, ((x - SPRITE_BIAS) >> 3) + 1)
+    left = tail - 1
+    if left < 0:
+        left = 1
+    elif left + width > 39:
+        left = 39 - width
+    return left, tail
 
 
 class Actor(object):
@@ -454,7 +538,13 @@ def step_actor(a, d, ctx):
         if op == 2:
             if ((arg >> 8) & 0x0F) == 1:
                 a.wait = ctx["talk"]
+                rec = (ctx["lines"][ctx["said"]]
+                       if ctx["said"] < len(ctx["lines"]) else None)
                 ctx["said"] += 1
+                if rec:
+                    width, got = rec
+                    left, tail = bubble_box(a.x, width)
+                    ctx["bubble"] = [got, width, left, tail, ctx["talk"]]
             return
         if op == 8:
             sub = (arg >> 8) & 7
@@ -474,6 +564,46 @@ def step_actor(a, d, ctx):
                 a.wait = _rest(a)
             return
         return                              # коды 9…F — пусто
+
+
+BUBBLE_FILL = 0            # ряд 0, цвет 0
+BUBBLE_EDGE = 15           # ряд 0, цвет 15
+
+
+def draw_bubble(px, font, got, width, left, band):
+    u"""Пузырь реплики: место и размер игры, рамка моя.
+
+    Столбцы и строки взяты из `$0503B4` и `$05056E` как есть: верхняя
+    кромка на строке 20, текст с 21-й через строку, ширина — байт записи.
+    **Рамку рисую сам:** тайлы `$259`…`$25C`, которыми её рисует игра, в
+    банках `$04`-`$05` никто не выгружает, и найти их не удалось. Буквы
+    же настоящие — `FontTiles` через `CharToTileTable`.
+    """
+    rows = 2 * len(got) + 1
+    x0, y0 = left * 8, (BUBBLE_ROW + 1) * 8
+    x1, y1 = min(SCREEN_W, x0 + width * 8), min(SCREEN_H, y0 + rows * 8)
+    if y1 > band[1]:
+        band[1] = y1
+    for y in range(max(0, y0), y1):
+        edge = y in (y0, y1 - 1)
+        o = y * SCREEN_W
+        for x in range(max(0, x0), x1):
+            px[o + x] = (BUBBLE_EDGE if edge or x in (x0, x1 - 1)
+                         else BUBBLE_FILL)
+    for li, raw in enumerate(got):
+        row = TEXT_ROW + 2 * li
+        for ci, tile in enumerate(line_tiles(raw)):
+            g = font.get(tile)
+            if g is None:
+                continue
+            bx, by = (left + 1 + ci) * 8, row * 8
+            if bx + 8 > SCREEN_W or by + 8 > SCREEN_H:
+                continue
+            for y in range(8):
+                o = (by + y) * SCREEN_W + bx
+                for x in range(8):
+                    v = g[y * 4 + (x >> 1)]
+                    px[o + x] = (v >> 4) if x % 2 == 0 else (v & 15)
 
 
 def play(k, path, talk=TALK_FRAMES, scale=1):
@@ -497,7 +627,9 @@ def play(k, path, talk=TALK_FRAMES, scale=1):
 
     scripts, _end = actors(d, 0x0A, n)
     acts = [Actor(one[0][0]) for one in scripts]
-    ctx = {"all": acts, "total": n, "arrived": 0, "said": 0, "talk": talk}
+    ctx = {"all": acts, "total": n, "arrived": 0, "said": 0, "talk": talk,
+           "lines": lines(d, txt, raw=True), "bubble": None}
+    font = font_glyphs()
 
     cache = {}
 
@@ -560,6 +692,13 @@ def play(k, path, talk=TALK_FRAMES, scale=1):
                     dx = ox + sx
                     if 0 <= dx < SCREEN_W and line[sx] is not None:
                         px[o + dx] = line[sx]
+        b = ctx["bubble"]
+        if b:
+            got, width, left, _tail, rest = b
+            draw_bubble(px, font, got, width, left, band)
+            b[4] = rest - 1
+            if b[4] <= 0:
+                ctx["bubble"] = None
         frames.append(px)
         held += 1
         if not any(a.alive for a in acts):
