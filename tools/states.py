@@ -1,0 +1,297 @@
+#!/usr/bin/env python3
+"""Сорок шесть состояний игрока: карта, переходы, тела.
+
+    python tools/states.py            карта 3 на 46
+    python tools/states.py --list     обработчики по размеру
+    python tools/states.py --graph    куда ведёт каждое состояние
+    python tools/states.py --pad      какие кнопки читает каждое
+    python tools/states.py --show 20  тело состояния утки
+    python tools/states.py --show n17 то же у ниндзя (d, n, s)
+
+Форма выбирает таблицу (`$FF1332`), номер состояния лежит в `+$4` записи
+игрока, а `$2A4D9A` зовёт обработчик по нему. Таблицы по 46 длинных слов
+идут встык с `$1FCCE0`; `$2A6454` в ячейке значит «состояния нет».
+
+Переходы вычисляются, а не угадываются: **`move.b #$XX,$4(a0)`** и есть
+переход, и обход берёт только своё тело — по ветвлениям и проваливанию,
+не заходя в `bsr`/`jsr`. Поэтому в графе нет чужих переходов из общих
+процедур вроде `$291C5A`.
+
+Разбор — docs/mauimallard/player.md.
+"""
+import bisect
+import os
+import re
+import struct
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import enemies as E                                          # noqa: E402
+from paths import rom_bytes                                  # noqa: E402
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+ROM = rom_bytes()
+U32 = lambda a: struct.unpack_from(">I", ROM, a)[0]           # noqa: E731
+
+FORMS = [("d", u"утка", 0x1FCCE0), ("n", u"ниндзя", 0x1FCD98),
+         ("s", u"уменьшенный", 0x1FCE50)]
+NSTATE = 46
+STUB = 0x2A6454
+
+A = sorted(E.BY)
+BRANCH = re.compile(r"^(bra|b(?:hi|ls|cc|cs|ne|eq|vc|vs|pl|mi|ge|lt|gt|le)"
+                    r"|dbf|dbra)\b.*?\$?([0-9A-F]{6})", re.I)
+STOP = re.compile(r"^(rts|rte|rtr|bra|jmp)\b")
+SETSTATE = re.compile(r"move\.b\s+#\$([0-9A-F]{2}),\$4\(a0\)")
+SETSCRIPT = re.compile(r"move\.l\s+#\$00([0-9A-F]{6}),\$22\(a0\)")
+PAD = re.compile(r"btst\s+#(\d+),d([01])\b")
+
+# Биты пульта Mega Drive в том же порядке, что в записи: d0 — что держат,
+# d1 — что только что нажали.
+BUTTON = {0: u"вверх", 1: u"вниз", 2: u"влево", 3: u"вправо",
+          4: u"B", 5: u"C", 6: u"A", 7: u"Start"}
+
+# Прочитано глазами по телу обработчика; остальные печатаются с
+# вычисленными переходами и кнопками, но без имени.
+NAMES = {
+    0x291F74: u"стоять",
+    0x292450: u"идти: разгон по $80 до $400",
+    0x292638: u"в прыжке",
+    0x29278E: u"падать",
+    0x292A90: u"вис на лиане: вверх и вниз меняют кадр, B — соскок с переворотом",
+    0x291D54: u"бросок стоя",
+    0x292310: u"присед, пока держат вниз",
+    0x291E30: u"бросок из приседа",
+    0x291F04: u"бросок с прицелом: направление из битов вверх, влево, вправо",
+    0x291BAA: u"на земле: оторвались — уйти в 12",
+    0x291BBC: u"в воздухе: коснулись земли — приземлиться",
+    0x2928AC: u"бросок в воздухе",
+    0x292B58: u"едем на объекте: сошли — падать",
+    0x292BC8: u"нас несут, B — спрыгнуть и вернуть шаг объектов",
+    0x292D18: u"разбег: B даёт прыжок по наклону земли",
+    0x293298: u"нас схватили: вырваться, когда $FF2131 ноль",
+    0x292B80: u"нас выстрелили: скорость из +$4C/+$4E",
+    0x292950: u"бросок в полёте",
+    0x2933A8: u"переждать анимацию и вернуться в состояние из +$5",
+    0x293372: u"ушли правее камеры плюс экран — конец уровня",
+    0x291DE8: u"бег с действием",
+    0x291E74: u"то же при нажатом вниз",
+    0x292E52: u"приседание: B — прыжок, C — состояние 37",
+    0x292116: u"несём объект и отдаём ему пульт в +$4C",
+    0x2921E0: u"то же с четырёхшаговым действием",
+    0x292204: u"то же, без действия",
+    0x292814: u"поднять биты $0520 в +$30 и выйти",
+    0x293398: u"поднять биты $4700 в +$30 и выйти",
+    0x292B56: u"пусто: один rts",
+    0x293412: u"притянуться к +$50/+$52 и развернуться",
+}
+WHY = {
+    0x291F74: u"держать C 50 кадров при ненулевом $FF133E — превращение в ниндзя; B зовёт $291F1A (прыжок), C ставит 6",
+    0x292450: u"`addi.w #$0080,$16(a0)` с зажимом в `$0400`; C ставит 6, B зовёт $291F1A",
+    0x292638: u"`btst #0,($FF2132)` — коснулись земли, тогда $292722; при $FF136A уходит в 7",
+    0x29278E: u"`clr.w $30(a0)` и та же проверка земли; C даёт бросок в полёте",
+    0x292A90: u"$292A24 щупает землю, B ставит `+$18 = $F9C0` и `bchg #11` — переворот",
+    0x291D54: u"B — прыжок, иначе `clr.w $16(a0)` и $291C5A с обратным вызовом $291CD6",
+    0x292310: u"выходит в 0, когда бит 1 (вниз) отпустили; B — прыжок, C — 9",
+    0x291E30: u"держит бит 1, зовёт $291C5A с обратным вызовом $291E00",
+    0x291F04: u"обратный вызов $291EA8 считает d5 из битов 0 и 2/3 и берёт скрипт из $1EAABA",
+    0x291BAA: u"`btst #0,($FF2132)`, и только это",
+    0x291BBC: u"та же проверка, но в обратную сторону: $292722",
+    0x2928AC: u"на земле — состояние 0 со скриптом $1D70E4, иначе $291C5A с $292858",
+    0x292B58: u"`tst.b ($FF2135)` — стоим ли на объекте; ноль даёт состояние 4",
+    0x292BC8: u"берёт `+$16` у несущего и возвращает `$FF1B42 = $2A6454`",
+    0x292D18: u"$292C46 читает код земли, `$1EABB0` масштабирует прыжок, `$1EABC2` — прибавку к разбегу",
+    0x293298: u"`+$40` — кто держит; `$FF1336`+8 даёт скрипт вырывания, дальше состояние 3",
+    0x292B80: u"`+$4C` в `+$16`, `+$4E` в `+$18`, скрипт `$FF1336`+8, состояние 18",
+    0x292950: u"$291C5A с обратным вызовом $292858 и $29256A следом",
+    0x2933A8: u"`tst.w $6(a0)`; ноль — `move.b $5(a0),$4(a0)`",
+    0x293372: u"`$FFFFE1BC + $140` меньше `+$12` — `$FF1A6C = $FFFF`",
+    0x291DE8: u"$291C5A с $291D72 и $292DE2 — движение по земле",
+    0x291E74: u"то же, но выходит в 20, когда бит 1 отпустили",
+    0x292E52: u"разбирает B, C и удержание вниз — по нему и названы биты пульта",
+    0x292116: u"`movem.w d0/d1,$4C(a1)` по `+$40`: пульт уходит тому, кого несём",
+    0x2921E0: u"то же плюс $291C5A с обратным вызовом $2921A0",
+    0x292204: u"только передача пульта и `ori.w #$0300,$30(a0)`",
+    0x292814: u"тело в две команды",
+    0x293398: u"тело в три команды, среди них `$FF2137 = 1`",
+    0x292B56: u"одна команда",
+    0x293412: u"сходится с `+$50`/`+$52` на 8 точек — `bchg #11`, гасит бит 14 в `+$30`",
+}
+
+
+def table():
+    """Три таблицы по 46 длинных слов."""
+    out = {}
+    for key, _t, base in FORMS:
+        out[key] = [U32(base + 4 * i) for i in range(NSTATE)]
+    return out
+
+
+def body(at, cap=200):
+    """Своё тело: ветвления и проваливание, БЕЗ входа в bsr/jsr."""
+    seen, q = set(), [at]
+    while q:
+        cur = q.pop()
+        while cur not in seen:
+            t = E.BY.get(cur)
+            if t is None:
+                break
+            seen.add(cur)
+            if len(seen) > cap:
+                return sorted(seen)
+            m = BRANCH.match(t)
+            if m:
+                tgt = int(m.group(2), 16)
+                if tgt in E.BY:
+                    q.append(tgt)
+            if STOP.match(t):
+                break
+            i = bisect.bisect_right(A, cur)
+            cur = A[i] if i < len(A) else None
+            if cur is None:
+                break
+    return sorted(seen)
+
+
+def facts(at):
+    b = body(at)
+    to, scripts, pads = set(), set(), set()
+    for a in b:
+        t = E.BY[a]
+        m = SETSTATE.search(t)
+        if m:
+            to.add(int(m.group(1), 16))
+        m = SETSCRIPT.search(t)
+        if m:
+            scripts.add(int(m.group(1), 16))
+        for n, r in PAD.findall(t):
+            pads.add((int(n), int(r)))
+    return {"size": len(b), "to": to, "scripts": scripts, "pads": pads}
+
+
+def handlers():
+    t = table()
+    use = {}
+    for key, _t, _b in FORMS:
+        for i, h in enumerate(t[key]):
+            if h != STUB:
+                use.setdefault(h, []).append((key, i))
+    return t, use
+
+
+def do_map():
+    t, use = handlers()
+    print(u"| № | утка | ниндзя | уменьшенный |")
+    print(u"|---|---|---|---|")
+    for i in range(NSTATE):
+        cells = []
+        for key, _t, _b in FORMS:
+            h = t[key][i]
+            cells.append(u"—" if h == STUB else u"`$%06X`" % h)
+        nm = NAMES.get(t["d"][i], u"")
+        print(u"| %d | %s | %s | %s |%s" % (i, cells[0], cells[1], cells[2],
+                                            (u" " + nm) if nm else u""))
+    live = sum(1 for key, _t, _b in FORMS for h in t[key] if h != STUB)
+    print()
+    print(u"занято %d мест из %d, различных обработчиков %d"
+          % (live, NSTATE * len(FORMS), len(use)))
+
+
+def do_list():
+    _t, use = handlers()
+    rows = [(facts(h)["size"], h, u) for h, u in use.items()]
+    rows.sort()
+    for n, h, u in rows:
+        f = facts(h)
+        print(u"%3d  $%06X  %-22s %s"
+              % (n, h, u",".join(u"%s%d" % (k, i) for k, i in u)[:22],
+                 NAMES.get(h, u"")))
+
+
+def do_graph():
+    t, use = handlers()
+    for key, title, _b in FORMS:
+        print(u"### %s" % title)
+        for i in range(NSTATE):
+            h = t[key][i]
+            if h == STUB:
+                continue
+            f = facts(h)
+            if not f["to"]:
+                continue
+            print(u"  %2d $%06X -> %s"
+                  % (i, h, u", ".join(str(x) for x in sorted(f["to"]))))
+        print()
+
+
+def do_pad():
+    t, use = handlers()
+    for key, title, _b in FORMS:
+        print(u"### %s" % title)
+        for i in range(NSTATE):
+            h = t[key][i]
+            if h == STUB:
+                continue
+            f = facts(h)
+            if not f["pads"]:
+                continue
+            s = u", ".join(u"%s%s" % (BUTTON.get(n, n),
+                                      u"" if r == 0 else u" (нажали)")
+                           for n, r in sorted(f["pads"]))
+            print(u"  %2d $%06X  %s" % (i, h, s))
+        print()
+
+
+def do_show(arg):
+    t, _use = handlers()
+    key = "d"
+    if arg and arg[0] in "dns":
+        key, arg = arg[0], arg[1:]
+    n = int(arg, 0)
+    h = t[key][n]
+    if h == STUB:
+        print(u"состояние %d у этой формы пустое (заглушка $2A6454)" % n)
+        return
+    f = facts(h)
+    print(u"состояние %d, форма %s: $%06X" % (n, key, h))
+    if h in NAMES:
+        print(u"  %s" % NAMES[h])
+        if h in WHY:
+            print(u"  чем доказано: %s" % WHY[h])
+    print(u"  ведёт в: %s" % (u", ".join(str(x) for x in sorted(f["to"]))
+                              or u"—"))
+    print(u"  скрипты: %s" % (u", ".join(u"$%06X" % x
+                                         for x in sorted(f["scripts"]))
+                              or u"—"))
+    print(u"  пульт:   %s"
+          % (u", ".join(u"%s%s" % (BUTTON.get(b, b),
+                                   u"" if r == 0 else u"!")
+                        for b, r in sorted(f["pads"])) or u"—"))
+    print()
+    for a in body(h):
+        print(u"   $%06X  %s" % (a, E.BY[a]))
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        do_map()
+    elif a[0] == "--list":
+        do_list()
+    elif a[0] == "--graph":
+        do_graph()
+    elif a[0] == "--pad":
+        do_pad()
+    elif a[0] == "--show" and len(a) > 1:
+        do_show(a[1])
+    else:
+        print(__doc__)
+        return 2
+
+
+if __name__ == "__main__":
+    main()
