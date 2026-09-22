@@ -133,6 +133,13 @@ u"""Сценки между миссиями: заголовок блока, с�
 **Кодировка полуширинная, а глифы хираганные:** `ｾｯｼｬﾊ` выходит на экран
 как `せっしゃは`. Катакана в выгрузках текста — транслитерация.
 
+Рамка пузыря — четыре тайла `$259`…`$25C`: хвостик-треугольник, кромка,
+бок и угол (углы и низ получаются отражениями, `$8A5C`, `$925C`,
+`$9A5C`). Своей выгрузки у них нет, и поиск по адресу `$4B20` ничего не
+давал: они едут ХВОСТОМ общего экрана. `ScreenUnpack17755C` `$050290`
+распаковывает `$17755C` и выгружает `$680` СЛОВ в VRAM `$3EA0` — это
+ровно 104 тайла, `$1F5`…`$25C`, и последние четыре из них рамка.
+
 ## Проигрывание (`--play`)
 
 `--play K` прогоняет сценку кадр в кадр и пишет GIF. Порядок тот же, что
@@ -566,30 +573,73 @@ def step_actor(a, d, ctx):
         return                              # коды 9…F — пусто
 
 
-BUBBLE_FILL = 0            # ряд 0, цвет 0
-BUBBLE_EDGE = 15           # ряд 0, цвет 15
+SCREEN_TILES = 0x17755C    # весь экран сценки: 104 тайла с $1F5
+SCREEN_FIRST = 0x1F5
+_SCREEN = {}
 
 
-def draw_bubble(px, font, got, width, left, band):
-    u"""Пузырь реплики: место и размер игры, рамка моя.
+def screen_tiles():
+    u"""{номер тайла: 32 байта} — то, что уходит в VRAM `$3EA0`.
 
-    Столбцы и строки взяты из `$0503B4` и `$05056E` как есть: верхняя
-    кромка на строке 20, текст с 21-й через строку, ширина — байт записи.
-    **Рамку рисую сам:** тайлы `$259`…`$25C`, которыми её рисует игра, в
-    банках `$04`-`$05` никто не выгружает, и найти их не удалось. Буквы
-    же настоящие — `FontTiles` через `CharToTileTable`.
+    `ScreenUnpack17755C` `$050290` распаковывает блок и выгружает `$680`
+    СЛОВ, то есть ровно 104 тайла, `$1F5`…`$25C`. Последние четыре и есть
+    рамка пузыря — потому её и не находил поиск по адресу `$4B20`: своей
+    выгрузки у неё нет, она едет хвостом общего экрана.
     """
-    rows = 2 * len(got) + 1
-    x0, y0 = left * 8, (BUBBLE_ROW + 1) * 8
-    x1, y1 = min(SCREEN_W, x0 + width * 8), min(SCREEN_H, y0 + rows * 8)
+    if not _SCREEN:
+        d = bytes(unpack(ROM, SCREEN_TILES)[2])
+        for i in range(104):
+            _SCREEN[SCREEN_FIRST + i] = d[i * 32:(i + 1) * 32]
+    return _SCREEN
+
+
+def _blit_name(px, tiles, name, col, row):
+    u"""Тайл по слову имени в клетку (col, row); цвет 0 — чёрный."""
+    g = tiles.get(name & 0x7FF)
+    if g is None:
+        g = bytes(32)
+    hf, vf = (name >> 11) & 1, (name >> 12) & 1
+    bx, by = col * 8, row * 8
+    if bx < 0 or by < 0 or bx + 8 > SCREEN_W or by + 8 > SCREEN_H:
+        return
+    for y in range(8):
+        sy = 7 - y if vf else y
+        o = (by + y) * SCREEN_W + bx
+        for x in range(8):
+            sx = 7 - x if hf else x
+            v = g[sy * 4 + (sx >> 1)]
+            px[o + x] = (v >> 4) if sx % 2 == 0 else (v & 15)
+
+
+def draw_bubble(px, font, got, width, left, tail, band):
+    u"""Пузырь реплики ровно так, как его кладёт `$0503B4`.
+
+    | строка | слева | посередине | справа |
+    |---|---|---|---|
+    | 19 | — | `$8259` только в столбце хвостика | — |
+    | 20 | `$825C` | `$825A`, в столбце хвостика `$8000` | `$8A5C` |
+    | 21… | `$825B` | `$8000` | `$8A5B` |
+    | низ | `$925C` | `$925A` | `$9A5C` |
+    """
+    tiles = screen_tiles()
+    nrows = 2 * len(got)
+    y1 = min(SCREEN_H, (BUBBLE_ROW + 2 + nrows) * 8)
     if y1 > band[1]:
         band[1] = y1
-    for y in range(max(0, y0), y1):
-        edge = y in (y0, y1 - 1)
-        o = y * SCREEN_W
-        for x in range(max(0, x0), x1):
-            px[o + x] = (BUBBLE_EDGE if edge or x in (x0, x1 - 1)
-                         else BUBBLE_FILL)
+    _blit_name(px, tiles, 0x8259, tail, BUBBLE_ROW)
+    for i in range(width):
+        col = left + i
+        if i == 0:
+            top, mid, bot = 0x825C, 0x825B, 0x925C
+        elif i == width - 1:
+            top, mid, bot = 0x8A5C, 0x8A5B, 0x9A5C
+        else:
+            top = 0x8000 if col == tail else 0x825A
+            mid, bot = 0x8000, 0x925A
+        _blit_name(px, tiles, top, col, BUBBLE_ROW + 1)
+        for r in range(nrows):
+            _blit_name(px, tiles, mid, col, BUBBLE_ROW + 2 + r)
+        _blit_name(px, tiles, bot, col, BUBBLE_ROW + 2 + nrows)
     for li, raw in enumerate(got):
         row = TEXT_ROW + 2 * li
         for ci, tile in enumerate(line_tiles(raw)):
@@ -695,7 +745,7 @@ def play(k, path, talk=TALK_FRAMES, scale=1):
         b = ctx["bubble"]
         if b:
             got, width, left, _tail, rest = b
-            draw_bubble(px, font, got, width, left, band)
+            draw_bubble(px, font, got, width, left, _tail, band)
             b[4] = rest - 1
             if b[4] <= 0:
                 ctx["bubble"] = None
