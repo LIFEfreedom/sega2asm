@@ -1215,13 +1215,12 @@ UploadSpritesFrom1D64 = $0564CE ; 20 ссылок. Трап $FF04 шлёт $FF1D
 ScreenLoadSetByArg            = $05017A   ; номер набора берётся из слова $8(a6)
 ScreenUnpackByArg             = $050230   ; распаковка набора по слову $8(a6)
 ScreenUnpack17755C            = $050290   ; распаковка $17755C в GameState
-ObjPlaceFromScript           = $0503B4   ; 132 инстр, 0 ссылок
+CutsceneOpenBubble           = $0503B4   ; было ObjPlaceFromScript: открыть пузырь реплики
                                ; идёт к ObjectRecords[$C(a5)] шагом $5A, читает пару байт п
                                ; о указателю $6(a5) в +$74/+$76 и берёт +$44 объекта минус 
                                ; $80 — то есть ставит объект по координатам из скрипта
-ObjWalkRecords               = $05056E   ; 74 инстр, 1 ссылок
+CutsceneTypeReply            = $05056E   ; было ObjWalkRecords: печатать реплику по знаку
                                ; тот же обход записей объектов
-AnimScrollByWord80            = $050678   ; прокрутка по слову +$80 записи a5; отрицательное пропускается
 ScreenWriteRowByArgs          = $0506E2   ; строка в VDP, длина из слова $E(a6)
 UploadNameRows                 = $050714   ; выгрузить +$E строк по $28 слов из +$8 трапом $FF04: источник
                              ; шагает на $50, адрес в таблице имён — на $80
@@ -1349,12 +1348,12 @@ LoadObjectScripts        = $056454   ; раздать слотам объект�
                              ; сценки; записи до нулевого слова
 ScreenObjRecordsWrap          = $0564F0   ; переходник в ScreenObjRecords
 ScreenObjRecords              = $0564FC   ; разметка записей объектов с +$6C, первое поле $FFFFFFFF
-ScreenPickByD3Nibble          = $056742   ; биты 4…5 d3 выбирают вариант
+CutsceneCmdStoryBlock         = $056742   ; было ScreenPickByD3Nibble: команда 2.5, биты 4…5 d3 выбирают вариант
 ScreenStepByRecord3E40        = $0569A8   ; слова +$3E и +$40 записи передаются в ScreenStepByArg8
 ScreenFadeStep43              = $056B70   ; ScreenFadeSteps с параметром ($0004, $0003)
 ScreenFadeStep23              = $056B84   ; то же с ($0002, $0003)
 ScreenFadeSteps               = $056B98   ; звук $95 и шаги палитры по паре чисел в d1
-ScreenAnimFromData318         = $056C2E   ; кадр ожидания и таблица data_318
+CutsceneFadePalettes          = $056C2E   ; было ScreenAnimFromData318: 14 шагов палитры по таблице $056C6E
 ScreenScroll30FramesA         = $056C9A   ; 30 кадров прокрутки
 ScreenScroll30FramesB         = $056D38   ; близнец ScreenScroll30FramesA
 ScreenPushWorkBuffer04        = $056DD6   ; длинные слова +$0 и +$4 GfxWorkBuffer на стек
@@ -4045,7 +4044,7 @@ CutsceneActorTick        = $0564FC   ; было ScreenObjRecords: раз в ка
 CutsceneOpcodeTable      = $056688   ; 16 слов, смещения относительно себя. Рабочих кодов
                              ; девять (0…8), коды 9…F ведут обратно в выборку, то есть
                              ; пустые. У кодов 2, 3 и 8 есть свои подтаблицы:
-                             ; $056722 (16 слов), $056904 (4), $056942 (8)
+                             ; $056722 (7 слов), $056904 (4), $056942 (8)
 CutsceneIndex            = $04FC14   ; какая сценка играет: строка — ГЛАВА минус три (то есть
                              ; только 3, 4 и 5), в строке 10 байт по номеру миссии минус
                              ; один, $FF — сценки нет. Заполнены только НЕЧЁТНЫЕ места,
@@ -4162,3 +4161,47 @@ CommonFrameTable         = $15E950   ; ОБЩИЙ банк кадров, [$07880
 
 StoryBlockTable          = $053684   ; 195 указателей на сжатые блоки сюжетных экранов
 StoryPalettes            = $1CC30C   ; 28 палитр подряд
+
+; Реплики сценок, заход 88 (docs/game-cutscene-scripts.md). Указатель на
+; список реплик один на всю сцену — $6(a5), своего у актёров нет. Поэтому
+; реплики снимаются СТРОГО по порядку файла, кто бы их ни произносил, а
+; говорящий берётся из индекса цикла: $0567AC кладёт его в $C(a5), и
+; CutsceneOpenBubble по нему ставит хвостик пузыря под нужного актёра.
+CutsceneCmdEnd           = $0566A8   ; код 0: снять бит 0 у $58, убавить живых ($2(a5))
+CutsceneCmdAnim          = $0566B6   ; код 1: завести анимацию трапом $FF08 по $3E/$40/$42,
+                             ; промотать младшим байтом через $FF09, биты 8…11
+                             ; взводят бит 2 «зациклена»
+CutsceneCmdWindow        = $05670C   ; код 2: подтаблица на семь входов, $056722
+CutsceneCmdSfx           = $056730   ; 2.0: трап $FF38 с номером из table_sfx. Сторож d7
+                             ; пускает за кадр один запрос на всю сцену
+CutsceneCmdReply         = $0567AC   ; 2.1: $C(a5) = НОМЕР АКТЁРА (индекс цикла),
+                             ; $12(a5) = 1, дальше CutsceneOpenBubble
+CutsceneCmdChoice        = $0567D2   ; 2.4: $12(a5) = 2, экран выбора; в сценках не встречается
+CutsceneCmdWindowSlide   = $05686C   ; 2.2: завести CutsceneWindowSlide на $68 кадров.
+                             ; Аргумент 0 — выезд вниз ($84 = -$50, $82 = $3C0),
+                             ; иначе вверх (+$50, 0)
+CutsceneCmdEffect        = $05689C   ; 2.3: эффект по CutsceneEffectTable; сценки зовут
+                             ; только вход 1 — CutsceneFadePalettes
+CutsceneCmdMusic         = $0567A2   ; 2.6: музыка трапом $FF30; в сценках не встречается
+CutsceneWindowSubTable   = $056722   ; семь слов: входы 2.0…2.6
+CutsceneEffectTable      = $0568AE   ; 16 слов для команды 2.3
+CutsceneCmdStepX         = $0568CE   ; код 4: $48(a1) = аргумент (период и знаковый сдвиг)
+CutsceneCmdStepY         = $0568D6   ; код 5: $4C(a1) = аргумент
+CutsceneCmdSetX          = $0568DE   ; код 6: $44(a1) = аргумент
+CutsceneCmdSetY          = $0568E6   ; код 7: $46(a1) = аргумент
+CutsceneCmdSetField      = $0568EE   ; код 3: подтаблица $056904 на четыре входа
+CutsceneFieldSubTable    = $056904   ; четыре слова: $3E, $40, $42, $59
+CutsceneSetKind          = $05690C   ; 3.0: $3E(a1) = тип юнита
+CutsceneSetAnim          = $056914   ; 3.1: $40(a1) = номер анимации
+CutsceneSetFace          = $05691C   ; 3.2: $42(a1) = направление
+CutsceneSetPalette       = $056924   ; 3.3: $59(a1) = ряд палитры, маска 3
+CutsceneCmdWait          = $056930   ; код 8: подтаблица $056942, рабочих пять
+CutsceneWaitSubTable     = $056942   ; восемь слов; входы 5…7 ведут обратно в выборку
+CutsceneWaitFrames       = $056952   ; 8.0: $50(a1) = младший байт
+CutsceneWaitMarkArrived  = $05695E   ; 8.1: бит 3 у $58, $7E(a5) плюс один, ждать кадр
+CutsceneWaitOthers       = $056970   ; 8.2: пока отметились не все ($0(a5) минус один),
+                             ; $52(a1) откатывается на слово назад
+CutsceneWaitAnimEnd      = $05699A   ; 8.3: у зацикленной (бит 2) не ждать вовсе
+CutsceneWindowSlide      = $050678   ; было AnimScrollByWord80: по строке за восемь кадров
+                             ; гонит тринадцать строк имён в план B с $E380 и
+                             ; подкручивает VSRAM; счётчик кадров — $80(a5)
