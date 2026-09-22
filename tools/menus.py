@@ -4,6 +4,7 @@ u"""Меню команд: картинки, пункты, переходы и �
     make menus                  # восемь меню в PNG плюс сводка
     make menus MNARGS=--plain   # без разметки пунктов
     make menus MNARGS=--hud     # подложка панели, три варианта
+    make menus MNARGS=--portraits  # портреты юнитов, по шесть на вид
 
 ## Восемь меню
 
@@ -101,6 +102,8 @@ HUD_TILES = 0x0111AA       # тайлы панели, база — тайл $256
 HUD_COLS, HUD_ROWS = 13, 28
 HUD_STRIDE = 4 + HUD_COLS * HUD_ROWS * 2
 HUD_BASE = 0x8256          # к слову имени прибавляется это
+PORTRAITS = 0x005DD6       # data_40: по 12 байт (6 слов) на тип юнита
+PORTRAIT_TYPES = 90
 MREC = 0x5C
 CHAPTERS = 0x060400
 DIRS = (u"вверх", u"вверх-вправо", u"вправо", u"вниз-вправо",
@@ -278,8 +281,57 @@ def do_hud():
     return 0
 
 
+def portraits(t):
+    u"""Шесть номеров кадров-портретов типа t (с единицы)."""
+    return struct.unpack_from(">6H", ROM, PORTRAITS + (t - 1) * 12)
+
+
+def do_portraits(scale=3):
+    u"""Портреты видов: кадр 4x4 из СОБСТВЕННОГО банка типа.
+
+    `LoadUnitPortrait` `$006230` берёт `+$1E` курсора (подпункт, с
+    единицы), достаёт слово из записи типа и по нему лезет в банк кадров
+    того же типа, потом кладёт `$0100` СЛОВ (16 тайлов) в VRAM `$FD20`.
+    Шестое слово, `+$A`, идёт особым путём — через `GfxTableRoot`.
+    """
+    import maptex, unitanim, unitgfx
+    d = out_path("menus")
+    os.makedirs(d, exist_ok=True)
+    live = [t for t in range(1, PORTRAIT_TYPES + 1) if any(portraits(t))]
+    print(u"типов с портретами: %d из %d" % (len(live), PORTRAIT_TYPES))
+    rows = {0: maptex.array_palette(0), 1: maptex.array_palette(1),
+            2: maptex.array_palette(3), 3: maptex.array_palette(3)}
+    gap, F = 6, 32
+    W = 6 * (F * scale + gap) + gap
+    H = len(live) * (F * scale + gap) + gap
+    img = [[(20, 20, 24)] * W for _ in range(H)]
+    for r, t in enumerate(live):
+        pal = rows[unitgfx.palette_row(t) & 3]
+        for c, idx in enumerate(portraits(t)):
+            px = unitanim.frame_pixels(t, idx, pal)
+            if px is None:
+                continue
+            ox, oy = gap + c * (F * scale + gap), gap + r * (F * scale + gap)
+            for y in range(F):
+                for x in range(F):
+                    col = px[y][x]
+                    if col is None:
+                        continue
+                    for ky in range(scale):
+                        line = img[oy + y * scale + ky]
+                        for kx in range(scale):
+                            line[ox + x * scale + kx] = col
+    p = os.path.join(d, "portraits.png")
+    png(p, W, H, img)
+    print(u"строка — тип, столбец — подпункт курсора -> %s"
+          % os.path.relpath(p, HERE))
+    return 0
+
+
 def main():
     args = sys.argv[1:]
+    if "--portraits" in args:
+        return do_portraits()
     if "--hud" in args:
         return do_hud()
     plain = "--plain" in args
