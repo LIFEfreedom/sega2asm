@@ -102,12 +102,19 @@ def windows():
     return sorted(out)
 
 
-def bra_table(lo, hi):
-    """Все слова через четыре байта — `$6000`? Тогда это таблица bra.w."""
-    n = (hi - lo) // 4
-    if n < 3 or (hi - lo) % 4:
+def bra_table(lo, hi, least=3):
+    """Таблица `bra.w` В НАЧАЛЕ окна: слова через четыре байта равны `$6000`.
+
+    Раньше требовалось, чтобы такими были ВСЕ слова окна, и правило
+    промахивалось мимо самого частого случая: таблица и сразу за ней
+    её же обработчики в том же окне (`data_43`, `data_44`).
+    """
+    if hi - lo < 4 * least:
         return None
-    if any(U16(lo + k * 4) != 0x6000 for k in range(n)):
+    n = 0
+    while lo + 4 * n + 4 <= hi and U16(lo + n * 4) == 0x6000:
+        n += 1
+    if n < least:
         return None
     return [lo + k * 4 + 2 + S16(lo + k * 4 + 2) for k in range(n)]
 
