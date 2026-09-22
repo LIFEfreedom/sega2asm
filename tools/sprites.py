@@ -110,6 +110,21 @@ def level_pals():
     return out
 
 
+def map_pals():
+    """128 байт перед картой уровня: его собственная палитра.
+
+    Запись графики (`+$08` записи уровня) держит в `+$04` адрес
+    карты, а ровно за 128 байт до неё лежит блок цветов.
+    """
+    out = {}
+    for i in range(23):
+        r = struct.unpack_from(">I", ROM, 0x1FCB50 + 4 * i)[0]
+        g = struct.unpack_from(">I", ROM, r + 8)[0]
+        out.setdefault(struct.unpack_from(">I", ROM, g + 4)[0] - 0x80,
+                       []).append(i)
+    return out
+
+
 def check_block(base, n=64):
     """Три числа: негодных слов, разных значений и ДЛИННЕЙШИЙ повтор.
 
@@ -300,6 +315,7 @@ def main():
         pals = find_pals()
         used = loaders()
         lvl = level_pals()
+        mp = map_pals()
         print(u"палитр по правилу 0BGR: %d (по 128 байт, четыре ряда)"
               % len(pals))
         print(u"из них ГРУЗЯТ %d, и ещё %d блоков код грузит мимо находок"
@@ -330,11 +346,20 @@ def main():
             elif lv:
                 src = (u"запись уровня `+$00`: %s"
                        % u", ".join(str(x) for x in lv))
+                if a in mp:
+                    src += (u"; она же лежит перед картой %s"
+                            % u", ".join(str(x) for x in mp[a]))
             else:
+                near_map = [x for x in mp if abs(a - x) <= 4]
                 known = [x for x in list(used) + list(lvl)
                          if x < len(ROM) and 0 < abs(a - x) < 128]
-                src = (u"*никто*; накладывается на $%06X" % known[0]
-                       if known else u"*никто*")
+                if near_map:
+                    src = (u"перед картой уровня %s, но не грузится"
+                           % u", ".join(str(x) for x in mp[near_map[0]]))
+                elif known:
+                    src = u"*никто*; накладывается на $%06X" % known[0]
+                else:
+                    src = u"*никто*"
             print(u"| `$%06X` | %d | %d | %d | %s |"
                   % (a, bad, uniq, run, src))
         print()
