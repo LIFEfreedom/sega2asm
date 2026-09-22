@@ -430,7 +430,7 @@ BIOS через line-F.
 Имена бывают двух сортов, и разницу надо держать в голове.
 
 **Разобранные** — около двухсот, там роль установлена чтением кода:
-`ResolveCombat`, `MatchPassword`, `FlushSpriteTable`, `CutsceneOpenBubble`
+`ResolveCombat`, `MatchPassword`, `FlushSpriteTable`, `SceneOpenBubble`
 и прочие. На них можно опираться.
 
 **Машинные** — остальные, выданные `tools/nameprocs.py`. Имя вида
