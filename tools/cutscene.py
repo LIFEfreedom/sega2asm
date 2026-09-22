@@ -623,7 +623,9 @@ def draw_bubble(px, font, got, width, left, tail, band):
     """
     tiles = screen_tiles()
     nrows = 2 * len(got)
-    y1 = min(SCREEN_H, (BUBBLE_ROW + 2 + nrows) * 8)
+    # нижняя кромка стоит строкой BUBBLE_ROW + 2 + nrows, значит
+    # её точки кончаются на строку ниже — иначе обрезка её срежет
+    y1 = min(SCREEN_H, (BUBBLE_ROW + 3 + nrows) * 8)
     if y1 > band[1]:
         band[1] = y1
     _blit_name(px, tiles, 0x8259, tail, BUBBLE_ROW)
