@@ -91,6 +91,7 @@ MENUS = [
     (0x1FD440, u"главное меню"),
     (0x1FD46E, u"оно же с отладкой ($FF2180)"),
     (0x1FD4AA, u"настройки"),
+    (0x1FD5BC, u"отладка ($290980)"),
 ]
 SETTINGS = 0xFFFD78          # блок настроек: $FFFFFD78 + индекс
 
@@ -100,7 +101,15 @@ def _string(a):
     s = a
     while ROM[a]:
         a += 1
-    return "".join(chr(c) for c in ROM[s:a]), a + 1
+    # `$0D` внутри строки — перевод строки на экране, а не буква: по нему
+    # разбиты и шесть раскладок кнопок, и двадцать три названия уровней.
+    t = "".join("\n" if c == 0x0D else chr(c) for c in ROM[s:a])
+    return t, a + 1
+
+
+def _flat(s):
+    """Строка в одну линию: перевод строки показываем косой чертой."""
+    return u" / ".join(x.strip() for x in s.split("\n") if x.strip())
 
 
 def menu(at):
@@ -157,10 +166,13 @@ def do_menus():
                 line += u"  настройка $%06X" % (SETTINGS + arg["setting"])
             if "proc" in arg:
                 line += u"  -> $%06X" % arg["proc"]
-            if "choices" in arg:
-                line += u"  [%s]" % u", ".join(c.strip()
+            if "choices" in arg and len(arg["choices"]) <= 4:
+                line += u"  [%s]" % u", ".join(_flat(c)
                                                for c in arg["choices"])
             print(line)
+            if "choices" in arg and len(arg["choices"]) > 4:
+                for j, c in enumerate(arg["choices"]):
+                    print(u"      %2d %s" % (j, _flat(c)))
         print()
 
 def main():
