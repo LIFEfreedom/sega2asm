@@ -33,6 +33,7 @@ Dyna Brothers 2 — проект дизассемблирования
               CSARGS="--play 0" — проиграть сценку в GIF
               CSARGS=--story — 152 сюжетных экрана того же движка
               CSARGS=--captions — 2820 титров картинками
+              CSARGS=--scenes — все 20 площадок движка и скрипты в ROM
   gfx       — графика в out/gfx/*.png
   unitgfx   — как выглядит каждый тип юнита (UARGS=номер типа)
   unitanim  — анимации юнитов по отдельности (UAARGS="5 --split")

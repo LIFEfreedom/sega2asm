@@ -966,7 +966,8 @@ GfxWorkBuffer    = $FFE45C
 ; демо-эпизодов и начать сначала.
 AttractLoop      = $003760
 ShowLogoScreen   = $05A5BA   ; 2118 инструкций, самая большая в игре
-ShowTitleScreen  = $057A86   ; 2002 инструкции
+ShowOpening      = $057A86   ; вступление: десять экранов движка сценария подряд,
+                             ; каждый прерывается кнопкой. Логотипа не рисует
 TitleMenu        = $040E90   ; 0 = игрок не вмешался, иначе выбор
 ShowDemoEpisode  = $059ACA   ; вызывается шесть раз подряд
 DemoEpisodeList  = $0037A8   ; порядок эпизодов: 3, 5, 1, 4, 0, 2
@@ -1283,7 +1284,8 @@ BuildSpriteList                = $05267C   ; собрать записи спр�
 TickAndDrawAnim                = $052724   ; шаг анимации: убавить таймер кадра +$8 записи, на нуле
                              ; сдвинуть номер кадра +$A на два (с возвратом в ноль по
                              ; признаку конца) и перезарядить таймер; затем BuildSpriteList
-ScreenAnyButtonPressed        = $052C16   ; бит 7 InputState или $FF0041 — нажата любая кнопка
+ScreenBeforeMissionCh01       = $052C16   ; ветка ScreenBeforeMission для глав 0 и 1:
+                             ; скрипт $177400, шесть ящеров игрока
 ScreenPaletteStepA            = $052D58   ; трап $FF21 и шаг палитры
 ScreenPaletteStepB            = $052F46   ; близнец ScreenPaletteStepA
 StoryViewerByIndex            = $053140   ; просмотрщик 0…11, он же двенадцать паролей soa…sol
@@ -1303,7 +1305,8 @@ LoadSceneGfxSet                = $053EC4   ; набор графики сцен�
                              ; список анимаций по адресу $FF5564, +$0 распаковывается в
                              ; $FF0564 и уходит в VRAM ($1000 байт), +$4 — туда же плюс
                              ; $2000 ($800 байт). Возвращает +$8 записи
-ScreenPlaySong19              = $054506   ; песня $19 трапом $FF30 и шаг палитры
+ShowVillainIntro              = $054506   ; песня 19, бегущий текст $0548A8, потом пять
+                             ; экранов движка: злодеи представляются
 ScrollTextRows                 = $05472A   ; прокрутка текста: список строк (+$8) сперва распаковывается
                              ; в тайлы, потом строки выезжают снизу — VSRAM растёт по кадру,
                              ; очередная строка дорисовывается через ScreenCommon. Выход по
@@ -4243,6 +4246,28 @@ StoryScreenIndex         = $0536C0   ; 45 входов: слово «сколь�
                              ; покрывают 135 указателей $053778…$053990
 StoryScreenTable         = $053774   ; 136 указателей на блоки сценарных экранов
                              ; в банках $19…$1B; нулевой берут напрямую
+SceneOpening1            = $1CEE78   ; скрипты вступления, лежат в ROM как есть
+SceneOpening2            = $1CEF88
+SceneOpening3            = $1CF00A
+SceneOpening4            = $1CF09C
+SceneOpening5            = $1CF220
+SceneOpening6            = $1CF3CC
+SceneOpening7            = $1CF6BE
+SceneOpening8            = $1CF79E
+SceneOpening9            = $1CF8DC
+SceneOpening10           = $1CFB0C
+SceneVillain1            = $19879E   ; скрипты ShowVillainIntro
+SceneVillain2            = $1987C2
+SceneVillain3            = $1987DA
+SceneVillain4            = $1987F4
+SceneVillain5            = $198814
+SceneMatchEndBeasts14    = $054F84   ; итог матча: шесть ящеров игрока
+SceneMatchEndBeasts30    = $054FF4
+SceneMatchEndBeasts12    = $055064
+SceneMatchEndEggs14      = $0550D4   ; то же шестью пустыми яйцами (вид 25)
+SceneMatchEndEggs30      = $055144
+SceneMatchEndEggs12      = $0551B4
+CrawlTable               = $0548A8   ; бегущий текст: Y, слов, адрес; $FFFF — конец страницы
 StoryScreenBackdrops     = $053BA4   ; было data_297: 45 указателей на таблицы
 StoryViewerRanges        = $0531FA   ; было data_294: 10 записей просмотрщика по 8 байт
 BackdropGalleryList      = $053448   ; было data_295: 58 пар «набор графики, фон»

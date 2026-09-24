@@ -8,6 +8,7 @@ u"""Сценки между миссиями: заголовок блока, с�
     make cutscene CSARGS=--story    # 152 сюжетных экрана
     make cutscene CSARGS="--story 7"  # скрипт одного из них
     make cutscene CSARGS=--captions # титры всех экранов в PNG
+    make cutscene CSARGS=--scenes   # все площадки движка и скрипты в ROM
 
 ## Где они и когда играют
 
@@ -19,6 +20,13 @@ u"""Сценки между миссиями: заголовок блока, с�
 
 Байт из индекса — это номер блока, а не номер миссии: порядок в главе
 перемешан (в главе 3 идут 0, 1, 3, 4, 2).
+
+Играют их ровно из двух мест. `PasswordShowScreenB` `$04FCB0` берёт главу
+и миссию из `MainState` и смотрит в индекс — это игра. `PasswordShowScreenA`
+`$04FC6E` ничего не смотрит: он чистит экран и ПРОВАЛИВАЕТСЯ в
+`ShowCutscene` с готовым номером в `d0`, а номер приходит из пароля. Так
+работают двенадцать слов `nina`…`ninl`, и им достаются сценки 0…11:
+на 12, 13 и 14 пароля нет.
 
 ## Блок
 
@@ -1510,6 +1518,297 @@ CAP_W, CAP_CELL, CAP_GAP = 17, 16, 4
 CAP_PAL = [(0x10, 0x10, 0x18), (0xE8, 0xE8, 0xD8), (0x40, 0x40, 0x50)]
 
 
+SCENE_BASES = {0x10: u"сценка", 0x16: u"сюжетный экран", 0x4E: u"итог матча"}
+
+SCENE_SITES = [
+    (0x04FFD2, u"ShowCutscene `$04FD28`", 0x10,
+     u"`a0` — распакованный блок сценки плюс 6"),
+    (0x052C7A, u"ScreenBeforeMission `$052BCE`", 0x16,
+     u"`$177400` — начало сегмента `data_gfx_ui1`"),
+    (0x053A62, u"DrawStoryScreen `$0539E0`", 0x16,
+     u"`a0` — распакованный блок сюжетного экрана плюс 8"),
+    (0x054984, u"ScreenFadeWaitFrame `$054940`", 0x16,
+     u"аргумент: `$19879E`, `$198814`"),
+    (0x0549F0, u"PlayTwoPhaseAnim `$0549CE`", 0x16,
+     u"аргумент: `$1987C2`, `$1987DA`, `$1987F4`"),
+    (0x054CD8, u"ScreenBranchByArg1 `$054C98`", 0x4E,
+     u"`$054F84` или `$0550D4`"),
+    (0x054E4E, u"ScreenBranchByArg1 `$054C98`", 0x4E,
+     u"`$FF2564` — скрипт собирают в ОЗУ по слотам юнитов"),
+    (0x055278, u"ScreenWorkBufferIfD0 `$05523E`", 0x4E,
+     u"`$055064` или `$0551B4`"),
+    (0x0552DE, u"ScreenWorkBufferIfD0 `$05523E`", 0x4E,
+     u"`$054FF4` или `$055144`"),
+    (0x057D2A, u"ScreenPaletteTrapFF32 `$057BF8`", 0x10, u"`$1CEE78`"),
+    (0x057EC6, u"ScreenDrawWorldMapA `$057E7C`", 0x10, u"`$1CEF88`"),
+    (0x057F42, u"ScreenDrawWorldMapB `$057EEC`", 0x10, u"`$1CF00A`"),
+    (0x057FC0, u"ScreenDrawWorldMapC `$057F76`", 0x10, u"`$1CF09C`"),
+    (0x05809E, u"ScreenDrawWorldMapD `$058054`", 0x10, u"`$1CF220`"),
+    (0x058132, u"ScreenFillWorkBufferDDDD `$058112`", 0x10, u"`$1CF3CC`"),
+    (0x05821A, u"ScreenScrollBig `$0581D6`", 0x10, u"`$1CF6BE`"),
+    (0x0582EC, u"ScreenScrollBig `$0581D6`", 0x10, u"`$1CF79E`"),
+    (0x058336, u"ScreenScrollBig `$0581D6`", 0x10, u"`$1CF8DC`"),
+    (0x059420, u"ScreenScrollFrom18DD4C `$0593F8`", 0x10, u"`$1CFB0C`"),
+    (0x059DB2, u"ShowDemoEpisode `$059ACA`", 0x10,
+     u"`a0` плюс слово `$A(a0)` — запись демо-эпизода"),
+]
+
+RAW_SCENES = [
+    (0x1CEE78, u"вступление 1"), (0x1CEF88, u"вступление 2"),
+    (0x1CF00A, u"вступление 3"), (0x1CF09C, u"вступление 4"),
+    (0x1CF220, u"вступление 5"), (0x1CF3CC, u"вступление 6"),
+    (0x1CF6BE, u"вступление 7"), (0x1CF79E, u"вступление 8"),
+    (0x1CF8DC, u"вступление 9"), (0x1CFB0C, u"вступление 10"),
+    (0x19879E, u"злодеи 1"), (0x1987C2, u"злодеи 2"),
+    (0x1987DA, u"злодеи 3"), (0x1987F4, u"злодеи 4"),
+    (0x198814, u"злодеи 5"),
+    (0x054F84, u"итог матча: шесть ящеров, анимация 14"),
+    (0x054FF4, u"итог матча: шесть ящеров, анимация 30"),
+    (0x055064, u"итог матча: шесть ящеров, анимация 12"),
+    (0x0550D4, u"итог матча: шесть яиц, анимация 14"),
+    (0x055144, u"итог матча: шесть яиц, анимация 30"),
+    (0x0551B4, u"итог матча: шесть яиц, анимация 12"),
+    (0x177400, u"перед миссией глав 0 и 1"),
+]
+
+SCENE_READ = {
+    0x1CEF88: [u"おーし　ガンガンいくぞ！"],
+    0x1CF00A: [u"もう少しだぁ　がんばろぉ"],
+    0x1CF09C: [u"今度こそ　敵も終わりだね"],
+    0x1CF220: [u"ちぃっ　最後の悪あがきか！", u"またかぁ！？",
+               u"またカタはつかんのか！？"],
+    0x1CF79E: [u"待て　どうして逃げるのだっ！", u"ＵＦＯなら　まだ作れるぞ",
+               u"あー　待てぃ", u"おいっ！",
+               u"ワシの科学力を信用せんのかっ！", u"ほぉー　そうか…",
+               u"ならばっ！", u"ワシは乗らんぞ！",
+               u"ぜぇ～～～～～～～～～～～～ったい", u"ここを動かん！"],
+    0x1CF8DC: [u"へっ！？", u"おいっ　開けろっ！", u"開けないか！",
+               u"こらっ！　ワシを置いていく気か！"],
+    0x1CFB0C: [u"だ　大丈夫ですか　ハカセ！", u"お前もまだ残っておったのか",
+               u"あーあ　行っちゃった",
+               u"こうなったら　残った者と我々だけで",
+               u"この星を手に入れるぞ", u"壊されたＵＦＯの部品と",
+               u"生き残った仲間を　かき集めるのだ"],
+    0x19879E: [u"ふっふっふっふっ"],
+    0x1987C2: [u"この星を手に入れるためなら", u"何でもお手伝いしますわ"],
+    0x1987DA: [u"ガウー！", u"ジャマな恐竜どもは",
+               u"オレ様がみんな片付けてやる"],
+    0x1987F4: [u"ふははははは．．．．"],
+    0x198814: [u"はーはっはっはっ"],
+}
+
+CRAWL = 0x0548A8           # таблица бегущего текста для ScrollTextRows
+CRAWL_READ = [
+    [u"宇宙人軍団が退却してから", u"何年もの月日が流れた…"],
+    [u"ジュラ星にとり残された", u"ハカセは、新たな宇宙軍",
+     u"部隊をつくるため、生き", u"残った仲間を探しだした。"],
+    [u"ハカセたちは文明のない", u"この星で、ＵＦＯの残骸を",
+     u"かき集めて研究所を", u"つくった。"],
+    [u"そこでは、仲間となる", u"種族をつくりだすため",
+     u"遺伝子合成の実験が", u"行われていた。"],
+]
+
+
+def raw_scene(addr):
+    u"""(смещение текста, актёров, [скрипты], конец) для скрипта в ROM.
+
+    `SceneActorSetup` `$056370` читает по переданному адресу слово
+    «смещение до списка текста» (ноль — списка нет) и слово «сколько
+    актёров» (больше 20 обрезается), а скрипты идут сразу за ними. У
+    сценки и сюжетного экрана этот адрес показывает ВНУТРЬ распакованного
+    блока; у мест из `RAW_SCENES` скрипт лежит в ROM как есть.
+    """
+    txt = struct.unpack_from(">H", ROM, addr)[0]
+    n = struct.unpack_from(">H", ROM, addr + 2)[0]
+    acts, end = actors(ROM, addr + 4, n)
+    return txt, n, acts, end
+
+
+def crawl_pages():
+    u"""[[(Y, слов, адрес)]] — страницы бегущего текста `$0548A8`.
+
+    Строка: слово Y, слово «сколько слов», длинный адрес потока слов
+    титров. Страница кончается `$FFFF`, дальше три нулевых слова и слово
+    `$28`. Слова те же, что у титров, — шрифт 16x16 в один бит.
+    """
+    w = lambda o: struct.unpack_from(">H", ROM, o)[0]
+    out, rows, o = [], [], CRAWL + 2
+    while True:
+        if w(o) == 0xFFFF:
+            out.append(rows)
+            rows, o = [], o + 2
+            if w(o) or w(o + 2) or w(o + 4):
+                break
+            o += 8
+            continue
+        y, ln, p = w(o), w(o + 2), U32(o + 4)
+        if ln > 40 or not 0x190000 <= p < 0x1A0000:
+            break
+        rows.append((y, ln, p))
+        o += 8
+    return out
+
+
+def caption_png(path, streams):
+    u"""Нарисовать список потоков слов титров, по строке на поток."""
+    laid = [caption_cells(one) for one in streams]
+    heights = [max((r for _c, r, _w in one), default=0) + 1 for one in laid]
+    h = sum(x * CAP_CELL for x in heights) + CAP_GAP * (len(laid) - 1)
+    w = CAP_W * CAP_CELL
+    px = [bytearray([2]) * w for _ in range(h)]
+    y = 0
+    for one, hh in zip(laid, heights):
+        for col, row, word in one:
+            blit_glyph(px, caption_glyph(word), col * CAP_CELL,
+                       y + row * CAP_CELL, 0, 1)
+        y += hh * CAP_CELL + CAP_GAP
+    png(path, w, h, [[CAP_PAL[v] for v in row] for row in px])
+
+
+def caption_rows(streams):
+    u"""[[слово]] — потоки титров, разложенные по строкам экрана.
+
+    В строке `CAP_W` клеток, и курсор шагает по всем словам, включая
+    пропуски: поток длиннее строки просто переносится, а хвост строки
+    добивается пропусками. Их и снимаем.
+    """
+    out = []
+    for one in streams:
+        for k in range(0, len(one), CAP_W):
+            row = list(one[k:k + CAP_W])
+            while row and row[-1] == 1:
+                row.pop()
+            if row:
+                out.append(row)
+    return out
+
+
+def check_read():
+    u"""(сошлось, всего) — сверка прочитанного глазами с данными.
+
+    Таблицы «глиф → знак» в ROM нет, так что прочитанное не с чем
+    сличать по смыслу. Но раскладка сверяется точно: строк должно быть
+    столько же, в строке столько же знаков, и слово `1` — пропуск
+    клетки — должно приходиться ровно на полноширинный пробел.
+    """
+    ok = tot = 0
+    jobs = []
+    for addr, _what in RAW_SCENES:
+        if addr not in SCENE_READ:
+            continue
+        txt, _n, acts, _end = raw_scene(addr)
+        cnt = sum(1 for one in acts for _o, w, _t in one
+                  if w >> 12 == 2 and (w >> 8) & 0x0F == 4)
+        jobs.append((captions(ROM, addr + txt, cnt), SCENE_READ[addr]))
+    word = lambda o: struct.unpack_from(">H", ROM, o)[0]
+    for i, pg in enumerate(crawl_pages()):
+        jobs.append(([[word(a + j * 2) for j in range(ln)]
+                      for _y, ln, a in pg], CRAWL_READ[i]))
+    for streams, got in jobs:
+        rows = caption_rows(streams)
+        for row, line in zip(rows, got):
+            tot += 1
+            if len(row) == len(line) and all(
+                    (w == 1) == (c == u"　")
+                    for w, c in zip(row, line)):
+                ok += 1
+        tot += abs(len(rows) - len(got))
+    return ok, tot
+
+
+def do_scenes():
+    u"""Все площадки движка сценария и скрипты, лежащие в ROM как есть."""
+    word = lambda o: struct.unpack_from(">H", ROM, o)[0]
+    out = os.path.join(out_path("cutscene"), "scenes")
+    os.makedirs(out, exist_ok=True)
+    doc = os.path.join(HERE, "docs", "game-scene-sites.md")
+    f = io.open(doc, "w", encoding="utf-8", newline="\n")
+    p = f.write
+    p(u"# Движок сценария: все площадки и скрипты в ROM\n\n")
+    p(u"Собрано `tools/cutscene.py` (`make cutscene CSARGS=--scenes`).\n\n")
+    p(u"СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n\n")
+    p(u"Команды скриптов разобраны в шапке `tools/cutscene.py`, сценки — в\n"
+      u"[game-cutscene-scripts.md](game-cutscene-scripts.md), сюжетные\n"
+      u"экраны — в [game-story-screens.md](game-story-screens.md).\n\n")
+    p(u"## Двадцать площадок\n\n")
+    p(u"`SceneActorSetup` `$056370` зовут из %d мест в %d процедурах. База\n"
+      u"`a5` — отступ от `GfxWorkBuffer` `$FFE45C`, и её значений ровно\n"
+      u"три.\n\n"
+      % (len(SCENE_SITES), len(set(s[1] for s in SCENE_SITES))))
+    p(u"| площадка | процедура | база | откуда скрипт |\n|---|---|---|---|\n")
+    for site, proc, base, src in SCENE_SITES:
+        p(u"| `$%06X` | %s | `+$%02X` (%s) | %s |\n"
+          % (site, proc, base, SCENE_BASES[base], src))
+    p(u"\n## Скрипты, лежащие в ROM как есть\n\n")
+    p(u"У сценки и сюжетного экрана скрипт живёт внутри сжатого блока.\n"
+      u"Ещё %d лежат в картридже открытым текстом и разбираются тем же\n"
+      u"кодом: слово «смещение до текста», слово «актёров», дальше\n"
+      u"скрипты. Проверка у всех одна: команд «конец» ровно столько,\n"
+      u"сколько актёров, и разбор кончается не дальше текста.\n\n"
+      % len(RAW_SCENES))
+    p(u"| адрес | что | актёров | команд | титров | конец | текст |\n"
+      u"|---|---|---|---|---|---|---|\n")
+    ok = 0
+    for addr, what in RAW_SCENES:
+        txt, n, acts, end = raw_scene(addr)
+        cmds = sum(len(one) for one in acts)
+        caps = sum(1 for one in acts for _o, w, _t in one
+                   if w >> 12 == 2 and (w >> 8) & 0x0F == 4)
+        ends = sum(1 for one in acts if one and one[-1][1] == 0)
+        if ends == n and (not txt or end - addr <= txt):
+            ok += 1
+        p(u"| `$%06X` | %s | %d | %d | %d | `+$%04X` | %s |\n"
+          % (addr, what, n, cmds, caps, end - addr,
+             u"`+$%04X`" % txt if txt else u"—"))
+        if caps:
+            caption_png(os.path.join(out, "scene_%06X.png" % addr),
+                        captions(ROM, addr + txt, caps))
+    p(u"\nСошлись все %d из %d.\n\n" % (ok, len(RAW_SCENES)))
+    p(u"## Что в них говорят\n\n")
+    p(u"Титры выложены картинками в `%s`. Таблицы «глиф → знак» в ROM нет,\n"
+      u"поэтому текст ниже **прочитан глазами по этим картинкам**, а не\n"
+      u"выведен из данных.\n\n"
+      % os.path.relpath(out, HERE).replace("\\", "/"))
+    good, total = check_read()
+    p(u"Чем это проверено: длиной и пропусками. Слово `1` в потоке титра —\n"
+      u"это пропуск клетки, и в прочитанном на его месте должен стоять\n"
+      u"полноширинный пробел. Сошлись **%d из %d** кусков.\n\n"
+      % (good, total))
+    for addr, what in RAW_SCENES:
+        if addr not in SCENE_READ:
+            continue
+        p(u"**`$%06X`, %s.** %s\n\n"
+          % (addr, what, u" / ".join(SCENE_READ[addr])))
+    pages = crawl_pages()
+    p(u"## Бегущий текст `$0548A8`\n\n")
+    p(u"`ShowVillainIntro` `$054506` перед злодеями пускает `ScrollTextRows`\n"
+      u"`$05472A` по таблице `$0548A8`: строка — слово Y, слово «сколько\n"
+      u"слов», длинный адрес. Слова те же, что у титров, то есть шрифт\n"
+      u"16x16 в один бит. Страниц %d, строк %d.\n\n"
+      % (len(pages), sum(len(x) for x in pages)))
+    p(u"| страница | строки |\n|---|---|\n")
+    for i, pg in enumerate(pages):
+        p(u"| %d | %s |\n"
+          % (i + 1, u", ".join(u"Y=%d, %d слов, `$%06X`" % r for r in pg)))
+    p(u"\nПрочитано по картинкам `crawl_NN.png` там же:\n\n")
+    for i, rows in enumerate(CRAWL_READ):
+        p(u"%d. %s\n" % (i + 1, u" ".join(rows)))
+    p(u"\n")
+    for i, pg in enumerate(pages):
+        caption_png(os.path.join(out, "crawl_%02d.png" % i),
+                    [[word(a + j * 2) for j in range(ln)]
+                     for _y, ln, a in pg])
+    f.close()
+    print(u"прочитано глазами: сошлось %d из %d" % check_read())
+    print(u"площадок %d, скриптов в ROM %d, сошлись %d"
+          % (len(SCENE_SITES), len(RAW_SCENES), ok))
+    print(u"страниц бегущего текста %d, строк %d"
+          % (len(pages), sum(len(x) for x in pages)))
+    print(u"картинки: %s" % os.path.relpath(out, HERE))
+    print(u"сводка: %s" % os.path.relpath(doc, HERE))
+    return 0
+
+
 def do_captions():
     u"""Титры всех сценарных экранов в PNG плюс лист различных глифов."""
     out = os.path.join(out_path("cutscene"), "captions")
@@ -1627,6 +1926,8 @@ def main():
         return do_play(k)
     if args and args[0] == "--story":
         return do_story(int(args[1]) if len(args) > 1 else None)
+    if args and args[0] == "--scenes":
+        return do_scenes()
     if args and args[0] == "--captions":
         return do_captions()
     only = int(args[0]) if args else None
