@@ -579,7 +579,8 @@ def k_beetle():
                                cmd(0x1D802C, [0xDB], size=1,
                                    signed=False)),
          "turns": "после каждого рывка по очереди: бит 11, бит 12",
-         "variant_b_flag": "бит 10 в +$30 (вариант $29DFDA)",
+         "bonus_token_variant": at(0x29DFDA, "bset #2,$31(a0)",
+                                   value="$29DFDA"),
          "death_sound": at(u, "pea ($000078).w")}
     k.update(core(u))
     k.update(census(0x29DFC4, 0x29DFDA))
