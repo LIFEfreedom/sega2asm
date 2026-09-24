@@ -136,7 +136,7 @@ def build():
     for i in range(n):
         v = F.U32(F.BASE + i * 4)
         it = F.parse(v)
-        put(v, v + 8 + len(it) * 10 + F.U16(v + 2) * 10, "записи кадров")
+        put(v, v + 8 + len(it) * 10 + F.U16(v + 2) * 6, "записи кадров")
         for d, _w, _x, _y, s in it:
             put(s, s + F.U16(d + 8) * 2, "тайлы спрайтов")
     for i in range(F.SETS):

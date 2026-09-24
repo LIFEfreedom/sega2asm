@@ -7,6 +7,7 @@
     python tools/spec.py --prog 1FF070         программа поведения `+$48`
     python tools/spec.py --kind 29DFC4         досье вида по конструктору
     python tools/spec.py --dump 29DFC4         то же, сами команды
+    python tools/spec.py --boxes 1D8720        коробки кадров скрипта
 
 Это не пересказ, а выписка. Обход берёт СВОЁ тело процедуры — ветвления и
 проваливание, без входа в `bsr`/`jsr` (тот же обход, что в `states.py`), — и
@@ -537,6 +538,33 @@ def do_table(base, n):
             print(u"    (не код)")
 
 
+# Номер коробки — номер бита; смысл снят с обработчиков касания
+# (`$299AD0`, `$2A95AC`, `$2A35CA`), см. behavior.md, раздел 2.2.
+BOXBIT = {14: u"тело", 8: u"удар", 9: u"удар", 10: u"удар", 11: u"удар",
+          15: u"зацеп"}
+
+
+def do_boxes(script):
+    """Коробки всех кадров скрипта: общая (`+4` кадра) и подробные."""
+    import anim as AN
+    import frames as F
+    seen = []
+    for _a, _raw, _txt, fr in AN.walk(script, 120):
+        if fr is None or fr in seen:
+            continue
+        seen.append(fr)
+        v = F.U32(F.BASE + 4 * fr)
+        items = F.parse(v)
+        if items is None:
+            print(u"кадр %4d  не кадр" % fr)
+            continue
+        print(u"кадр %4d  общая x %+d..%+d, y %+d..%+d" % (
+            fr, F.S8(v + 4), F.S8(v + 5), F.S8(v + 6), F.S8(v + 7)))
+        for x0, x1, y0, y1, num in F.boxes(v, len(items)):
+            print(u"           %-5s (бит %2d) x %+d..%+d, y %+d..%+d" % (
+                BOXBIT.get(num, u"-"), num, x0, x1, y0, y1))
+
+
 def do_kinds():
     cells, where = E.census()
     by_upd = {}
@@ -581,6 +609,8 @@ def main():
         do_table(int(a[1], 16), int(a[2]))
     elif a[0] == "--kinds":
         do_kinds()
+    elif a[0] == "--boxes":
+        do_boxes(int(a[1], 16))
     else:
         print(__doc__)
 
