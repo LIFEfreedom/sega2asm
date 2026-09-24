@@ -132,8 +132,8 @@ AttractLoop $003760
 Девять анимаций событий (`EventAnim1`…`EventAnim8`, `EventAnimBig`)
 играются поверх карты: команда Z80, ожидание кадров, перестроение списка
 видимых юнитов. Восемь полноэкранных (`ScreenAfterBattle`,
-`ScreenWithChoice`, `ScreenPerTurn`, `ScreenUnlockGate`, `ScreenCommon`,
-`DrawCenteredText` и другие) чистят планы и CRAM и читают ввод.
+`ScreenPerTurn`, `ScreenUnlockGate`, `ScreenCommon`, `DrawCenteredText` и
+другие) чистят планы и CRAM и читают ввод.
 
 **Середина банка — один движок сценарных экранов.** `SceneActorSetup`
 `$056370` (было `ScreenBig`) заводит актёров, `SceneActorTick` `$0564FC`
@@ -144,6 +144,15 @@ AttractLoop $003760
 прочие. Базу `a5` каждый экран ставит себе сам, отступом от
 `GfxWorkBuffer`: у сценки `+$10`, у сюжетного экрана `+$16`. Разбор
 команд — в шапке `tools/cutscene.py`.
+
+Порядок сюжетных экранов задаёт не этот банк, а описание миссии.
+`LoadMissionState` `$006C06` кладёт 92-байтовую запись миссии в
+`MainState` `$FF028A`; байт 0 записи — глава, байт 1 — номер миссии.
+После матча `RunMission` отдаёт байт 1 в `StoryPlayEpisode` `$053530`, а
+байт 0 выбирает индекс: сюжетные экраны есть только у главы 0 (8 миссий)
+и главы 1 (45). Те же блоки показывает отладочный просмотрщик
+`StoryViewerByIndex` `$053140` — двенадцать паролей `soa`…`sol`
+([game-story-screens.md](game-story-screens.md)).
 
 Все 214 процедур банка названы. Три базы, вокруг которых он вращается:
 

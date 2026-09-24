@@ -1032,7 +1032,7 @@ EventAnimBig     = $0514F2   ; <- $00DC5C, 891 инструкция, 18 звук
 ; Экраны: чистят планы и CRAM, читают ввод, рисуют из GfxWorkBuffer.
 ScreenBeforeMission      = $052BCE   ; экран перед миссией: +$0 состояния выбирает
                              ; вид экрана, +$1 — номер миссии
-ScreenWithChoice = $053530   ; <- $003A94, читает крестовину и кнопки
+StoryPlayEpisode = $053530   ; <- $003A94: сюжетные экраны миссии, байт 1 MainState
 ScreenPerTurn    = $054482   ; <- $02FF88, вызывается по чётности $24(a6)
 ScreenUnlockGate = $054AFC   ; <- $00395A, $003A26, $006F76; сразу после
                              ; вызова проверяется UnlockFlag
@@ -1286,10 +1286,10 @@ TickAndDrawAnim                = $052724   ; шаг анимации: убави
 ScreenAnyButtonPressed        = $052C16   ; бит 7 InputState или $FF0041 — нажата любая кнопка
 ScreenPaletteStepA            = $052D58   ; трап $FF21 и шаг палитры
 ScreenPaletteStepB            = $052F46   ; близнец ScreenPaletteStepA
-ScreenPaletteByWordD0         = $053140   ; слово d0 ложится в локальные два байта и ведёт палитру
-ScreenPaletteFromData295      = $05324A   ; трап $FF32 и таблица data_295
-ScreenPaletteFromArgPtr       = $0532C6   ; палитра по указателю $8(a6)
-ScreenBranchByPtrRange        = $0533B6   ; указатель a0 меньше $0536C0 — одна ветка, иначе другая
+StoryViewerByIndex            = $053140   ; просмотрщик 0…11, он же двенадцать паролей soa…sol
+BackdropGallery               = $05324A   ; 58 пар «набор графики, фон», листается крестовиной
+StoryPlayRange                = $0532C6   ; диапазон входов индекса: $8(a6) начало, $C(a6) конец
+StoryEpisodeCard              = $0533B6   ; карточка номера миссии, только для индекса главы 1
 DrawStoryScreen          = $0539E0   ; второй клиент движка сценарных экранов после сценок.
                              ; Распаковывает блок в ТОТ ЖЕ $FF2564, что ShowCutscene, но
                              ; шапка другая: слово в ScreenUnpackFromData297, слово в
@@ -1384,8 +1384,8 @@ FadeOutUntilMusicEnds          = $05737A   ; затемнять палитру �
                              ; что музыка кончилась: байт $A01C14 читается через захват шины
                              ; Z80. Потом ещё несколько кадров и трап $FF2E
 ScreenStepFromFF1D64          = $05741E   ; разбор буфера $FF1D64
-ScreenClearPlanesA            = $0574FC   ; трапы $FF21, $FF22, $FF29
-ScreenClearPlanesB            = $05759A   ; то же плюс GfxWorkBuffer
+StoryShowHazure               = $0574FC   ; один блок $053774, «ハズレ»; пароль hazure
+StoryShowEnding               = $05759A   ; семь блоков банка $16 перед PlayEnding
 CopyBlockToEE5C              = $0576B4   ; 107 инстр, 2 ссылок
                                ; копирование блока в $FFEE5C, близнец следующей
 ScreenBuildRecords            = $057924   ; сборка записей, счётчик в d5
@@ -4244,5 +4244,9 @@ StoryScreenIndex         = $0536C0   ; 45 входов: слово «сколь�
 StoryScreenTable         = $053774   ; 136 указателей на блоки сценарных экранов
                              ; в банках $19…$1B; нулевой берут напрямую
 StoryScreenBackdrops     = $053BA4   ; было data_297: 45 указателей на таблицы
+StoryViewerRanges        = $0531FA   ; было data_294: 10 записей просмотрщика по 8 байт
+BackdropGalleryList      = $053448   ; было data_295: 58 пар «набор графики, фон»
+StoryScreenIndexCh0      = $053994   ; индекс главы 0: 10 входов, два ведут на $053774
+SceneGfxSetTable         = $053C58   ; 31 набор графики по 20 байт, для LoadSceneGfxSet
                              ; имён РОВНО по 2240 байт. В шапке блока лежит
                              ; БАЙТОВОЕ смещение сюда; заняты 44 из 45

@@ -71,10 +71,15 @@ u"""Сценки между миссиями: заголовок блока, с�
 
 | где | сколько | куда |
 |---|---|---|
-| `$053774` | 1 | берут напрямую, `pea (loc_053774).l` в `$057566` |
-| `$053778`…`$053990` | 135 | по индексу `$0536C0` |
-| `$0539BC` | 9 | своя таблица `$053994` |
-| `data_320` `$057698` | 7 | банк `$16`, цикл на семь в `$057606` |
+| `$053774` | 1 | «ハズレ», `StoryShowHazure` и пароль `hazure` |
+| `$053778`…`$053990` | 135 | индекс `$0536C0`, глава 1, 45 миссий |
+| `$0539BC` | 9 | индекс `$053994`, глава 0, 8 миссий |
+| `data_320` `$057698` | 7 | банк `$16`, семь штук перед концовкой |
+
+Заказывает их описание миссии, а не банк вывода: байт 0 записи в
+`MainState` `$FF028A` — номер главы и выбор индекса, байт 1 — номер
+миссии и вход в нём. Кто это читает и какие блоки достаются каждой
+миссии — в `docs/game-story-screens.md`.
 
 **Индекс `$0536C0`** — 45 входов по два слова: «сколько блоков ЕЩЁ» и
 смещение до первого указателя, считая от самого слова смещения. Цели идут
@@ -422,21 +427,32 @@ def header(d):
 STORY_INDEX = 0x0536C0     # 45 входов: слово «сколько ещё», слово смещения
 STORY_TABLE = 0x053774     # 135 указателей на блоки, банки $19…$1B
 STORY_LONE = 0x053774      # нулевой не входит в индекс: его берут напрямую
-STORY_EXTRA = 0x0539BC     # ещё 9 блоков, своя таблица кода $053994
+STORY_INDEX0 = 0x053994    # StoryScreenIndexCh0: 10 входов
+STORY_EXTRA = 0x0539BC     # ещё 9 блоков, они же цели индекса главы 0
 STORY_16 = 0x057698        # data_320: 7 блоков в банке $16
+VIEWER_RANGES = 0x0531FA   # StoryViewerRanges: база, начало, конец
+GALLERY = 0x053448         # BackdropGalleryList: 58 пар «набор, фон»
+GFXSET_TABLE = 0x053C58    # SceneGfxSetTable: 31 запись по 20 байт
+CHAPTER_TABLE = 0x060400   # 9 указателей на сжатые описания миссий
+MISSION_REC = 0x5C         # длина описания одной миссии
 
 
-def story_index():
+def story_index(base=STORY_INDEX, end=STORY_TABLE):
     u"""[(адрес входа, сколько блоков, [адреса блоков])] — индекс `$0536C0`.
 
     Вход: слово «сколько блоков ЕЩЁ», слово смещения до первого указателя,
     считая от самого слова смещения. Цели идут встык: 45 входов ровно
     покрывают 135 указателей, от `$053778` до `$053990`.
+
+    Смещение знаковое: `adda.w` расширяет знак, и два последних входа
+    индекса главы 0 (`$0539B4`, `$0539B8`) им уходят НАЗАД, на одинокий
+    указатель `$053774`.
     """
     out = []
-    for a in range(STORY_INDEX, STORY_TABLE, 4):
+    for a in range(base, end, 4):
         n = 1 + struct.unpack_from(">H", ROM, a)[0]
-        t = a + 2 + struct.unpack_from(">H", ROM, a + 2)[0]
+        o = struct.unpack_from(">h", ROM, a + 2)[0]
+        t = a + 2 + o
         out.append((a, n, [U32(t + i * 4) for i in range(n)]))
     return out
 
@@ -451,6 +467,67 @@ def story_blocks():
     return out
 
 
+def chapter_missions():
+    u"""[(глава, [(байт 0, байт 1) описания миссии])] по `ChapterTable`.
+
+    `LoadMissionState` `$006C06` распаковывает главу и копирует из неё
+    запись длиной `$5C` в `MainState` `$FF028A`. Байт 0 записи — номер
+    главы, байт 1 — номер миссии в главе; проверяется тем, что так
+    выходит у всех 123 записей семи непустых глав.
+    """
+    out = []
+    for ch in range(9):
+        p = U32(CHAPTER_TABLE + ch * 4)
+        if not p:
+            out.append((ch, []))
+            continue
+        d = bytes(unpack(ROM, p)[2])
+        out.append((ch, [(d[i], d[i + 1])
+                         for i in range(0, len(d), MISSION_REC)]))
+    return out
+
+
+def story_order():
+    u"""[(глава, миссия, [номера блоков])] — что покажут после матча.
+
+    `StoryPlayEpisode` `$053530` берёт байт 0 записи миссии как выбор
+    таблицы (0 — индекс главы 0, 1 — индекс `$0536C0`, от 2 — экранов
+    нет) и байт 1 как номер входа; номер сверх таблицы сворачивается на
+    первый вход.
+    """
+    num = {}
+    for i, a in enumerate(story_blocks()):
+        num.setdefault(a, i)
+    sets = {0: story_index(STORY_INDEX0, STORY_EXTRA), 1: story_index()}
+    out = []
+    for ch, recs in chapter_missions():
+        if ch not in sets:
+            continue
+        idx = sets[ch]
+        for _b0, n in recs:
+            e = idx[n - 1] if 1 <= n <= len(idx) else idx[0]
+            out.append((ch, n, [num[b] for b in e[2]]))
+    return out
+
+
+def viewer_ranges():
+    u"""[(номер, адрес первого входа, адрес за последним, сколько)].
+
+    Десять записей по восемь байт: длинный базовый адрес, слово начала,
+    слово конца. `StoryViewerByIndex` `$053140` отдаёт пару адресов
+    `StoryPlayRange` `$0532C6`, и номер записи — это номер просмотрщика
+    минус два.
+    """
+    out = []
+    for i in range(10):
+        a = VIEWER_RANGES + i * 8
+        b = U32(a)
+        s = b + struct.unpack_from(">H", ROM, a + 4)[0]
+        e = b + struct.unpack_from(">H", ROM, a + 6)[0]
+        out.append((i + 2, s, e, (e - s) // 4))
+    return out
+
+
 def story_block(addr):
     u"""Распакованный блок сюжетного экрана."""
     return bytes(unpack(ROM, addr)[2])
@@ -458,6 +535,10 @@ def story_block(addr):
 
 def story_header(d):
     u"""(фон, набор графики, палитра 0, палитра 1, текст, актёров).
+
+    Фон `None` — это `$FFFF` в нулевом слове: `DrawStoryScreen` тогда не
+    трогает ни фон, ни набор графики, а оставляет то, что уже на экране.
+    Таких блоков три из 152.
 
     Фон отдаётся номером: в блоке лежит БАЙТОВОЕ СМЕЩЕНИЕ в `data_297`
     `$053BA4`, а там 45 указателей на таблицы имён по 2240 байт.
@@ -472,7 +553,8 @@ def story_header(d):
     скрипты.
     """
     w = lambda o: struct.unpack_from(">H", d, o)[0]
-    return (w(0) // 4, w(2), w(4), w(6), 8 + w(8), w(10))
+    unp = None if w(0) == 0xFFFF else w(0) // 4
+    return (unp, w(2), w(4), w(6), 8 + w(8), w(10))
 
 
 CAPTION_GLYPHS = 0x18F362  # 280 указателей на блоки по 16 глифов
@@ -1203,6 +1285,129 @@ def do_backdrops():
     return 0
 
 
+VIEWER_WORDS = u"soa sob soc sod soe sof sog soh soi soj sok sol".split()
+
+
+def story_who(p):
+    u"""Секция «кто заводит сюжетные экраны» в сводку."""
+    p(u"## Кто их заводит\n\n")
+    p(u"Порядок задаёт не банк вывода, а описание миссии.\n"
+      u"`LoadMissionState` `$006C06` распаковывает главу из `ChapterTable`\n"
+      u"`$060400` и копирует 92-байтовую запись миссии в `MainState`\n"
+      u"`$FF028A`. Байт 0 записи — номер главы, байт 1 — номер миссии в\n"
+      u"главе: так выходит у всех записей всех непустых глав, и их длины\n")
+    lens = u", ".join(u"%d" % len(r) for _c, r in chapter_missions() if r)
+    p(u"(%s) совпали с разбором паролей "
+      u"([game-passwords.md](game-passwords.md)).\n\n" % lens)
+    p(u"После матча `RunMission` `$003846` зовёт `StoryPlayEpisode`\n"
+      u"`$053530` с байтом 1 — и только на первом заходе: путь повтора\n"
+      u"той же миссии `$003988` ставит `d7` в 1, и по этому слову экран\n"
+      u"пропускается. Внутри байт 0 выбирает таблицу, а номер сверх её\n"
+      u"длины сворачивается на первый вход.\n\n")
+    p(u"| байт 0 | индекс | входов | глава | миссий |\n"
+      u"|---|---|---|---|---|\n")
+    for ch, base, end in ((0, STORY_INDEX0, STORY_EXTRA),
+                          (1, STORY_INDEX, STORY_TABLE)):
+        n = len(story_index(base, end))
+        p(u"| %d | `$%06X` | %d | %d | %d |\n"
+          % (ch, base, n, ch, len(chapter_missions()[ch][1])))
+    p(u"| 2 и дальше | — | — | 2…5, 8 | сюжетных экранов нет |\n")
+    p(u"\nУ главы 1 таблица совпала с главой миссия в миссию. У главы 0\n"
+      u"входов на два больше, чем миссий, и оба лишних ведут на `$053774`\n"
+      u"— на блок 0, тот самый «ハズレ».\n\n")
+    p(u"| глава | миссия | блоки |\n|---|---|---|\n")
+    for ch, n, blocks in story_order():
+        p(u"| %d | %d | %s |\n"
+          % (ch, n, u", ".join(u"%d" % b for b in blocks)))
+    p(u"\n### Просмотрщик: двенадцать паролей `soa`…`sol`\n\n")
+    p(u"`StoryViewerByIndex` `$053140` принимает номер 0…11 и больше\n"
+      u"ничего: `cmpi.w #$000C,d0` и выход. Ровно столько паролей в него и\n"
+      u"уходит — `soa`…`sol`, номера 124…135, отрезанные байтом\n"
+      u"`PasswordSceneBound` `$0470EE`. Номер 0 — галерея фонов\n"
+      u"`BackdropGallery` `$05324A`, номер 1 — вся кампания подряд, с\n"
+      u"титульного экрана и музыки 19, номера 2…11 — десять диапазонов из\n"
+      u"`StoryViewerRanges` `$0531FA`.\n\n")
+    p(u"| № | пароль | что показывает |\n|---|---|---|\n")
+    p(u"| 0 | `%s` | %d пар «набор графики, фон» из `BackdropGalleryList` "
+      u"`$%06X`, "
+      u"листается крестовиной |\n"
+      % (VIEWER_WORDS[0], (0x053530 - GALLERY) // 4, GALLERY))
+    p(u"| 1 | `%s` | весь индекс `$%06X`, %d входов |\n"
+      % (VIEWER_WORDS[1], STORY_INDEX, len(story_index())))
+    for i, s, e, n in viewer_ranges():
+        p(u"| %d | `%s` | входы `$%06X`…`$%06X`, %d |\n"
+          % (i, VIEWER_WORDS[i], s, e - 4, n))
+    tot = sum(n for _i, _s, _e, n in viewer_ranges())
+    p(u"\nДесять записей не пересекаются и в сумме дают %d входа: восемь\n"
+      u"настоящих миссий главы 0 и все 45 главы 1. Номер входа печатает\n"
+      u"`StoryEpisodeCard` `$0533B6` — но только пока указатель внутри\n"
+      u"индекса главы 1: он считает `(a0 − $0536C0) / 4 + 1`, выводит\n"
+      u"двузначное число в слово плана `$C61A`, вводит палитру `$18D158`\n"
+      u"и держит карточку 60 кадров.\n\n" % tot)
+    p(u"### Ещё две площадки\n\n")
+    p(u"`StoryShowHazure` `$0574FC` показывает один блок 0 и больше\n"
+      u"ничего — его зовёт пароль `hazure` (№ 123). `StoryShowEnding`\n"
+      u"`$05759A` прокручивает семь блоков банка `$16` из `data_320`\n"
+      u"`$%06X` и стоит в `PostGameDispatch` прямо перед `PlayEnding`.\n\n"
+      % STORY_16)
+    p(u"Учёт замкнулся: 1 + %d + %d + 7 = %d.\n\n"
+      % (sum(n for _a, n, _b in story_index(STORY_INDEX0, STORY_EXTRA)) - 2,
+         sum(n for _a, n, _b in story_index()), len(story_blocks())))
+
+
+def story_gfx(p):
+    u"""Секция «фоны и наборы графики» в сводку."""
+    used_bd, used_gs = set(), set()
+    for a in story_blocks():
+        unp, gfx, _p0, _p1, _t, _n = story_header(story_block(a))
+        if unp is None:
+            continue
+        used_bd.add(unp)
+        used_gs.add(gfx)
+    u16 = lambda o: struct.unpack_from(">H", ROM, o)[0]
+    gal = [(u16(a), u16(a + 2) // 4) for a in range(GALLERY, 0x053530, 4)]
+    gal_bd = set(b for _g, b in gal)
+    gal_gs = set(g for g, _b in gal)
+    nbd = (GFXSET_TABLE - 0x053BA4) // 4
+    ngs = (0x053EC4 - GFXSET_TABLE) // 20
+    p(u"\n## Фоны и наборы графики\n\n")
+    p(u"Фонов в `data_297` `$053BA4` ровно %d, наборов графики в таблице\n"
+      u"`$%06X` — %d по 20 байт. Обе границы сходятся сами: `$053BA4` плюс\n"
+      u"%d на 4 — это `$%06X`, а `$%06X` плюс %d на 20 — `$053EC4`, адрес\n"
+      u"самой `LoadSceneGfxSet`.\n\n"
+      % (nbd, GFXSET_TABLE, ngs, nbd, GFXSET_TABLE, GFXSET_TABLE, ngs))
+    p(u"Запись набора: `+$0` графика (`$1000` слов в заданный адрес VRAM),\n"
+      u"`+$4` добавка, если не ноль (`$800` слов в тот же адрес плюс\n"
+      u"`$2000`), `+$8` палитра — её `LoadSceneGfxSet` возвращает в `d0`,\n"
+      u"`+$10` данные в `$FF3564`, `+$C` их опись: слово «сколько», дальше\n"
+      u"записи по `$A` байт, и из каждой в `$FF5564` кладётся пара слов —\n"
+      u"ноль и число кадров из шапки самого куска. Читаются `+$C` и `+$10`\n"
+      u"только вместе: когда `+$10` ноль, опись не трогают вовсе.\n\n")
+    p(u"| | фоны | наборы |\n|---|---|---|\n")
+    p(u"| берут 152 блока | %d | %d |\n" % (len(used_bd), len(used_gs)))
+    p(u"| берёт галерея | %d | %d |\n" % (len(gal_bd), len(gal_gs)))
+    p(u"| не берёт никто | %s | %s |\n"
+      % (u", ".join(u"%d" % i for i in range(nbd)
+                    if i not in used_bd and i not in gal_bd) or u"—",
+         u", ".join(u"%d" % i for i in range(ngs)
+                    if i not in gal_gs and i not in used_gs) or u"—"))
+    p(u"\nСюжет не берёт фон %s и наборы %s, а галерея берёт: фон 6 стоит\n"
+      u"в ней дважды, с наборами 26 и 27. Похоже на вырезанный экран,\n"
+      u"который в отладочном просмотрщике остался.\n\n"
+      % (u", ".join(u"%d" % i for i in sorted(gal_bd - used_bd)),
+         u" и ".join(u"%d" % i for i in sorted(gal_gs - used_gs))))
+    p(u"Кроме галереи и сюжетных блоков `LoadSceneGfxSet` зовут с\n"
+      u"постоянным номером десять площадок: `$02FE0A` и `$030244` —\n"
+      u"набор 23, `$0300DE` и `$03064E` — 21, `$030288` — 6, `$030528` и\n"
+      u"`$0308FA` — 19, `$03056C` — 11, `$030694` — 12, `$0546B6` — 24.\n"
+      u"Это концовка и её части. Наборы %s, значит, не берёт никто, и это\n"
+      u"статические двойники наборов 23, 6 и 21: та же графика и та же\n"
+      u"палитра, но `+$10` обнулён, то есть без кусков в `$FF3564` и без\n"
+      u"их описи.\n\n"
+      % u", ".join(u"%d" % i for i in range(ngs)
+                   if i not in gal_gs and i not in used_gs))
+
+
 def do_story(which=None):
     u"""Сводка по сценарным экранам, кроме сценок; с номером — весь скрипт."""
     addrs = story_blocks()
@@ -1211,9 +1416,10 @@ def do_story(which=None):
         d = story_block(a)
         unp, gfx, p0, p1, txt, n = story_header(d)
         acts, end = actors(d, 0x0C, n)
-        print(u"блок %d, `$%06X`, %d байт. Фон %d, набор графики %d, "
+        print(u"блок %d, `$%06X`, %d байт. Фон %s, набор графики %d, "
               u"палитры %d и %d, актёров %d, зазор %d"
-              % (which, a, len(d), unp, gfx, p0, p1, n, txt - end))
+              % (which, a, len(d), u"прежний" if unp is None else unp,
+                 gfx, p0, p1, n, txt - end))
         for i, one in enumerate(acts):
             print(u"\n### Актёр %d (%s) — %d команд\n"
                   % (i, actor_brief(one), len(one)))
@@ -1230,6 +1436,7 @@ def do_story(which=None):
     p(u"Скрипт одного блока: `make cutscene CSARGS=\"--story 7\"`.\n\n")
     p(u"Формат блока и таблица команд разобраны в шапке "
       u"`tools/cutscene.py`.\n\n")
+    story_who(p)
     p(u"## Индекс `$0536C0`\n\n")
     p(u"45 входов, у каждого «сколько блоков ещё» и смещение. Цели идут\n"
       u"встык и ровно покрывают 135 указателей `$053778`…`$053990`.\n\n")
@@ -1241,8 +1448,9 @@ def do_story(which=None):
                               collections.Counter(), collections.Counter())
     tot_act = tot_cmd = tot_cap = gaps = 0
     p(u"\n## Блоки\n\n")
-    p(u"Фон — номер в `data_297` `$053BA4`, где 45 таблиц имён "
-      u"по 2240 байт.\n\n")
+    p(u"Фон — номер в `data_297` `$053BA4`, где 45 таблиц имён по 2240\n"
+      u"байт; «прежний» — это `$FFFF`, блок оставляет на экране то, что\n"
+      u"уже выведено, и набор графики тогда тоже не меняется.\n\n")
     p(u"| № | адрес | байт | фон | графика | палитры | актёров "
       u"| команд | титров | зазор |\n"
       u"|---|---|---|---|---|---|---|---|---|---|\n")
@@ -1268,8 +1476,10 @@ def do_story(which=None):
         caps = sum(1 for one in acts for _o, w, _t in one
                    if w >> 12 == 2 and (w >> 8) & 0x0F == 4)
         tot_cap += caps
-        p(u"| %d | `$%06X` | %d | %d | %d | %d, %d | %d | %d | %d | %d |\n"
-          % (i, a, len(d), unp, gfx, p0, p1, n, cmds, caps, txt - end))
+        p(u"| %d | `$%06X` | %d | %s | %s | %d, %d | %d | %d | %d | %d |\n"
+          % (i, a, len(d), u"прежний" if unp is None else u"%d" % unp,
+             u"—" if unp is None else u"%d" % gfx,
+             p0, p1, n, cmds, caps, txt - end))
     p(u"\n## Что в них есть\n\n")
     p(u"Блоков %d, актёров %d, командных слов %d. Блоков, где скрипты\n"
       u"кончаются не там, где начинается список реплик: **%d**.\n\n"
@@ -1286,9 +1496,12 @@ def do_story(which=None):
                     for k, v in sorted(sfx.items())) or u"нет",
          u", ".join(u"%d (x%d)" % kv for kv in sorted(music.items()))
          or u"нет"))
+    story_gfx(p)
     f.close()
     print(u"блоков %d, актёров %d, команд %d, блоков с зазором %d"
           % (len(addrs), tot_act, tot_cmd, gaps))
+    print(u"глав с сюжетными экранами %d, миссий с ними %d"
+          % (len(set(c for c, _n, _b in story_order())), len(story_order())))
     print(u"сводка: %s" % os.path.relpath(doc, HERE))
     return 0
 
