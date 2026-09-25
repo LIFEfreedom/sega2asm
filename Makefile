@@ -230,7 +230,7 @@ maps:
 	@$(PYTHON) $(TOOLS_DIR)/maps.py
 
 # Анимации шести видов для ремейка Dyna: лист на анимацию, строки — стороны
-# сверху против часовой до низа, затем правая.  make exportanim EAARGS=--all
+# по кругу от верхней против часовой.  make exportanim EAARGS=--all
 EAARGS ?=
 exportanim:
 	@$(PYTHON) $(TOOLS_DIR)/exportanim.py $(EAARGS)
