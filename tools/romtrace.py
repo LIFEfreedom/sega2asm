@@ -39,9 +39,18 @@
 Путь до уровня: с включения каждые 90 кадров 4 кадра держится Start (логотип,
 титульный экран, меню, заставка мира). На входе в `LevelSetup` (`$2984C2`)
 номер уровня `$FF1B14` подменяется на нужный, и Start больше не жмётся.
-Первый вход в задачу игрока `$298C44` — вход в уровень: снимок `entry` (до
-первого шага игрока); с этого кадра идёт запись пульта сценария, и после
-каждого кадра снимается `frames[k]`.
+Точку возрождения `$FFFFFD86` сценарий может подменить (`at`) перед `$2987B8`,
+где она становится позицией игрока. Первый вход в задачу игрока `$298C44` —
+вход в уровень: снимок `entry` (до первого шага игрока; сценарий `fly`
+включает здесь отладочный полёт `$FFFFFD84`); с этого кадра идёт запись
+пульта сценария, и после каждого кадра снимается `frames[k]` — до первого
+кадра с сигналом выхода `$FF1A6C` включительно или до `record` кадров.
+
+Сценарии: ходы утки на уровнях 0, 1, 3, 5, 7, 14, 15, 17; вход в каждый
+уровень 0-18 (`enter_NN`, один кадр); три демо (`demo_N`: запись пульта
+взята из потока ROM `$1FD7DC` и развёрнута обратно через раскладку 0, кадры
+не снимаются — ремейк проигрывает запись сам); моноцикл бонуса 19 — только
+для камеры.
 
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
@@ -74,6 +83,10 @@ except ImportError:
 
 VINT_VECTOR = 0x78
 LEVEL_SETUP = 0x2984C2
+PLAYER_POSITION = 0x2987B8     # move.l ($FFFFFD86).w,$12(a0): точка возрождения становится позицией
+RESPAWN = 0xFFFFFD86
+DEBUG_FLIGHT = 0xFFFFFD84        # не ноль — отладочный полёт $2A5114 и камера $29798E
+EXIT = 0xFF1A6C
 PLAYER_TASK = 0x298C44
 LEVEL_NUMBER = 0xFF1B14
 DEMO = 0xFFFFFD90            # не ноль — идёт демо, пульт из записи
@@ -106,11 +119,16 @@ LAYOUT = [
     (0xFF04DC, 2, "потолок от объектов"),
     (0xFF2130, 0x10, "шаг игрока: код клетки, вода, флаги, запреты"),
     (0xFF2168, 8, "снос"),
+    (0xFFFFE1C6, 4, "пульт: сырой байт (активный ноль), держат, нажали"),
+    (0xFFFFFD7A, 2, "раскладка пульта $FFFFFD7B"),
+    (0xFFFFFD84, 6, "отладочный полёт, точка возрождения"),
 ]
 
-# Сценарии: уровень, объекты, что по трассе сверять ремейку (camera — камера по
-# позициям игрока, player — запись игрока и переменные шага), запись пульта
-# [(кнопки, кадров), ...].
+# Сценарии: уровень, объекты, что по трассе сверять ремейку (camera — шаг камеры
+# $297748 по позициям игрока, player — запись игрока, переменные шага и камера,
+# entry — вход в уровень, demo — только запись пульта), точка возрождения at
+# (x, y) вместо старта уровня (подменяется $FFFFFD86 перед $2987B8), fly —
+# отладочный полёт с камерой $29798E, запись пульта [(кнопки, кадров), ...].
 SCENARIOS = {
     "idle": {
         "level": 0, "objects": False, "checks": ["camera", "player"],
@@ -122,12 +140,130 @@ SCENARIOS = {
         "input": [("R", 90), ("", 60), ("L", 30), ("", 60)],
         "about": "уровень 0: вправо, стоп, разворот влево, стоп",
     },
+    "jump_tap": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("", 10), ("C", 1), ("", 70)],
+        "about": "уровень 0: прыжок, C держат один кадр — короткий прыжок",
+    },
+    "jump_full": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("", 10), ("C", 45), ("", 40), ("C", 6), ("", 60)],
+        "about": "уровень 0: полный прыжок с места, потом C на 6 кадров",
+    },
+    "run_jump": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 40), ("RC", 30), ("R", 20), ("", 60)],
+        "about": "уровень 0: разбег и прыжок с разбега, посадка на ходу, стоп",
+    },
+    "air_control": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("C", 10), ("CR", 20), ("CL", 25), ("L", 15), ("", 20), ("C", 40), ("CL", 30), ("", 40)],
+        "about": "уровень 0: в прыжке вправо, против хода влево (разворот в воздухе), посадка",
+    },
+    "walk_wall": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 150), ("", 30), ("R", 20), ("L", 20), ("", 30)],
+        "about": "уровень 0: ходьба в колонну x=432 (упор, толкание), отход",
+    },
+    "jump_wall": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 70), ("RC", 45), ("R", 40), ("", 30)],
+        "about": "уровень 0: прыжок с разбега в колонну x=432",
+    },
+    "turns": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 30), ("L", 5), ("R", 5), ("L", 30), ("", 20), ("U", 20), ("UR", 10), ("UL", 10), ("", 30)],
+        "about": "уровень 0: развороты на ходу и с места, взгляд вверх",
+    },
+    "fall_pit_1": {
+        "level": 1, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 80)],
+        "about": "уровень 1: вправо, с уступа в яму ниже нижнего предела — гибель",
+    },
+    "ledges_3": {
+        "level": 3, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 300)],
+        "about": "уровень 3: вправо, два срыва с уступов, упор",
+    },
+    "ledges_5": {
+        "level": 5, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 20), ("RC", 40), ("R", 30), ("RC", 40), ("R", 30), ("RC", 40), ("R", 60)],
+        "about": "уровень 5: вправо с прыжками, срывы с уступов, склоны",
+    },
+    "ledges_17": {
+        "level": 17, "objects": False, "checks": ["camera", "player"],
+        "input": [("L", 300)],
+        "about": "уровень 17: влево, срыв с уступа, упор",
+    },
+    "viscous_14": {
+        "level": 14, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 300)],
+        "about": "уровень 14, вязкий: вправо, упор, срыв с уступа",
+    },
+    "viscous_15": {
+        "level": 15, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 20), ("RC", 40), ("R", 30), ("RC", 20), ("RCL", 20), ("L", 30), ("", 40)],
+        "about": "уровень 15, вязкий: прыжки с разбега, разворот в воздухе",
+    },
+    "ceiling_3": {
+        "level": 3, "objects": False, "checks": ["camera", "player"], "at": (664, 370),
+        "input": [("", 5), ("C", 40), ("", 30), ("R", 10), ("RC", 40), ("", 40)],
+        "about": "уровень 3, утка под потолком в 4 клетках: прыжок в потолок с места и с хода",
+    },
+    "ceiling_1": {
+        "level": 1, "objects": False, "checks": ["camera", "player"], "at": (472, 512),
+        "input": [("", 5), ("C", 30), ("", 40), ("L", 8), ("LC", 30), ("", 30)],
+        "about": "уровень 1, утка под потолком в 3 клетках: прыжок в потолок",
+    },
+    "pit_7": {
+        "level": 7, "objects": False, "checks": ["camera", "player"], "at": (160, 400),
+        "input": [("", 40)],
+        "about": "уровень 7: падение в яму до гибели; зонд стены у дна читает строки за картой (таблица $FF0020 повторяет последнюю строку)",
+    },
+    "fly_0": {
+        "level": 0, "objects": False, "checks": ["player"], "fly": True,
+        "input": [("R", 40), ("RA", 20), ("U", 30), ("UC", 10), ("L", 60), ("D", 20), ("", 10)],
+        "about": "уровень 0, отладочный полёт ($FFFFFD84 на входе): крестовина, A и C удваивают шаг",
+    },
     "unicycle_19": {
         "level": 19, "objects": False, "checks": ["camera"],
         "input": [("", 600)],
         "about": "бонус 19: моноцикл едет сам, пульт не трогают",
     },
 }
+
+for _level in range(19):          # 19-22 — бонус, утка с входа на моноцикле
+    SCENARIOS["enter_%02d" % _level] = {
+        "level": _level, "objects": False, "checks": ["entry"],
+        "input": [("", 1)],
+        "about": "вход в уровень %d: запись игрока и переменные, которые ставит вход" % _level,
+    }
+
+# Демо: уровень и поток пульта ($1FD7DC, screens.md 4). Поток — пары (кнопки в
+# активном нуле уже после раскладки, кадров); первая пара звучит один кадр, ноль в
+# кнопках — конец ($2A56BA). Раскладка 0 меняет B и C местами, она же и обратна себе.
+DEMOS = ((0, 0x1FC75C), (3, 0x1FC84C), (7, 0x1FC9C0))
+
+
+def demo_input(rom, at):
+    def buttons(stored):
+        held = ~stored & 0xFF
+        held = (held & ~0x30) | ((held & 0x10) << 1) | ((held & 0x20) >> 1)
+        return "".join(ch for i, ch in enumerate(BUTTONS) if held >> i & 1)
+
+    out = [(buttons(rom[at]), 1)]
+    at += 2
+    while rom[at]:
+        out.append((buttons(rom[at]), rom[at + 1] or 256))
+        at += 2
+    return out
+
+
+for _n, (_level, _at) in enumerate(DEMOS):
+    SCENARIOS["demo_%d" % _level] = {
+        "level": _level, "objects": False, "checks": ["demo"], "demo": _at, "record": 1,
+        "about": "демо %d: запись пульта из ROM ($%06X), кадры не снимаются — ремейк проигрывает её целиком" % (_n, _at),
+    }
 
 NO_OBJECTS = [
     (0x2914EA, "4E96", "4E71", "обход столбца клеток: jsr (a6) — конструктор объекта клетки"),
@@ -302,6 +438,8 @@ def snapshot(md):
 def run(name, sc, rom):
     patches = [] if sc["objects"] else NO_OBJECTS
     md = MegaDrive(rom, patches)
+    if "demo" in sc:
+        sc = dict(sc, input=demo_input(rom, sc["demo"]))
     pads = []
     for buttons, n in sc["input"]:
         pads += [pad_byte(buttons)] * n
@@ -313,13 +451,20 @@ def run(name, sc, rom):
             state["setup_frame"] = boot_frame[0]
             md.write(LEVEL_NUMBER, struct.pack(">H", sc["level"]))
 
+    def on_position(uc, address, size, user):
+        if "at" in sc:
+            md.write(RESPAWN, struct.pack(">hh", *sc["at"]))
+
     def on_player(uc, address, size, user):
         if state["entry"] is None:
+            if sc.get("fly"):
+                md.write(DEBUG_FLIGHT, b"\x01")
             state["entry"] = snapshot(md)
             md.pad = pads[0]
 
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
+    md.uc.hook_add(UC_HOOK_CODE, on_position, None, PLAYER_POSITION, PLAYER_POSITION)
 
     boot = 0
     boot_frame = [0]
@@ -336,8 +481,11 @@ def run(name, sc, rom):
         raise RuntimeError("%s: вошли в демо, а не в игру" % name)
 
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
+    # Уровень кончается первым кадром с сигналом выхода (гибель, выход).
     frames = [dict(pad=pads[0], **snapshot(md))]
-    for k in range(1, len(pads)):
+    for k in range(1, min(len(pads), sc.get("record", len(pads)))):
+        if md.word(EXIT) != 0:
+            break
         md.pad = pads[k]
         while not md.frame():
             pass
@@ -362,6 +510,8 @@ def run(name, sc, rom):
             "level": sc["level"],
             "objects": sc["objects"],
             "checks": sc["checks"],
+            "at": list(sc["at"]) if "at" in sc else None,
+            "fly": bool(sc.get("fly")),
             "input": [[b, n] for b, n in sc["input"]],
             "patches": [{"at": "$%06X" % at, "was": old, "now": new, "why": why}
                         for at, old, new, why in patches],

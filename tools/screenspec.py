@@ -419,13 +419,17 @@ def demo():
     for i in range(3):
         a = 0x1FD7DC + 6 * i
         p = U32(a + 2)
-        q, frames = p, 0
+        # первая пара звучит один кадр ($2A5684 ставит счётчик $FFFFFD91 = 1),
+        # каждая следующая — свой счётчик; subq.b/bne ($2A56CE): 0 — 256 кадров
+        q, frames = p + 2, 1
         while ROM[q] != 0:
-            frames += ROM[q + 1]
+            frames += ROM[q + 1] or 256
             q += 2
         out.append(OrderedDict([("level", dw(a)), ("stream", hexa(p)),
-                                ("frames", D(frames, u"сумма счётчиков "
-                                                     u"пар до нуля")),
+                                ("frames", D(frames, u"первая пара — один кадр, "
+                                                     u"дальше сумма счётчиков до "
+                                                     u"нуля в кнопках; счётчик 0 — "
+                                                     u"256 кадров")),
                                 ("end", hexa(q))]))
     return OrderedDict([
         ("when", u"главное меню простояло свой срок"),
