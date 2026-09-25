@@ -4,6 +4,7 @@ u"""Анимации шести видов в раскладке ремейка 
     python tools/exportanim.py          # шесть видов игрока 1
     python tools/exportanim.py --all    # все 45 различных наборов
     python tools/exportanim.py --props  # яйца и гнёзда под имена ремейка
+    python tools/exportanim.py --scale 2  # любое из них, увеличенное вдвое
 
 Пишет в `out/<имя>/export/` дерево, которое кладётся прямо в `Content`:
 
@@ -31,7 +32,7 @@ u"""Анимации шести видов в раскладке ремейка 
 диагонали соседняя прямая сторона, см. «Стороны». Правые стороны
 выводятся, потому что в оригинале они не всегда зеркало левых.
 Строки бывают разной длины (у ﾄﾘｹﾗ
-`eat` — 17, 20 и 21 ячейка): хвост короткой строки прозрачен, а сколько
+`eat` — от 6 до 8 кадров): хвост короткой строки прозрачен, а сколько
 в ней кадров на деле, пишет `animations.json`.
 
 ## Стороны
@@ -223,24 +224,28 @@ u"""Анимации шести видов в раскладке ремейка 
 
 ## Время
 
-`Animation` держит ОДНУ задержку на всю анимацию, а в оригинале
-длительность своя у каждого кадра — у покоя ｱﾛ это 6, 16, 6, 16, то
-есть разница почти втрое. Поэтому кадры здесь **размножены**: при задержке ремейка
-в 50 мс и такте оригинала в 1/60 с один такт это примерно треть ячейки, и
-кадр занимает `round(длительность / 3)` ячеек, но не меньше одной.
-Анимация из одного кадра остаётся одним кадром.
+Ячейка листа — один шаг скрипта оригинала, без повторов. Длительность
+у каждого кадра своя — у покоя ｱﾛ это 6, 16, 6, 16 тактов, — и лежит в
+`animations.json`: `frames[i].dur` в тактах по 1/60 с. Ремейк держит
+задержку на кадр, поэтому размножать кадры под одну общую задержку, как
+делала прежняя версия, больше незачем.
 
-Точные длительности лежат в `animations.json` — если в `Animation`
-появится задержка на кадр, сетку можно будет пересобрать плотной.
+Что делать после последнего кадра, пишут два поля строки. `loop` —
+номер кадра, с которого скрипт идёт по кругу (у покоя 0, у смерти
+последний, то есть «застыть»). `next` — номер анимации, в которую
+скрипт перетекает, дойдя до её входа: так `dying_pop` (`$03`) уходит в
+пустой кадр `$00`. Если нет ни того, ни другого, строка кончается
+предохранителем обходчика.
 
 ## Чего здесь нет
 
 - **`layouts.cs`.** Прежняя версия писала записи `AnimationLayout` для
   листов по одной стороне; под лист на восемь сторон загрузчика в ремейке
   пока нет, и выдумывать его API здесь незачем. Старый файл удаляется.
-- **Размер.** Кадр оригинала 32x32, а перерисованная графика ремейка
-  64x64. `FromSpriteSheet` берёт размер ячейки из ширины листа, так что
-  лист заработает как есть, но юниты выйдут вдвое меньше нынешних.
+- **Размер по умолчанию.** Кадр оригинала 32x32, и клетка карты у него
+  тоже 32x32 (`tools/maptex.py`), а у ремейка клетка 64. Для ремейка
+  выгружать с `--scale 2`: ближайший сосед, пропорция «спрайт = клетка»
+  сохраняется, а `cell` в `animations.json` становится 64.
 - **Палитра игрока.** Берётся ряд из `UnitPaletteRow`: у типов 5…10 это
   ряд 1, то есть цвета игрока 1. У игрока 2 те же кадры в ряду 2 —
   `--all` выводит и их.
@@ -268,6 +273,26 @@ import unitanim                                              # noqa: E402
 from paths import OUT as out_path                            # noqa: E402
 
 FRAME = unitanim.FRAME                 # 32
+
+
+def arg_scale():
+    u"""Масштаб из `--scale N`: во сколько раз увеличить картинки."""
+    a = sys.argv[1:]
+    if "--scale" in a:
+        return max(1, int(a[a.index("--scale") + 1]))
+    return 1
+
+
+SCALE = arg_scale()
+
+
+def write_png(path, w, h, img):
+    u"""PNG с прозрачностью, увеличенный в SCALE раз ближайшим соседом."""
+    if SCALE > 1:
+        img = [[c for c in row for _ in range(SCALE)]
+               for row in img for _ in range(SCALE)]
+        w, h = w * SCALE, h * SCALE
+    gfx.png(path, w, h, img, alpha=True)
 
 SPECIES_BYTE = 0x01FAEE            # +$1 записи: вид плюс флаги
 
@@ -345,23 +370,7 @@ FACINGS = ((0, "top"), (7, "top_left"), (6, "left"), (5, "bottom_left"),
            (1, "top_right"))
 LEFT, RIGHT = 6, 2            # сверяются: зеркало ли правая левой
 
-TICK_MS = 1000.0 / 60.0                # такт оригинала
-SLOT_MS = 50.0                         # задержка Animation в LevelScene
-
-
-def slots(dur):
-    u"""Сколько ячеек листа занимает кадр длительностью dur тактов."""
-    return max(1, int(round(dur * TICK_MS / SLOT_MS)))
-
-
-def expand(seq):
-    u"""Кадры, размноженные под равномерную задержку."""
-    if len(seq) <= 1:
-        return [w for w, _d in seq]
-    out = []
-    for w, d in seq:
-        out.extend([w] * slots(d))
-    return out
+TICK_HZ = 60                           # такт оригинала: кадр развёртки NTSC
 
 
 def grid(n):
@@ -385,7 +394,7 @@ def sheet(t, words, pal, path):
             for x in range(FRAME):
                 if src[x] is not None:
                     row[ox + x] = src[x] + (255,)
-    gfx.png(path, w, h, img, alpha=True)
+    write_png(path, w, h, img)
     return cols, rows
 
 
@@ -433,7 +442,7 @@ def single(t, word, pal, path):
         return False
     img = [[(c + (255,)) if c is not None else (0, 0, 0, 0) for c in row]
            for row in f]
-    gfx.png(path, FRAME, FRAME, img, alpha=True)
+    write_png(path, FRAME, FRAME, img)
     return True
 
 
@@ -594,7 +603,7 @@ def rows_sheet(t, rows, pal, path):
                 for x in range(FRAME):
                     if src[x] is not None:
                         row[ox + x] = src[x] + (255,)
-    gfx.png(path, w, h, img, alpha=True)
+    write_png(path, w, h, img)
     return cols
 
 
@@ -612,7 +621,7 @@ def main():
         entries = unitanim.entry_map(t)
         manifest[key] = {"species": sp, "name": name, "type": t,
                          "palette_row": unitgfx.palette_row(t),
-                         "cell": FRAME,
+                         "cell": FRAME * SCALE,
                          "directions": [n for _s, n in FACINGS],
                          "anims": {}}
         playable = sp in PLAYABLE
@@ -640,7 +649,7 @@ def main():
                     info.append(place)
                     continue
                 seq, loop, nxt = got
-                words = expand(seq)
+                words = [w for w, _d in seq]
                 rows.append(words)
                 place.update({
                     "loop": loop,
