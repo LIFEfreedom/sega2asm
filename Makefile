@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex cutscene menus worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim exportanim animdict pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex cutscene menus worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim exportanim exportmissions animdict pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -222,8 +222,9 @@ packmap: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/packmap.py
 
 # Скорость и урон от местности по видам: три таблицы блока параметров
+TRARGS ?=
 terrain:
-	@$(PYTHON) $(TOOLS_DIR)/terrain.py
+	@$(PYTHON) $(TOOLS_DIR)/terrain.py $(TRARGS)
 
 # Карты этапов: местность 40x40 в PNG и сводка по расстановке
 maps:
@@ -234,6 +235,11 @@ maps:
 EAARGS ?=
 exportanim:
 	@$(PYTHON) $(TOOLS_DIR)/exportanim.py $(EAARGS)
+
+# Миссии оригинала для ремейка Dyna (#204): 123 mission.json и campaign.json
+# в out/<имя>/export/campaigns/Original/.
+exportmissions:
+	@$(PYTHON) $(TOOLS_DIR)/exportmissions.py
 
 # Словарь анимаций юнита: кто ставит каждый номер +$7 и что он показывает
 animdict:

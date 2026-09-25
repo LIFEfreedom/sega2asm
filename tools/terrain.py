@@ -100,6 +100,55 @@ def table(which, elite):
     return {nm: row(block(off), base, n, w) for nm, off in SPECIES}
 
 
+BLOCKING_IMM = 0x021A36   # TerrainIsBlocking $021A22: move.l #маска,d3
+HAZARD_IMM = 0x021A16     # TerrainIsHazard $021A02: то же
+DEADLY_TYPES = (11, 12, 30)      # ApplyDeadlyTerrain -> DieUnlessAction27
+FISSURE, VENT = 13, 20           # FissureSwallowUnit, DieIfActionAllows
+STEP_MASK_A, STEP_MASK_B = 0x12, 0x26   # +$12/+$26 + (приказ - 8) * 4
+ORDERS = (0x08, 0x09, 0x0A, 0x0B, 0x0C)
+
+
+def export_json():
+    u"""`--json`: правила местности для ремейка (#204) — `terrain_rules.json`.
+
+    Таблицы A, B и C (22 значения, типы 0…21) обычные и улучшенные по
+    шести видам, маски шага по приказам `$08`…`$0C` (наборы A и B), маска
+    непроходимых типов и смертельные типы. Числа — как в ROM: урон в
+    единицах здоровья оригинала, шаг — делитель накопителя.
+    """
+    import json
+    from paths import OUT as out_path
+    doc = {"source": "Dyna Brothers 2, species parameter blocks $01FC5A",
+           "table_types": 22,
+           "blocking_mask": U32(BLOCKING_IMM),
+           "hazard_mask": U32(HAZARD_IMM),
+           "deadly_types": list(DEADLY_TYPES),
+           "fissure_type": FISSURE,
+           "vent_type": VENT,
+           "species": []}
+    for nm, off in SPECIES:
+        p = block(off)
+        entry = {"species": int(nm.split()[0]), "name": nm.split()[1]}
+        for which, key in (("A", "step"), ("B", "walk_damage"),
+                           ("C", "entry_damage")):
+            _n, a, b, n, w = next(t for t in TABLES if t[0] == which)
+            entry[key] = row(p, a, n, w)
+            entry["elite_" + key] = row(p, b, n, w)
+        entry["step_masks_a"] = [U32(p + STEP_MASK_A + 4 * (o - 8))
+                                 for o in ORDERS]
+        entry["step_masks_b"] = [U32(p + STEP_MASK_B + 4 * (o - 8))
+                                 for o in ORDERS]
+        doc["species"].append(entry)
+    d = out_path("export")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "terrain_rules.json")
+    with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    print(u"правила местности -> %s" % os.path.relpath(path, HERE))
+    return 0
+
+
 def md_table(p, data, n, title):
     p("%s\n\n" % title)
     p("| вид | " + " | ".join(str(t) for t in range(n)) + " |\n")
@@ -113,6 +162,8 @@ def md_table(p, data, n, title):
 
 
 def main():
+    if "--json" in sys.argv[1:]:
+        return export_json()
     out = os.path.join(HERE, "docs", "game-terrain.md")
     f = io.open(out, "w", encoding="utf-8", newline="\n")
     p = f.write
