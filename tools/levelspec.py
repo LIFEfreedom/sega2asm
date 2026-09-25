@@ -163,6 +163,13 @@ GENERATORS = set([0x29E698, 0x29E6A2, 0x29E6AC, 0x2A163C, 0x29D12C,
                   0x29DFEC, 0x29E55E] +
                  list(range(0x29B7A4, 0x29B893)))
 EXIT_UPDATE = 0x29C6C2
+# Механизмы облика игрока — по конструктору (behavior.md, 1.7 и 1.8).
+FORM_OBJECTS = {
+    0x29F33C: ("shrinker", u"колдун: облачко в 42 точках впереди уменьшает "
+                           u"утку или возвращает рост ($29F410)"),
+    0x29A4A4: ("brace_post", u"опора для распора ниндзя; рушится через 66 "
+                             u"тактов после распора"),
+}
 
 
 def load_groups():
@@ -192,6 +199,8 @@ def role_of(ctor, touch):
             extra["drops_bonus_token"] = True
         return ("enemy" if num < 25 or num > 28 and num != 32
                 else "destructible"), key, extra
+    if ctor in FORM_OBJECTS:
+        return FORM_OBJECTS[ctor][0], FORM_OBJECTS[ctor][1], {}
     if ctor in GENERATORS:
         return "generator", u"выпускает бойцов (enemy-catalog.md)", {}
     if GROUPS is None:

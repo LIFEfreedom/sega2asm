@@ -309,9 +309,328 @@ def player():
                                 at(0x29895A, "andi.w #$0007,d3")),
         "fuel_drain": at(0x29895A, "moveq #1,d0"),
     }
+    throw = [{"ahead_px": dw(0x1EAA82 + 4 * i + 2),
+              "up_px": dw(0x1EAA82 + 4 * i)} for i in range(4)]
     return {"difficulty": diff, "damage": dmg, "heal": heal,
             "movement": move, "hold": hold,
-            "ammo_per_pickup": at(0x29A0E0, "moveq #16,d0", nth=0)}
+            "throw_from": dict(zip(("ahead", "up", "diagonal", "down"),
+                                   throw)),
+            "ammo_per_pickup": at(0x29A0E0, "moveq #16,d0", nth=0),
+            "body": body(), "ninja": ninja(), "small": small()}
+
+
+# ------------------------------------------------------------ скрипты игрока
+
+SCRIPT_SRC = (u"хронология скрипта $%06X: исполнитель $297074 держит кадр "
+              u"+$26 тактов, D8 n — n тактов; такт 0 — кадр, в котором "
+              u"скрипт поставлен; первый кадр без D8 в игре держится "
+              u"прежний +$26, здесь — записанный самим скриптом")
+
+
+def timeline(a, d26=None, cap=400):
+    """Исполнить скрипт анимации так же, как `$297074`.
+
+    -> (кадры [(такт, кадр, длительность)], записи полей [(такт, поле,
+    значение, адрес команды)], такт конца, состояние в конце или None).
+    Конец — запись в `+$04`, кадр «навсегда» или повтор адреса; условные
+    переходы не берутся.
+    """
+    import anim as AN
+    frames, writes, t, seen = [], [], 0, set()
+    start = a
+    while cap:
+        cap -= 1
+        if (a, d26) in seen:
+            return frames, writes, t, None
+        seen.add((a, d26))
+        dur = d26
+        while True:
+            hi = ROM[a]
+            if hi < 0xD8:
+                w = struct.unpack_from(">H", ROM, a)[0]
+                a += 2
+                if w < 3:
+                    continue
+                if dur is None and not frames and d26 is not None:
+                    # Первый кадр: +$28 загружен из ПРЕЖНЕГО +$26 до того,
+                    # как скрипт записал свой. Берём записанный скриптом —
+                    # в игре тут остаток прошлой анимации.
+                    dur = d26
+                frames.append((t, (w - AN.FRAMES) // 4, dur))
+                if dur is None:
+                    raise SpecError("скрипт $%06X: длительность кадра зависит "
+                                    "от прежнего +$26, задайте d26" % start)
+                if dur == 0:
+                    return frames, writes, t, None
+                t += dur
+                break
+            n = ROM[a + 1]
+            if hi == 0xD8:
+                dur = n
+            elif hi == 0xD9:
+                a += struct.unpack_from(">h", ROM, a + 2)[0]
+                continue
+            elif hi in (0xE1, 0xDC, 0xDD, 0xDE, 0xE2, 0xE3, 0xE4):
+                v = (ROM[a + 3] if hi == 0xE1 else
+                     struct.unpack_from(">I" if hi == 0xDD else ">H",
+                                        ROM, a + 2)[0])
+                writes.append((t, n, v, a))
+                if hi == 0xE1 and n == 0x26:
+                    d26 = v
+                if n == 0x04 and hi in (0xE1, 0xDC):
+                    return frames, writes, t, v >> 8 if hi == 0xDC else v
+            a += AN.CMDS[hi][0]
+    raise SpecError("скрипт $%06X не кончился" % start)
+
+
+def script_end(a, d26=None):
+    _f, _w, t, st = timeline(a, d26)
+    return D(t, SCRIPT_SRC % a + u": такт, когда скрипт сменил состояние")
+
+
+def script_mark(a, field, value, d26=None, nth=0):
+    """Такт n-й записи `+field = value` в скрипте."""
+    _f, writes, _t, _s = timeline(a, d26)
+    hits = [(t, at_) for t, n, v, at_ in writes if n == field and v == value]
+    if len(hits) <= nth:
+        return _fail("$%06X: нет записи +$%02X = $%X" % (a, field, value))
+    t, at_ = hits[nth]
+    return D(t, SCRIPT_SRC % a + u": запись +$%02X = $%X по $%06X" % (
+        field, value, at_))
+
+
+def script_field(a, field, d26=None):
+    """Значение первой записи в поле (например скорость `+$18`)."""
+    _f, writes, _t, _s = timeline(a, d26)
+    for t, n, v, at_ in writes:
+        if n == field:
+            return V(_signed(v, 16), u"%s: команда скрипта, поле +$%02X, "
+                     u"такт %d" % (hexa(at_), field, t))
+    return _fail("$%06X: нет записи в +$%02X" % (a, field))
+
+
+def strike(a, d26=None):
+    """Удар по скрипту: такты с коробками удара (биты 8-11) и их охват."""
+    import frames as F
+    frames, writes, end, _st = timeline(a, d26)
+    hit, hook, box = [], [], None
+    for t, fr, dur in frames:
+        v = F.U32(F.BASE + 4 * fr)
+        items = F.parse(v)
+        if items is None:
+            continue
+        for x0, x1, y0, y1, num in F.boxes(v, len(items)):
+            if 8 <= num <= 11:
+                hit.append((t, t + dur - 1))
+                box = ([min(box[0], x0), max(box[1], x1),
+                        min(box[2], y0), max(box[3], y1)]
+                       if box else [x0, x1, y0, y1])
+            elif num == 15:
+                hook.append((t, t + dur - 1))
+    src = SCRIPT_SRC % a + u"; коробки кадров — tools/frames.py"
+    out = {"total_f": D(end, src + u": конец")}
+    if hit:
+        out["strike_from_f"] = D(min(h[0] for h in hit), src)
+        out["strike_to_f"] = D(max(h[1] for h in hit), src)
+        out["reach_px"] = {
+            "x": [D(box[0], src), D(box[1], src)],
+            "y": [D(box[2], src), D(box[3], src)]}
+    if hook:
+        out["hook_from_f"] = D(min(h[0] for h in hook), src)
+        out["hook_to_f"] = D(max(h[1] for h in hook), src)
+    opens = [t for t, n, v, _a in writes if n == 0x05 and v == 1]
+    shuts = [t for t, n, v, _a in writes if n == 0x05 and v == 0 and
+             opens and t > opens[0]]
+    if opens and shuts:
+        out["chain_from_f"] = D(opens[0], src + u": +$05 = 1")
+        out["chain_to_f"] = D(shuts[0] - 1, src + u": +$05 = 0")
+    return out
+
+
+def body():
+    """Габариты для столкновений с картой: у утки и ниндзя одни."""
+    return {
+        "feet_below_y_px": at(0x2A4F6C, "addi.w #$0010,d1", span=0x10),
+        "ground_probe_side_px": at(0x2A4F9A, "move.w #$0004,d2", span=0x10),
+        "duck_ninja": {
+            "half_width_px": at(0x29A8D8, "move.w #$0020,($FF133C).l",
+                                span=0x30),
+            "wall_rows": D(2, "moveq #1,d2: dbf на две строки клеток",
+                           at(0x2A4CBE, "moveq #1,d2", span=4)),
+            "head_probe_px": neg(at(0x29261C, "move.w #$FFE8,d7")),
+        },
+        "small": {
+            "half_width_px": at(0x29A8A0, "move.w #$0010,($FF133C).l",
+                                span=0x30),
+            "wall_rows": D(1, "subq.w #1,d2: одна строка",
+                           at(0x2A4CC0, "subq.w #1,d2", span=0x14)),
+            "wall_row_below_y_px": at(0x2A4CC0, "addq.w #8,d1", span=0x14),
+            "head_probe_px": at(0x2942BC, "moveq #0,d7", span=8),
+        },
+    }
+
+
+def hook_release():
+    out = []
+    for i in range(10):
+        a = 0x1EAA36 + 6 * i
+        out.append({"ahead_px": db(a, signed=True),
+                    "below_px": db(a + 1, signed=True),
+                    "v": pair(dw(a + 2), dw(a + 4))})
+    return out
+
+
+def ninja():
+    """Облик ниндзя: превращение, ход, рывок, удары, распор, крюк."""
+    hits = [0x1D78E8]
+    for i in range(4):
+        j = 0x1D78D8 + 4 * i
+        off = cmd(j, [0xD9, 0x00])
+        hits.append(j + off.v if ok(off) else j)
+    combo = []
+    for n, a in enumerate(hits):
+        h = strike(a, 3)
+        h["anim"] = hexa(a)
+        combo.append(h)
+    return {
+        "enter": {
+            "hold_f": at(0x291F74, "cmpi.w #$0032,($FF1A02).l"),
+            "hold_crouching_f": at(0x292310, "cmpi.w #$0032,($FF1A02).l",
+                                   span=0x20),
+            "freeze_f": script_mark(0x1D6EBE, 0x06, 0),
+            "sound": at(0x291FC2, "pea ($00004C).w", span=0x10),
+            "anim": "$1D6EBE",
+        },
+        "leave": {
+            "hold_f": at(0x29351C, "cmpi.w #$0032,($FF1A02).l", span=0x20),
+            "hold_crouching_f": at(0x293670, "cmpi.w #$0032,($FF1A02).l",
+                                   span=0x20),
+            "freeze_f": script_mark(0x1D779E, 0x06, 0),
+            "sound": at(0x29351C, "pea ($00004C).w", span=0x60),
+            "crouching_anim_f": script_end(0x1D8C48),
+            "fuel_out_anim": "$1D8C48",
+        },
+        "fuel_dash_drain_per_f": at(0x293BD2, "moveq #2,d0"),
+        "movement": {
+            "walk_a": at(0x29378A, "addi.w #$0080,d2", span=0x20),
+            "walk_max_v": at(0x29378A, "cmpi.w #$0400,d2", span=0x20),
+            "stop_keep_half_from_v": at(0x29376E, "cmpi.w #$0400,d2",
+                                        span=0x10),
+            "stand_decay_div": D(2, "asr.w $16(a0): половина за кадр",
+                                 at(0x2935DC, "asr.w $16(a0)", span=0x10,
+                                    value=2)),
+            "walk_keep_with_a_f": script_mark(0x1D77D8, 0x05, 0),
+            "jump_v": at(0x2937FC, "move.w #$FA10,$18(a0)"),
+            "run_jump_v": pair(at(0x2937FC, "move.w #$0300,$16(a0)"),
+                               at(0x2937FC, "move.w #$FA30,$18(a0)")),
+            "short_jump_a": at(0x29385C, "addi.w #$0080,d2", span=0x20),
+            "short_jump_until_v": at(0x29385C, "cmpi.w #$FE80,d2",
+                                     span=0x20),
+            "short_jump_from_f": script_mark(0x1D7B8C, 0x05, 1),
+            "run_short_jump_from_f": script_mark(0x1D7B42, 0x05, 1),
+            "landing_sound": at(0x2937A4, "pea ($000005).w", span=0x60),
+            "crouch_sound": at(0x2935DC, "pea ($00004B).w", span=0x40),
+        },
+        "dash": {
+            "v": at(0x293494, "move.w #$0800,$16(a0)", span=0x50),
+            "sound": at(0x293494, "pea ($00005C).w", span=0x50),
+            "tap_max_f": at(0x2A4B0A, "cmpi.b #$0F,d3", nth=0),
+            "trail_every_f": D(4, "moveq #3 / and кадрового счётчика",
+                               at(0x293BD2, "moveq #3,d2", span=4)),
+            "trail_behind_px": at(0x293B88, "move.w #$0010,d0", span=0x20),
+            "trail_f": script_mark(0x1D6E7A, 0x06, 1),
+            "anim": "$1D7AC2",
+        },
+        "attack": {
+            "damage": at(0x2987EE, "move.b #$04,$43(a0)", span=0x10),
+            "combo_extra_max": D(4, "cmpi.w #5 / bge: не больше 4",
+                                 at(0x2A4934, "cmpi.w #$0005,d6")),
+            "sounds": [db(0x1EABE8 + i) for i in range(4)],
+            "combo": combo,
+            "crouching": dict(strike(0x1D7A9E), anim="$1D7A9E"),
+            "air": dict(strike(0x1D7982), anim="$1D7982"),
+        },
+        "brace": {
+            "window_f": script_mark(0x1D7AE0, 0x05, 0),
+            "hands_up_px": neg(at(0x293A1A, "subi.w #$002E,d1", span=0x40)),
+            "wall_left_px": D(-42, "-$1A - $10",
+                              at(0x293A1A, "subi.w #$001A,d0", span=0x40),
+                              at(0x293A1A, "subi.w #$0010,d0", span=0x40)),
+            "gap_left_px": neg(at(0x293A1A, "subi.w #$001A,d0",
+                                  span=0x40)),
+            "wall_right_from_cell_px": at(0x293A72, "addi.w #$0040,d0",
+                                          span=8),
+            "center_from_cell_px": D(32, "+$40 - $20 от клетки x-$1A",
+                                     at(0x293A72, "addi.w #$0040,d0",
+                                        span=8),
+                                     at(0x293ABC, "subi.w #$0020,d0",
+                                        span=8)),
+            "post_up_px": at(0x2938D2, "subi.w #$0030,d0"),
+            "post_up_tol_px": at(0x2938D2, "cmpi.w #$0008,d0"),
+            "post_side_px": at(0x2938D2, "subi.w #$0022,d0"),
+            "post_side_tol_px": at(0x2938D2, "cmpi.w #$000C,d0", nth=0),
+            "sound": at(0x293AE4, "pea ($00000E).w", span=0x10),
+            "pullup_jump_f": script_mark(0x1D7B0E, 0x06, 2),
+            "pullup_jump_v": script_field(0x1D7B0E, 0x18),
+            "pullup_lift_px": at(0x293B00, "subi.w #$0008,$14(a0)",
+                                 span=0x40),
+            "pullup_lift_rising_px": at(0x293B00, "subi.w #$0010,$14(a0)",
+                                        span=0x40),
+            "post_break_f": D(66, "перезарядка $3C (61 кадр) + 5 тактов "
+                              "скрипта до бита 14",
+                              at(0x29A4A4, "move.w #$003C,$6(a0)",
+                                 span=0x20),
+                              script_mark(0x1D8B70, 0x30, 0x4000)),
+        },
+        "hook": {
+            "hang_below_px": at(0x29A2BA, "addi.w #$0020,d0", span=0x20),
+            "sound": at(0x29A28C, "pea ($00000E).w", span=0x30),
+            "phase_f": cmd(0x1D79C2, [0xE1, 0x26]),
+            "phases": D(10, SCRIPT_SRC % 0x1D79C2 + u": +$4E = 0..9"),
+            "release": hook_release(),
+            "anim": "$1D79C2",
+        },
+        "hurt_f": script_end(0x1D7BFA),
+        "hurt_tile_bounce_v": script_field(0x1D7C2E, 0x18),
+    }
+
+
+def small():
+    """Уменьшенный облик: кто уменьшает, ход, бросок."""
+    offs = [{"ahead_px": dw(0x1EAAC6 + 4 * i + 2),
+             "up_px": dw(0x1EAAC6 + 4 * i)} for i in range(3)]
+    low = {"ahead_px": at(0x294504, "move.l #$FFF80014,d4", part="lo"),
+           "up_px": at(0x294504, "move.l #$FFF80014,d4", part="hi")}
+    return {
+        "caster": {
+            "cell_code": D(168, "код клетки уровня 8 -> $29F33C"),
+            "spell_ahead_px": at(0x29F3BE, "moveq #42,d3", span=0x30),
+            "spell_touch_code": at(0x29F3BE, "move.w #$00DE,d4", span=0x40),
+            "spell_f": script_mark(0x1D9684, 0x06, 1),
+            "sound": at(0x29F410, "pea ($000093).w", span=0x20),
+            "shrink_freeze_f": script_mark(0x1D7E8E, 0x06, 0),
+            "grow_freeze_f": script_mark(0x1D7EE4, 0x06, 0),
+        },
+        "movement": {
+            "walk_a": at(0x2945E4, "addi.w #$0080,d2", span=0x20),
+            "walk_max_v": at(0x2945E4, "cmpi.w #$0300,d2", span=0x20),
+            "release_div": D(4, "lsr.w #2",
+                             at(0x29461A, "lsr.w #2,d2", span=0x30)),
+            "release_decay_div": D(4, "asr.w #2: вычесть четверть за кадр",
+                                   at(0x294424, "asr.w #2,d2", span=0x10)),
+            "jump_v": at(0x2942D6, "move.w #$FB80,$18(a0)"),
+            "run_jump_v": pair(at(0x2942D6, "move.w #$0300,$16(a0)"),
+                               at(0x2942D6, "move.w #$FB90,$18(a0)")),
+            "short_jump_a": at(0x294672, "addi.w #$0080,d2", span=0x20),
+            "short_jump_until_v": at(0x294672, "cmpi.w #$FE80,d2",
+                                     span=0x20),
+            "short_jump_from_f": script_mark(0x1D7D2C, 0x05, 1),
+        },
+        "throw_from": {"ahead": offs[0], "up": offs[1], "diagonal": offs[2],
+                       "crouching_or_air": low},
+        "throw_at_f": script_mark(0x1D7C86, 0x05, 1),
+        "hurt_f": script_end(0x1D7E74),
+    }
 
 
 def touch():
