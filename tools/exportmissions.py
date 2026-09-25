@@ -6,6 +6,10 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 Пишет `out/<имя>/export/campaigns/Original/`: `campaign.json` и
 `maps/<N>/mission.json` на каждую из 123 миссий, в порядке глав ROM
 (0 — уроки, 1…5, 8 — галерея), плюс `report.md` о том, что не вошло.
+Названия английские, как весь интерфейс ремейка. Кампания открыта
+целиком (`all_unlocked`): цели оригинала ещё не перенесены, и уроки,
+где противника нет, не выиграть — последовательное открытие заперло бы
+всё за первым уроком.
 
 ## Карта
 
@@ -30,6 +34,10 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 Байт карты уходит отдельным слоем `map_bytes`: по нему ремейк рисует
 клетку, пока её тип не изменился, — края, берега и виды деревьев
 остаются как в оригинале.
+
+Поле — клетки 1…38: `CanStepToCell` `$01E050` отказывает в шаге, если
+новая координата равна 0 или не меньше 39. Отсюда `playable_margin` 1.
+Край при этом бывает любой местностью, чаще всего водой.
 
 ## Игроки
 
@@ -106,10 +114,10 @@ def unit_type(t):
 
 def mission_name(c, m):
     if c == 0:
-        return u"Урок %d" % m
+        return u"Lesson %d" % m
     if c == 8:
-        return u"Галерея, карта %d" % m
-    return u"Глава %d, миссия %d" % (c, m)
+        return u"Gallery, map %d" % m
+    return u"Chapter %d, mission %d" % (c, m)
 
 
 def conditions(team):
@@ -190,7 +198,7 @@ def export_mission(c, m, r, recs, skipped):
         ("start_x", start["x"]), ("start_y", start["y"]),
         ("tileset", str(r[0x2A])),
         ("starting_energy", players[0]["starting_energy"]),
-        ("playable_margin", 0),
+        ("playable_margin", 1),
         ("tilemap", []),
         ("terrain_types", terrain),
         ("map_bytes", list(cells)),
@@ -222,7 +230,9 @@ def main():
                      doc["map"]["starting_energy"]))
     with io.open(os.path.join(root, "campaign.json"), "w", encoding="utf-8",
                  newline="\n") as f:
-        json.dump({"name": u"Оригинал"}, f, ensure_ascii=False, indent=2)
+        json.dump(collections.OrderedDict([("name", u"Original"),
+                                           ("all_unlocked", True)]),
+                  f, ensure_ascii=False, indent=2)
         f.write("\n")
     with io.open(os.path.join(root, "report.md"), "w", encoding="utf-8",
                  newline="\n") as f:
