@@ -55,7 +55,7 @@ u"""Анимации шести видов в раскладке ремейка 
 покоя, `$18`/`$19` у шага), и в `$0B` и `$19` лежат виды в три
 четверти. Строка диагонали строится ровно так же, как её показывает
 игра: номер анимации по чётности, ячейка `сторона & ~1`. Поэтому у
-`dying`, `kicking` и `eat` строки диагоналей повторяют соседние прямые —
+ударов, смертей и `eat` строки диагоналей повторяют соседние прямые —
 своих кадров для них в ROM нет; `animations.json` пишет у каждой
 строки, какая анимация и ячейка в неё пошли.
 
@@ -63,26 +63,63 @@ u"""Анимации шести видов в раскладке ремейка 
 `animations.json` пишет поле `right`: `mirror` — правая это левая
 зеркально, `same` — кадры не зависят от стороны (например, смерть),
 `own` — у правой СВОИ кадры, и отражением левой их не получить. У
-шести видов `own` пять раз: `eat` у ｱﾛ, ﾃｨﾗﾉ и ﾌﾟﾃﾗ, `kicking` и `eat`
-у ﾋﾟｰﾁｬﾝ. У ｱﾛ, например, на левой стороне он ест мордой к зрителю
-(кадры 71…78), на правой — спиной (79…86).
+шести видов `own` девять раз: `eat` у ｱﾛ, ﾃｨﾗﾉ и ﾌﾟﾃﾗ, все четыре удара
+и `eat` у ﾋﾟｰﾁｬﾝ, `kicking_4` у ｽﾃｺﾞ. У ｱﾛ, например, на левой стороне
+он ест мордой к зрителю (кадры 71…78), на правой — спиной (79…86).
 
 ## Какие анимации
 
-`LevelScene` грузит пять анимаций на вид. В оригинале их 33; вот
-соответствие, выведенное из того, КТО ставит номер в `+$7` записи юнита:
+`LevelScene` грузит пять анимаций на вид. В оригинале их 33, и там, где
+игра выбирает между несколькими, выводятся все, а правило выбора пишет
+`animations.json` в поле `select` (см. «Как игра выбирает»). Соответствие
+выведено из того, КТО ставит номер в `+$7` записи юнита:
 
-| ремейк | оригинал | ставит |
+| файл | оригинал | ставит |
 |---|---|---|
-| `idle` | `$0A` | `EnterWalkStateNormal`: действие `$0B`, покой |
-| `walking` | `$18` | `EnterStepState`: действие `$0E`, шаг в клетку |
+| `idle` | `$0A` (`$0B` на диагоналях) | `EnterWalkStateNormal`: действие `$0B`, покой |
+| `walking` | `$18` (`$19`) | `EnterStepState`: действие `$0E`, шаг в клетку |
+| `kicking_1` | `$13` | `ResolveCombat`, исход 1; ещё `EnterTrampleState` |
+| `kicking_2` | `$14` | `ResolveCombat`, исход 2 |
+| `kicking_3` | `$15` | `ResolveCombat`, исход 3 |
+| `kicking_4` | `$16` | `ResolveCombat`, редкий исход |
 | `dying` | `$1A` | `UnitDie` |
-| `kicking` | `$13` | `EnterTrampleState`; в бою — удар степени 1 из четырёх |
+| `dying_flame` | `$01` | `UnitDieFlame`: лава и огонь, бедствия |
+| `dying_splash` | `$02` | `UnitDieSplash`; `UnitDie` у яйца и падали |
+| `dying_pop` | `$03` | `UnitDiePop`: клетка с битом 5 плитки |
 | `eat` | `$0D` | `EnterAction1E`, `GrazeHeal300` |
 
-Удар в бою бывает четырёх степеней (`$13`…`$16`, выбирает
-`ResolveCombat`), и чаще всего, в 48% стычек, играет `$14`, а не `$13`;
-разбор — в `docs/game-animations.md`.
+`dying_flame`, `dying_splash` и `dying_pop` — из общего банка: кадры у
+всех видов одни, отличается только палитра.
+
+## Как игра выбирает
+
+**Удар.** `ResolveCombat` `$01B1AE` бросает дважды. Первый бросок из
+256 — против шанса редкого исхода, байта `+$AC` блока параметров
+нападающего, а если у него взведён бит 5 `+$11` (постоянное
+улучшение), то `+$AD`: выпало меньше — `kicking_4`. Иначе второй
+бросок: 0…`$60` — `kicking_1`, `$61`…`$DC` — `kicking_2`, `$DD`…`$FF` —
+`kicking_3`, то есть 38%, 48% и 14%. У шести видов обычный шанс
+редкого исхода 1/256, после улучшения — от 32/256 у ﾌﾟﾃﾗ до 50/256;
+значения по видам — в `select.kicking`. Разбор боя целиком — в
+`docs/game-actions.md`.
+
+Разные кадры у всех четырёх исходов только у ｱﾛ и ﾃｨﾗﾉ. У ｽﾃｺﾞ, ﾄﾘｹﾗ
+и ﾋﾟｰﾁｬﾝ исходы 1–3 — один и тот же скрипт, отличается только редкий,
+у ﾌﾟﾃﾗ совпадают 1 и 2. Листы всё равно выводятся все четыре, чтобы
+правило выбора работало одинаково для любого вида.
+
+**Смерть.** Сначала местность: `CheckLethalTerrain` `$019DF4` смотрит
+клетку под ногами в таком порядке — бит 5 плитки даёт `dying_pop`,
+лава или огонь — `dying_flame`, плитки `$53`/`$54` — `dying_splash`, а
+плитка `$0D` — `UnitVanish`: юнит пропадает вовсе без анимации. Иначе
+смерть идёт через `UnitDie` `$01A8AE`: `dying`, но юнит в действиях
+`$02`…`$09` (яйцо) и `$26`, `$27`, `$29`, `$31` (падаль) исчезает
+всплеском `dying_splash`. Этот список лежит в ROM по `$016894` и
+выводится в `select.dying.splash_actions`.
+
+Жертва удара тоже получает свою анимацию (`$0F`…`$11`, по таблице
+вида нападающего), но анимации «получил удар» у ремейка нет, и здесь
+она не выводится (`docs/game-animations.md`).
 
 ИСПРАВЛЕНО: было `idle` = `$05` и `walking` = `$0A`. Но `$05` у шести
 видов — это ЯЙЦО из общего банка (кадры 1, 4, 7, 10, 13, 16), а `$0A`
@@ -214,6 +251,7 @@ import json
 import math
 import os
 import shutil
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -287,10 +325,18 @@ def sets_six():
 
 # имя в ремейке -> номер анимации оригинала на чётной и нечётной стороне
 ANIMS = (("idle", 0x0A, 0x0B), ("walking", 0x18, 0x19),
-         ("dying", 0x1A, 0x1A), ("kicking", 0x13, 0x13),
+         ("kicking_1", 0x13, 0x13), ("kicking_2", 0x14, 0x14),
+         ("kicking_3", 0x15, 0x15), ("kicking_4", 0x16, 0x16),
+         ("dying", 0x1A, 0x1A), ("dying_flame", 0x01, 0x01),
+         ("dying_splash", 0x02, 0x02), ("dying_pop", 0x03, 0x03),
          ("eat", 0x0D, 0x0D))
-# неигровым наборам вдобавок: поза покоя декораций (EnterIdleFacing)
-OTHER_ANIMS = ANIMS + (("rest", 0x05, 0x05),)
+# неигровым наборам — свои ячейки набора, без общего банка, плюс поза
+# покоя декораций (EnterIdleFacing)
+OTHER_ANIMS = tuple(a for a in ANIMS if a[1] > 0x03) + (("rest", 0x05, 0x05),)
+
+DESC_OFFSET = 0x01FAEE       # +$2 записи типа: смещение дескриптора
+DESCRIPTORS = 0x01FC5A       # +$0 дескриптора: указатель на блок параметров
+SPLASH_ACTIONS = 0x016894    # UnitDie: при этих действиях смерть — всплеск
 
 # строки листа: сторона оригинала и имя, по кругу от верхней против
 # часовой стрелки
@@ -457,6 +503,53 @@ def export_props():
     return 0
 
 
+def param_block(t):
+    u"""Адрес блока параметров вида для типа t: через дескриптор."""
+    off = struct.unpack_from(">H", gfx.rom, DESC_OFFSET + t * 4 + 2)[0]
+    return struct.unpack_from(">I", gfx.rom, DESCRIPTORS + off)[0]
+
+
+def action_set(addr):
+    u"""Номера действий из набора `TestActionInSet`: два длинных слова.
+
+    Первое — биты действий `$20`…`$3F`, второе — `$00`…`$1F`; `btst` по
+    регистру берёт номер бита по модулю 32.
+    """
+    hi, lo = struct.unpack_from(">II", gfx.rom, addr)
+    return [a for a in range(0x40)
+            if ((hi if a >= 0x20 else lo) >> (a & 31)) & 1]
+
+
+def selection(t):
+    u"""Правило, по которому оригинал выбирает удар и смерть, для типа t."""
+    b = param_block(t)
+    return {
+        "kicking": {
+            "source": "ResolveCombat $01B1AE",
+            "roll_of": 256,
+            "rare": {"anim": "kicking_4",
+                     "chance": gfx.rom[b + 0xAC],
+                     "chance_upgraded": gfx.rom[b + 0xAD]},
+            "otherwise": [{"anim": "kicking_1", "roll_to": 0x60},
+                          {"anim": "kicking_2", "roll_to": 0xDC},
+                          {"anim": "kicking_3", "roll_to": 0xFF}],
+        },
+        "dying": {
+            "source": "CheckLethalTerrain $019DF4, UnitDie $01A8AE",
+            "terrain_first": [
+                {"cell": "tile bit 5", "anim": "dying_pop"},
+                {"cell": "lava or fire (types 11, 12)",
+                 "anim": "dying_flame"},
+                {"cell": "tile $53 or $54", "anim": "dying_splash"},
+                {"cell": "tile $0D", "anim": None},
+            ],
+            "default": "dying",
+            "splash_actions": ["$%02X" % a
+                               for a in action_set(SPLASH_ACTIONS)],
+        },
+    }
+
+
 def facing_steps(t, an, side, entries):
     u"""(кадры, петля, продолжение) стороны или None, если её нет."""
     try:
@@ -523,6 +616,9 @@ def main():
                          "directions": [n for _s, n in FACINGS],
                          "anims": {}}
         playable = sp in PLAYABLE
+        if playable:
+            manifest[key]["select"] = selection(t)
+        written = set()
         for anim, an, odd in (ANIMS if playable else OTHER_ANIMS):
             # Имена ремейка осмысленны только у шести видов. У гнезда
             # или яйца ячейка $0A это не «покой», а просто ячейка
@@ -570,6 +666,7 @@ def main():
                 shutil.rmtree(stale)
             cols = rows_sheet(t, rows, pal, os.path.join(d, anim + ".png"))
             made += 1
+            written.add(anim + ".png")
             manifest[key]["anims"][anim] = {
                 "rom_anim": "$%02X" % an,
                 "rom_anim_diagonal": "$%02X" % odd,
@@ -577,6 +674,12 @@ def main():
                 "right": rel,
                 "directions": info,
             }
+
+        d = os.path.join(root, key)
+        if written and os.path.isdir(d):      # листы прежних раскладок
+            for name in os.listdir(d):
+                if name.endswith(".png") and name not in written:
+                    os.remove(os.path.join(d, name))
 
     io.open(os.path.join(out_path("export"), "animations.json"), "w",
             encoding="utf-8", newline="\n").write(
