@@ -4,7 +4,8 @@ u"""Карты миссий настоящими тайлами игры.
     make maptex                     # все 123 миссии
     make maptex MTARGS="1 5"        # только глава 1, миссия 5
     make maptex MTARGS=--types      # лист образцов местности
-    make maptex MTARGS=--export     # местность в раскладке ремейка
+    make maptex MTARGS=--export     # местность картинками по типам
+    make maptex MTARGS=--remake     # наборы местности для ремейка (#203)
     make maptex MTARGS="--anim 1 1"           # GIF: живые вода и огонь
     make maptex MTARGS="--anim 1 1 14 7 8 8"  # он же, окно задано руками
 
@@ -386,6 +387,24 @@ DrawCellTiles:                 ; $015B3C
 (его берут 22 миссии), а `terrain/set<N>/` даёт все девять, чтобы было из
 чего выбрать.
 
+## Наборы для ремейка (`--remake`)
+
+С #203 ремейк рисует карту так же, как игра: клетка — картинка байта карты
+целиком, земля внутри. `--remake` пишет в `out/<имя>/export/terrain/`
+по папке `record<N>` на каждую из одиннадцати записей `StageGfxRecords`:
+
+| файл | что |
+|---|---|
+| `cells.png` | клетка 32x32 каждого байта, у которого есть тип; байт `b` — столбец `b % 16`, строка `b // 16` |
+| `anim.png` | кадры анимированных тайлов 8x8, по 16 в строке |
+| `fire.png` | две плитки пламени, палитра ряда 0, нулевой цвет прозрачен |
+| `terrain.json` | байт -> тип, `data_36`, стыки, маска живых типов, маски пламени, расписание потоков, места анимированных тайлов в клетках |
+
+Палитра — нулевая палитра записи: её берут 95 миссий из 123. Анимированные
+тайлы в `cells.png` нарисованы кадром такта 0. Расписание каждого тайла
+сжато до его собственного цикла: у записи 0 вода крутится за 32 такта
+при общем периоде 480.
+
 ## Байт 0 читает мимо таблицы
 
 Вычитание единицы означает, что у байта `$00` записи нет: индекс уходит
@@ -395,6 +414,7 @@ DrawCellTiles:                 ; $015B3C
 """
 import collections
 import io
+import json
 import os
 import struct
 import sys
@@ -1398,7 +1418,8 @@ def fire_cell(idx, tiles2, phase=0):
     плиток, см. «Анимация огня» в шапке: на нечётной они меняются местами.
     """
     a0 = MAP_BUFFER + idx * 2
-    d4 = ((a0 & 0xFFFF) << 16) | ((a0 + (a0 & 0xFFFF)) & 0xFFFF)
+    # swap d4 / add.w a0,d4: младшее слово — сумма двух половин адреса
+    d4 = ((a0 & 0xFFFF) << 16) | (((a0 >> 16) + (a0 & 0xFFFF)) & 0xFFFF)
     masks = ROM[FIRE_PATTERN:FIRE_PATTERN + 8]
     px = [[None] * CELL for _ in range(CELL)]
     flame = 1 ^ (phase & 1)                    # первым идёт $0373
@@ -1515,6 +1536,183 @@ def export_terrain():
     return 0
 
 
+REMAKE_COLUMNS = 16        # cells.png: байт b лежит в столбце b % 16, строке b // 16
+SHORE_BYTES = (0x19, 0x49)  # байты, которым BuildMapEdgeCodes достраивает кромку
+EDGE_SIDE_NAMES = ("top", "right", "bottom", "left")
+
+
+def _tile_rgba(g, pal, hf=0, vf=0, clear0=False):
+    u"""8x8 точек тайла в красках pal; clear0 — нулевой цвет прозрачен."""
+    rows = []
+    for y in range(8):
+        yy = 7 - y if vf else y
+        line = []
+        for x in range(8):
+            xx = 7 - x if hf else x
+            b = g[yy * 4 + (xx >> 1)]
+            v = (b >> 4) if xx % 2 == 0 else (b & 15)
+            line.append((0, 0, 0, 0) if clear0 and not v else pal[v] + (255,))
+        rows.append(line)
+    return rows
+
+
+def _own_cycle(seq):
+    u"""Кратчайший повторяющийся отрезок [[кадр, такты], ...].
+
+    Расписание снято по общему периоду набора, а у тайла свой: вода записи 0
+    крутится за 32 такта при общих 480. Отрезок годится, только если его
+    повторы дают всю последовательность в точности.
+    """
+    n = len(seq)
+    for p in range(1, n + 1):
+        if n % p == 0 and all(seq[i] == seq[i % p] for i in range(n)):
+            return seq[:p]
+    return seq
+
+
+def _atlas(images, cols, size):
+    u"""Картинки size x size в сетку cols столбцов; пустые места прозрачны."""
+    n = max(1, len(images))
+    w, h = cols * size, ((n + cols - 1) // cols) * size
+    img = [[(0, 0, 0, 0)] * w for _ in range(h)]
+    for i, px in enumerate(images):
+        if px is None:
+            continue
+        ox, oy = (i % cols) * size, (i // cols) * size
+        for y in range(size):
+            img[oy + y][ox:ox + size] = px[y]
+    return w, h, img
+
+
+def remake_record(k, rec, outdir):
+    u"""Одна запись StageGfxRecords для ремейка (#203): атласы и terrain.json.
+
+    `cells.png` — клетка каждого байта карты, у которого есть тип, 32x32,
+    палитрой 0 записи (её берёт большинство миссий), анимированные тайлы на
+    такте 0. `anim.png` — кадры анимированных тайлов 8x8, `fire.png` — две
+    плитки пламени палитрой ряда 0. В `terrain.json` — всё, чем ремейк
+    выбирает и складывает клетки: байт -> тип, добавка берега `data_36`,
+    таблица стыков, маска живых типов, маски пламени, расписание потоков и
+    места анимированных тайлов в клетках.
+    """
+    typeof, celltab, metatab = meta_tables(rec)
+    setno = rec[0x1CB]
+    tiles0 = tileset(rec, 0)
+    pals = [array_palette(0), array_palette(1), array_palette(3),
+            rec_palette(rec, 0)]
+    hot = animated_tiles(setno)
+    rows_seen = collections.Counter()
+
+    # клетки всех байтов с типом
+    cells = [None] * 256
+    spots = {}                 # байт -> [(x, y, тайл, ряд, отражения)]
+    for b in range(1, 256):
+        if typeof[b] >= 32:
+            continue
+        entry = celltab[b - 1]
+        px = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+        for q in range(4):
+            meta = metatab[entry[q] & 0x1FF]
+            for s in range(4):
+                name = (meta[s] + 0x6075) & 0xFFFF
+                t, row = name & 0x7FF, (name >> 13) & 3
+                hf, vf = (name >> 11) & 1, (name >> 12) & 1
+                bx = (q & 1) * 16 + (s & 1) * 8
+                by = (q >> 1) * 16 + (s >> 1) * 8
+                rows_seen[row] += 1
+                if t in hot:
+                    spots.setdefault(b, []).append((bx, by, t, row,
+                                                    hf | (vf << 1)))
+                g = tiles0.get(t)
+                if g is None:
+                    continue
+                blk = _tile_rgba(g, pals[row], hf, vf)
+                for y in range(8):
+                    px[by + y][bx:bx + 8] = blk[y]
+        cells[b] = px
+
+    # расписание анимированных тайлов: состояние на каждом такте смены
+    streams = anim_streams(setno)
+    period = streams_period(streams) if streams else 1
+    ticks = streams_ticks(streams, period) if streams else [0]
+    used = sorted({(t, row) for v in spots.values() for _x, _y, t, row, _f in v})
+    states = [tileset(rec, tick) for tick in ticks]
+    frames, frame_index, timelines = [], {}, []
+    for t, row in used:
+        seq = []
+        for i, tick in enumerate(ticks):
+            dur = (ticks[i + 1] if i + 1 < len(ticks) else period) - tick
+            key = (bytes(states[i].get(t, b"\0" * 32)), row)
+            if key not in frame_index:
+                frame_index[key] = len(frames)
+                frames.append(_tile_rgba(key[0], pals[row]))
+            f = frame_index[key]
+            if seq and seq[-1][0] == f:
+                seq[-1][1] += dur
+            else:
+                seq.append([f, dur])
+        seq = _own_cycle(seq)
+        timelines.append({"frames": [{"atlas": f, "dur": d} for f, d in seq]})
+    tile_no = {tr: i for i, tr in enumerate(used)}
+
+    os.makedirs(outdir, exist_ok=True)
+    w, h, img = _atlas(cells, REMAKE_COLUMNS, CELL)
+    png(os.path.join(outdir, "cells.png"), w, h, img, alpha=True)
+    w, h, img = _atlas(frames, 16, 8)
+    png(os.path.join(outdir, "anim.png"), w, h, img, alpha=True)
+    flames = fire_tiles()
+    fire = [_tile_rgba(g, array_palette(0), clear0=True) for g in flames]
+    w, h, img = _atlas(fire, 2, 8)
+    png(os.path.join(outdir, "fire.png"), w, h, img, alpha=True)
+
+    doc = collections.OrderedDict()
+    doc["record"] = k
+    doc["cell"] = CELL
+    doc["columns"] = REMAKE_COLUMNS
+    doc["types"] = [v if v < 32 else 255 for v in typeof]
+    doc["shore_add"] = list(ROM[EDGE_ADD:EDGE_ADD + 256])
+    doc["shore_bytes"] = list(SHORE_BYTES)
+    doc["live_types"] = U32(ANIM_TYPE_MASK)
+    doc["bare_byte"] = EDGE_FILL_BYTE
+    doc["fire_byte"] = FIRE_BYTE
+    doc["edges"] = [{"side": EDGE_SIDE_NAMES[n], "shift": shift,
+                     "dx": dx, "dy": dy, "quad": meta_no,
+                     "slots": [{"tile": t, "col": c, "row": r}
+                               for t, c, r in slots]}
+                    for n, (shift, (dx, dy), meta_no, slots)
+                    in enumerate(EDGE_SIDES)]
+    doc["fire"] = {"masks": list(ROM[FIRE_PATTERN:FIRE_PATTERN + 8]),
+                   "step": FIRE_STEP}
+    doc["anim"] = {"period": period, "tiles": timelines}
+    doc["cells"] = [{"byte": b,
+                     "spots": [{"x": x, "y": y, "tile": tile_no[(t, row)],
+                                "flip": fl}
+                               for x, y, t, row, fl in spots[b]]}
+                    for b in sorted(spots)]
+    with io.open(os.path.join(outdir, "terrain.json"), "w",
+                 encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
+        f.write("\n")
+    return {"bytes": sum(1 for c in cells if c is not None),
+            "anim_tiles": len(used), "frames": len(frames),
+            "period": period, "rows": dict(rows_seen)}
+
+
+def export_remake():
+    u"""`--remake`: все 11 записей в раскладке ремейка (#203)."""
+    root = out_path("export")
+    recs = gfx_records()
+    for k, rec in enumerate(recs):
+        d = os.path.join(root, "terrain", "record%d" % k)
+        r = remake_record(k, rec, d)
+        print(u"запись %2d: байтов %3d, анимированных тайлов %2d, кадров %3d,"
+              u" период %4d, ряды палитры %s"
+              % (k, r["bytes"], r["anim_tiles"], r["frames"], r["period"],
+                 r["rows"]))
+    print(u"-> %s" % os.path.relpath(os.path.join(root, "terrain"), HERE))
+    return 0
+
+
 def do_anim(rest):
     u"""`--anim [глава миссия [x y ширина высота]]` — GIF с живой водой."""
     want = (int(rest[0]), int(rest[1])) if len(rest) >= 2 else (1, 1)
@@ -1538,6 +1736,8 @@ def do_anim(rest):
 
 def main():
     args = sys.argv[1:]
+    if "--remake" in args:
+        return export_remake()
     if "--export" in args:
         return export_terrain()
     if args and args[0] == "--anim":
