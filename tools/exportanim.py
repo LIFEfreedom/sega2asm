@@ -7,14 +7,55 @@ u"""Анимации шести видов в раскладке ремейка 
 
 Пишет в `out/<имя>/export/` дерево, которое кладётся прямо в `Content`:
 
-    objects/units/<папка>/<анимация>/{top,bottom,right}.png
-    layouts.cs        — записи для UnitAnimationOverrides
-    animations.json   — покадровые длительности оригинала
+    objects/units/<папка>/<анимация>.png   — одна анимация, все стороны
+    animations.json   — раскладка листов и покадровые длительности
 
-## Что во что легло
+## Лист
 
-`LevelScene` грузит пять анимаций на вид и три стороны на анимацию
-(левая — зеркало правой). В оригинале анимаций 33 и сторон четыре; вот
+Одна анимация — один файл. Строка листа — сторона, столбец — кадр по
+времени, ячейка 32x32. Стороны идут от верхней против часовой стрелки
+до нижней, а последней строкой — правая:
+
+| строка | сторона | сторона оригинала | что на кадрах |
+|---|---|---|---|
+| 0 | `top` | 0 | спина |
+| 1 | `left` | 6 | профиль влево |
+| 2 | `bottom` | 4 | морда |
+| 3 | `right` | 2 | профиль вправо |
+
+Правая строка нужна потому, что правая сторона в оригинале не всегда
+зеркало левой, см. «Стороны». Строки бывают разной длины (у ﾄﾘｹﾗ
+`eat` — 17, 20 и 21 ячейка): хвост короткой строки прозрачен, а сколько
+в ней кадров на деле, пишет `animations.json`.
+
+## Стороны
+
+Номер стороны оригинала — это направление юнита, и идёт оно ПО часовой
+стрелке от «вверх». Так говорят таблицы шага `DirDeltaX` `$016956` и
+`DirDeltaY` `$01695E` (у стороны 2 шаг X+1, у стороны 6 X−1), и так же
+выглядят сами кадры: у ｱﾛ и ﾃｨﾗﾉ на стороне 2 морда смотрит вправо, на
+стороне 6 — влево. Обычно сторона 2 — это кадры стороны 6 с битом
+отражения, но не всегда (ниже).
+
+ИСПРАВЛЕНО: прежняя версия опознавала стороны по ходьбе ｽﾃｺﾞ, у которого
+голову легко спутать с хвостом, сочла сторону 6 профилем вправо и писала
+её в `right.png`. На деле там был левый профиль.
+
+Своих кадров у диагоналей нет: `unitgfx.script_addr` берёт
+`сторона & ~1`, так что вверх-влево (7) показывает левый профиль, а
+вниз-влево (5) — морду. Поэтому диагоналей в листе нет.
+
+**Правая сторона не всегда зеркало левой.** По каждой анимации
+`animations.json` пишет поле `right`: `mirror` — правая это левая
+зеркально, `same` — кадры не зависят от стороны (например, смерть),
+`own` — у правой СВОИ кадры, и отражением левой их не получить. У
+шести видов `own` пять раз: `eat` у ｱﾛ, ﾃｨﾗﾉ и ﾌﾟﾃﾗ, `kicking` и `eat`
+у ﾋﾟｰﾁｬﾝ. У ｱﾛ, например, на левой стороне он ест мордой к зрителю
+(кадры 71…78), на правой — спиной (79…86).
+
+## Какие анимации
+
+`LevelScene` грузит пять анимаций на вид. В оригинале их 33; вот
 соответствие, выведенное из того, КТО ставит номер в `+$7` записи юнита:
 
 | ремейк | оригинал | ставит |
@@ -24,17 +65,6 @@ u"""Анимации шести видов в раскладке ремейка 
 | `dying` | `$1A` | `UnitDie` |
 | `kicking` | `$13` | `EnterTrampleState` |
 | `eat` | `$0D` | `EnterAction1E`, `GrazeHeal300` |
-
-Стороны опознаны по самим кадрам ходьбы ｽﾃｺﾞ: сторона 0 рисует спину,
-сторона 4 — морду, сторона 6 — профиль вправо, сторона 2 — тот же профиль
-с взведённым битом отражения.
-
-| оригинал | ремейк |
-|---|---|
-| 0 | `top` |
-| 4 | `bottom` |
-| 6 | `right` |
-| 2 | не выводится: это `right` зеркально, ремейк отражает сам |
 
 Виды: папка ремейка — вид оригинала — тип расстановки игрока 1.
 
@@ -139,6 +169,13 @@ u"""Анимации шести видов в раскладке ремейка 
 
 ## Чего здесь нет
 
+- **Поза покоя взрослого ящера.** `idle` здесь — ячейка `$05`, а у
+  шести видов в ней лежит ЯЙЦО из общего банка (кадры 1, 4, 7, 10, 13,
+  16, см. «Яйца и гнёзда»). Так было и в прежней раскладке; какая
+  ячейка даёт стоящего ящера, не установлено.
+- **`layouts.cs`.** Прежняя версия писала записи `AnimationLayout` для
+  листов по одной стороне; под лист на четыре стороны загрузчика в ремейке
+  пока нет, и выдумывать его API здесь незачем. Старый файл удаляется.
 - **Размер.** Кадр оригинала 32x32, а перерисованная графика ремейка
   64x64. `FromSpriteSheet` берёт размер ячейки из ширины листа, так что
   лист заработает как есть, но юниты выйдут вдвое меньше нынешних.
@@ -151,6 +188,7 @@ import io
 import json
 import math
 import os
+import shutil
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -226,8 +264,9 @@ def sets_six():
 ANIMS = (("idle", 0x05), ("walking", 0x0A), ("dying", 0x1A),
          ("kicking", 0x13), ("eat", 0x0D))
 
-# сторона оригинала -> имя файла ремейка
-SIDES = ((0, "top"), (4, "bottom"), (6, "right"))
+# строки листа: сторона оригинала и имя, сверху против часовой до низа
+FACINGS = ((0, "top"), (6, "left"), (4, "bottom"), (2, "right"))
+RIGHT = 2                      # правая сторона: ещё и сверяется с левой
 
 TICK_MS = 1000.0 / 60.0                # такт оригинала
 SLOT_MS = 50.0                         # задержка Animation в LevelScene
@@ -387,92 +426,144 @@ def export_props():
     return 0
 
 
+def facing_steps(t, an, side, entries):
+    u"""(кадры, петля, продолжение) стороны или None, если её нет."""
+    try:
+        seq, loop, ok, nxt = unitanim.steps(unitgfx.script_addr(t, an, side),
+                                            entries)
+        ok = ok and unitanim.frames_fit(t, seq)
+    except Exception:
+        return None
+    if not ok or not seq:
+        return None
+    return seq, loop, nxt
+
+
+def right_relation(left, right):
+    u"""Как правая сторона соотносится с левой: mirror, same, own, none."""
+    if left is None or right is None:
+        return "none"
+    if right[0] == left[0]:
+        return "same"
+    if [(w ^ 0x800, d) for w, d in right[0]] == left[0]:
+        return "mirror"
+    return "own"
+
+
+def rows_sheet(t, rows, pal, path):
+    u"""Лист «строка — сторона, столбец — кадр»; пустые ячейки прозрачны."""
+    cols = max(len(r) for r in rows)
+    w, h = cols * FRAME, len(rows) * FRAME
+    img = [[(0, 0, 0, 0)] * w for _ in range(h)]
+    cache = {}
+    for r, words in enumerate(rows):
+        for i, word in enumerate(words):
+            if word not in cache:
+                cache[word] = unitanim.frame_pixels(t, word, pal)
+            f = cache[word]
+            if f is None:
+                continue
+            ox, oy = i * FRAME, r * FRAME
+            for y in range(FRAME):
+                row = img[oy + y]
+                src = f[y]
+                for x in range(FRAME):
+                    if src[x] is not None:
+                        row[ox + x] = src[x] + (255,)
+    gfx.png(path, w, h, img, alpha=True)
+    return cols
+
+
 def main():
     if "--props" in sys.argv[1:]:
         return export_props()
     both = "--all" in sys.argv[1:]
     root = os.path.join(out_path("export"), "objects", "units")
-    layouts, manifest, made, missing = [], {}, 0, []
+    manifest, made, missing = {}, 0, []
+    rights = collections.Counter()
+    own = []
 
     for key, t, sp, name in (sets_all() if both else sets_six()):
-        if True:
-            pal = unitgfx.row_palette(unitgfx.palette_row(t))
-            entries = unitanim.entry_map(t)
-            manifest[key] = {"species": sp, "name": name, "type": t,
-                             "palette_row": unitgfx.palette_row(t),
-                             "anims": {}}
-            playable = sp in PLAYABLE
-            for anim, an in ANIMS:
-                # Имена ремейка осмысленны только у шести видов. У гнезда
-                # или яйца ячейка $0A это не «ходьба», а просто ячейка
-                # $0A, поэтому папка называется по номеру.
-                anim = anim if playable else "anim_%02X" % an
-                d = os.path.join(root, key, anim)
-                for side, fname in SIDES:
-                    try:
-                        seq, loop, ok, nxt = unitanim.steps(
-                            unitgfx.script_addr(t, an, side), entries)
-                        ok = ok and unitanim.frames_fit(t, seq)
-                    except Exception:
-                        ok, nxt = False, None
-                    if not ok or not seq:
-                        missing.append((key, anim, fname))
-                        continue
-                    words = expand(seq)
-                    os.makedirs(d, exist_ok=True)
-                    cols, rows = sheet(t, words, pal,
-                                       os.path.join(d, fname + ".png"))
-                    made += 1
-                    layouts.append((key, anim, fname, cols, rows, len(words)))
-                    manifest[key]["anims"].setdefault(anim, {})[fname] = {
-                        "rom_anim": "$%02X" % an,
-                        "rom_facing": side,
-                        "loop": loop,
-                        "next": ("$%02X" % nxt[0]) if nxt else None,
-                        "columns": cols, "rows": rows,
-                        "frame_count": len(words),
-                        "frames": [{"frame": w & 0xFF,
-                                    "common": bool(w & 0x100),
-                                    "hflip": bool(w & 0x800),
-                                    "dur": d} for w, d in seq],
-                    }
+        pal = unitgfx.row_palette(unitgfx.palette_row(t))
+        entries = unitanim.entry_map(t)
+        manifest[key] = {"species": sp, "name": name, "type": t,
+                         "palette_row": unitgfx.palette_row(t),
+                         "cell": FRAME,
+                         "directions": [n for _s, n in FACINGS],
+                         "anims": {}}
+        playable = sp in PLAYABLE
+        for anim, an in ANIMS:
+            # Имена ремейка осмысленны только у шести видов. У гнезда
+            # или яйца ячейка $0A это не «ходьба», а просто ячейка
+            # $0A, поэтому файл называется по номеру.
+            anim = anim if playable else "anim_%02X" % an
+            rows, info = [], []
+            for side, dname in FACINGS:
+                got = facing_steps(t, an, side, entries)
+                if got is None:
+                    missing.append((key, anim, dname))
+                    rows.append([])
+                    info.append({"direction": dname, "row": len(info),
+                                 "rom_facing": side, "frame_count": 0})
+                    continue
+                seq, loop, nxt = got
+                words = expand(seq)
+                rows.append(words)
+                info.append({
+                    "direction": dname, "row": len(info),
+                    "rom_facing": side,
+                    "loop": loop,
+                    "next": ("$%02X" % nxt[0]) if nxt else None,
+                    "frame_count": len(words),
+                    "frames": [{"frame": w & 0xFF,
+                                "common": bool(w & 0x100),
+                                "hflip": bool(w & 0x800),
+                                "dur": d} for w, d in seq],
+                })
+            if not any(rows):
+                continue
+            rel = right_relation(facing_steps(t, an, 6, entries),
+                                 facing_steps(t, an, RIGHT, entries))
+            rights[rel] += 1
+            if rel == "own":
+                own.append((key, anim))
+            d = os.path.join(root, key)
+            os.makedirs(d, exist_ok=True)
+            stale = os.path.join(d, anim)          # прежний каталог сторон
+            if os.path.isdir(stale):
+                shutil.rmtree(stale)
+            cols = rows_sheet(t, rows, pal, os.path.join(d, anim + ".png"))
+            made += 1
+            manifest[key]["anims"][anim] = {
+                "rom_anim": "$%02X" % an,
+                "columns": cols, "rows": len(FACINGS),
+                "right": rel,
+                "directions": info,
+            }
 
     io.open(os.path.join(out_path("export"), "animations.json"), "w",
             encoding="utf-8", newline="\n").write(
         json.dumps(manifest, ensure_ascii=False, indent=1))
-
-    cs = [u"// Сгенерировано tools/exportanim.py — записи для",
-          u"// UnitAnimationOverrides в LevelScene. Только шесть видов",
-          u"// игрока 1: у остальных наборов нет своего UnitType.", u""]
-    seen = set()
-    types = {"pacific": "Pacific", "fat": "Fat", "defender": "Defender",
-             "hunter": "Hunter", "scout": "Scout", "egg_eater": "EggEater"}
-    for key, anim, fname, cols, rows, n in layouts:
-        if key not in types:
-            continue
-        ut = types[key]
-        dirn = {"top": "Top", "bottom": "Bottom", "right": "Right"}[fname]
-        an = {"idle": "IdleAnim", "walking": "WalkingAnim",
-              "dying": "DyingAnim", "kicking": "KickingAnim",
-              "eat": "EatAnim"}[anim]
-        line = (u"    [(UnitType.%s, %s, Direction.%s)] = "
-                u"new AnimationLayout(%d, %d, Rows: %d),"
-                % (ut, an, dirn, cols, n, rows))
-        if line not in seen:
-            seen.add(line)
-            cs.append(line)
-    io.open(os.path.join(out_path("export"), "layouts.cs"), "w",
-            encoding="utf-8", newline="\n").write(u"\n".join(cs) + u"\n")
+    old = os.path.join(out_path("export"), "layouts.cs")
+    if os.path.exists(old):
+        os.remove(old)
 
     print(u"наборов: %d, листов: %d -> %s"
           % (len(manifest), made, os.path.relpath(root, HERE)))
+    print(u"строки листа: %s"
+          % ", ".join("%d %s (сторона %d)" % (i, n, s)
+                      for i, (s, n) in enumerate(FACINGS)))
     if missing:
         byset = collections.Counter(m[0] for m in missing)
-        print(u"нет анимации: %d сочетаний; больше всего у %s"
+        print(u"нет стороны: %d сочетаний; больше всего у %s"
               % (len(missing),
                  ", ".join("%s (%d)" % kv for kv in byset.most_common(5))))
-    print(u"раскладки: %s" % os.path.relpath(
-        os.path.join(out_path("export"), "layouts.cs"), HERE))
+    print(u"правая сторона: %s"
+          % ", ".join("%s %d" % kv for kv in sorted(rights.items())))
+    six = [k for k in own if k[0] in {v[0] for v in PLAYABLE.values()}]
+    if six:
+        print(u"своя правая сторона у шести видов: %s"
+              % ", ".join("%s/%s" % k for k in six))
     return 0
 
 
