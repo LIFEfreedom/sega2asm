@@ -89,6 +89,7 @@ ROM даёт 383 функции и 13 507 команд, и сверка (`make x
 | [game-species-stego.md](game-species-stego.md) | один вид целиком: ｽﾃｺﾞ — доход, стадо, превращение у игрока 2 |
 | [game-species-peachan.md](game-species-peachan.md) | один вид целиком: ﾋﾟｰﾁｬﾝ — лотерейный удар, питание яйцами, мёртвое правило |
 | [game-actions.md](game-actions.md) | словарь действий `+$15`, развязка стычки |
+| [game-animations.md](game-animations.md) | словарь анимаций `+$7`: кто ставит каждый из 33 номеров, четыре степени удара, четыре смерти |
 | [game-damage.md](game-damage.md) | формула урона, сила и защита, урон от местности |
 | [game-movement.md](game-movement.md) | стоимость шага по местности, механика скорости |
 | [game-upgrade.md](game-upgrade.md) | постоянное улучшение и вторая половина блока параметров |

@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex cutscene menus worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim exportanim pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex cutscene menus worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim exportanim animdict pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -234,6 +234,10 @@ maps:
 EAARGS ?=
 exportanim:
 	@$(PYTHON) $(TOOLS_DIR)/exportanim.py $(EAARGS)
+
+# Словарь анимаций юнита: кто ставит каждый номер +$7 и что он показывает
+animdict:
+	@$(PYTHON) $(TOOLS_DIR)/animdict.py
 
 # Анимации юнитов поодиночке: своя полоса кадров на анимацию, длительности
 # и точка возврата, плюс units.json для переноса.

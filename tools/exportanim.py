@@ -77,8 +77,12 @@ u"""Анимации шести видов в раскладке ремейка 
 | `idle` | `$0A` | `EnterWalkStateNormal`: действие `$0B`, покой |
 | `walking` | `$18` | `EnterStepState`: действие `$0E`, шаг в клетку |
 | `dying` | `$1A` | `UnitDie` |
-| `kicking` | `$13` | `EnterTrampleState` |
+| `kicking` | `$13` | `EnterTrampleState`; в бою — удар степени 1 из четырёх |
 | `eat` | `$0D` | `EnterAction1E`, `GrazeHeal300` |
+
+Удар в бою бывает четырёх степеней (`$13`…`$16`, выбирает
+`ResolveCombat`), и чаще всего, в 48% стычек, играет `$14`, а не `$13`;
+разбор — в `docs/game-animations.md`.
 
 ИСПРАВЛЕНО: было `idle` = `$05` и `walking` = `$0A`. Но `$05` у шести
 видов — это ЯЙЦО из общего банка (кадры 1, 4, 7, 10, 13, 16), а `$0A`
