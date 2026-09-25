@@ -3,13 +3,26 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 
     make exportmissions
 
-Пишет `out/<имя>/export/campaigns/Original/`: `campaign.json` и
-`maps/<N>/mission.json` на каждую из 123 миссий, в порядке глав ROM
-(0 — уроки, 1…5, 8 — галерея), плюс `report.md` о том, что не вошло.
-Названия английские, как весь интерфейс ремейка. Кампания открыта
-целиком (`all_unlocked`): цели оригинала ещё не перенесены, и уроки,
-где противника нет, не выиграть — последовательное открытие заперло бы
-всё за первым уроком.
+Пишет `out/<имя>/export/campaigns/<кампания>/`: `campaign.json` и
+`maps/<N>/mission.json`, где N — номер миссии в главе, плюс общий
+`report.md` о том, что не вошло. Кампания — режим оригинала, то есть
+его главы (`ChapterTable` `$060400`); какой пункт меню какую главу
+открывает, прослежено по коду в [game-modes.md](../docs/game-modes.md):
+
+| кампания | глава | в оригинале |
+|---|---|---|
+| Training | 0 | れんしゅうモード |
+| Story | 1 | ストーリーモード |
+| Original: Easy / Normal / Hard | 3 / 4 / 5 | オリジナルモード, три уровня |
+| Duel | 2 | たいけつモード, карты для двоих |
+| Extra | 8 | в меню нет, только пароли |
+
+Названия английские, как весь интерфейс ремейка: у сюжета и поединка —
+названия оригинала латиницей, у уроков — номер урока, у прочих
+названий в ROM нет. Кампании открыты целиком (`all_unlocked`): цели
+оригинала ещё не перенесены (dyna #207), и первый урок, где противника
+нет вовсе, не выиграть — последовательное открытие заперло бы всё за
+ним.
 
 ## Карта
 
@@ -62,8 +75,11 @@ import collections
 import io
 import json
 import os
+import re
+import shutil
 import struct
 import sys
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -72,6 +88,8 @@ except Exception:
     pass
 
 import maptex as mt                                          # noqa: E402
+import missions as ms                                        # noqa: E402
+import dumptext as dt                                        # noqa: E402
 from unpack import unpack                                    # noqa: E402
 from paths import OUT as out_path                            # noqa: E402
 
@@ -112,12 +130,83 @@ def unit_type(t):
     return owner, b & 0x1F, bool(b & 0x20)
 
 
+# (папка, название, глава) в порядке меню оригинала; Extra — последней
+CAMPAIGNS = (("Training", u"Training", 0),
+             ("Story", u"Story", 1),
+             ("OriginalEasy", u"Original: Easy", 3),
+             ("OriginalNormal", u"Original: Normal", 4),
+             ("OriginalHard", u"Original: Hard", 5),
+             ("Duel", u"Duel", 2),
+             ("Extra", u"Extra", 8))
+
+DUEL_NAMES = 0x04F22A              # 16 строк «NN:название», таблица $04F1EC
+
+KANA = {}
+for _row, _cons in (("アイウエオ", ""), ("カキクケコ", "k"), ("ガギグゲゴ", "g"),
+                    ("サシスセソ", "s"), ("ザジズゼゾ", "z"), ("タチツテト", "t"),
+                    ("ダヂヅデド", "d"), ("ナニヌネノ", "n"), ("ハヒフヘホ", "h"),
+                    ("バビブベボ", "b"), ("パピプペポ", "p"), ("マミムメモ", "m"),
+                    ("ラリルレロ", "r")):
+    for _k, _v in zip(_row, "aiueo"):
+        KANA[_k] = _cons + _v
+KANA.update({u"シ": "shi", u"ジ": "ji", u"チ": "chi", u"ヂ": "ji", u"ツ": "tsu",
+             u"ヅ": "zu", u"フ": "fu", u"ヤ": "ya", u"ユ": "yu", u"ヨ": "yo",
+             u"ワ": "wa", u"ヲ": "o", u"ン": "n", u"ヴ": "vu"})
+SMALL_VOWEL = {u"ァ": "a", u"ィ": "i", u"ゥ": "u", u"ェ": "e", u"ォ": "o"}
+SMALL_Y = {u"ャ": "a", u"ュ": "u", u"ョ": "o"}
+
+
+def romaji(text):
+    u"""Полуширинная катакана ROM -> латиница по Хепбёрну, слово с заглавной.
+
+    ッ удваивает следующую согласную, ー тянет гласную повтором, малые
+    гласные и я/ю/ё сливаются с предыдущим слогом; латиница и цифры
+    остаются как есть."""
+    s = unicodedata.normalize("NFKC", text)
+    s = re.sub(r"([A-Za-z0-9]+)", r" \1 ", s)
+    s = re.sub(r"!(?=\S)", "! ", s)
+    words = []
+    for word in s.split():
+        out, double = "", False
+        for ch in word:
+            if ch in KANA:
+                syl = KANA[ch]
+                if double:
+                    syl = ("t" if syl.startswith("ch") else syl[0]) + syl
+                    double = False
+                out += syl
+            elif ch == u"ッ":
+                double = True
+            elif ch in SMALL_VOWEL:
+                if out and out[-1] in "aiueo":
+                    # ウィ -> wi: одна гласная уступает место w
+                    bare = len(out) == 1 or out[-2] in "aiueon"
+                    out = out[:-1] + ("w" if bare and out[-1] == "u" else "")
+                out += SMALL_VOWEL[ch]
+            elif ch in SMALL_Y:
+                if out.endswith(("shi", "chi")):
+                    out = out[:-1] + SMALL_Y[ch]
+                elif out.endswith("ji"):
+                    out = out[:-1] + SMALL_Y[ch]
+                else:
+                    out = out[:-1] + "y" + SMALL_Y[ch]
+            elif ch == u"ー":
+                out += next((c for c in reversed(out) if c in "aiueo"), "")
+            else:
+                out += ch
+        words.append(out[:1].upper() + out[1:] if re.search(u"[\u30a0-\u30ff]", word) else out)
+    return " ".join(words)
+
+
 def mission_name(c, m):
+    u"""Название миссии m главы c; пустое, если у оригинала его нет."""
     if c == 0:
         return u"Lesson %d" % m
-    if c == 8:
-        return u"Gallery, map %d" % m
-    return u"Chapter %d, mission %d" % (c, m)
+    if c == 1:
+        return romaji(ms.briefing_name(1, m))
+    if c == 2:
+        return romaji(dt.seq(DUEL_NAMES, 16)[m - 1].split(":", 1)[1])
+    return u""
 
 
 def conditions(team):
@@ -209,31 +298,35 @@ def export_mission(c, m, r, recs, skipped):
     return doc, len(units), len(nests[2])
 
 
+def write_json(path, doc, **kw):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, ensure_ascii=False, **kw)
+        f.write("\n")
+
+
 def main():
-    root = out_path("export", "campaigns", "Original")
-    maps = os.path.join(root, "maps")
-    os.makedirs(maps, exist_ok=True)
+    root = out_path("export", "campaigns")
+    if os.path.isdir(root):
+        shutil.rmtree(root)            # всё здесь пишет только этот скрипт
     recs = mt.gfx_records()
     skipped = collections.Counter()
-    n = 0
-    rows = []
+    by_chapter = collections.defaultdict(list)
     for c, m, r in mt.missions():
-        n += 1
-        doc, nunits, nests2 = export_mission(c, m, r, recs, skipped)
-        d = os.path.join(maps, str(n))
-        os.makedirs(d, exist_ok=True)
-        with io.open(os.path.join(d, "mission.json"), "w", encoding="utf-8",
-                     newline="\n") as f:
-            json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
-            f.write("\n")
-        rows.append((n, doc["name"], r[3], nunits, nests2,
-                     doc["map"]["starting_energy"]))
-    with io.open(os.path.join(root, "campaign.json"), "w", encoding="utf-8",
-                 newline="\n") as f:
-        json.dump(collections.OrderedDict([("name", u"Original"),
-                                           ("all_unlocked", True)]),
-                  f, ensure_ascii=False, indent=2)
-        f.write("\n")
+        by_chapter[c].append((m, r))
+    rows, n = [], 0
+    for order, (folder, title, c) in enumerate(CAMPAIGNS, 1):
+        for m, r in by_chapter[c]:
+            n += 1
+            doc, nunits, nests2 = export_mission(c, m, r, recs, skipped)
+            write_json(os.path.join(root, folder, "maps", str(m), "mission.json"),
+                       doc, separators=(",", ":"))
+            rows.append((folder, m, doc["name"], r[3], nunits, nests2,
+                         doc["map"]["starting_energy"]))
+        write_json(os.path.join(root, folder, "campaign.json"),
+                   collections.OrderedDict([("name", title), ("order", order),
+                                            ("all_unlocked", True)]),
+                   indent=2)
     with io.open(os.path.join(root, "report.md"), "w", encoding="utf-8",
                  newline="\n") as f:
         p = f.write
@@ -241,11 +334,12 @@ def main():
         p(u"## Не выгружено\n\n| что | записей |\n|---|---:|\n")
         for k, v in sorted(skipped.items()):
             p(u"| %s | %d |\n" % (k, v))
-        p(u"\n## Миссии\n\n| № | название | этап | юнитов | гнёзд у игрока 2 | деньги |\n"
-          u"|---:|---|---:|---:|---:|---:|\n")
+        p(u"\n## Миссии\n\n| кампания | № | название | этап | юнитов | гнёзд у игрока 2 | деньги |\n"
+          u"|---|---:|---|---:|---:|---:|---:|\n")
         for row in rows:
-            p(u"| %d | %s | %d | %d | %d | %d |\n" % row)
-    print(u"миссий: %d -> %s" % (n, os.path.relpath(root, HERE)))
+            p(u"| %s | %d | %s | %d | %d | %d | %d |\n" % row)
+    print(u"миссий: %d в %d кампаниях -> %s" % (n, len(CAMPAIGNS),
+                                              os.path.relpath(root, HERE)))
     for k, v in sorted(skipped.items()):
         print(u"  не выгружено: %s — %d" % (k, v))
     return 0
