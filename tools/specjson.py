@@ -184,6 +184,14 @@ def cmd(a, head, signed=True, size=2):
         hexa(a), " ".join("%02X" % b for b in head)))
 
 
+def seen_next(mark):
+    """Метку скрипта, записанную на такте t, код видит на такте t + 1:
+    обработчик игрока и обновление +$1E работают раньше, чем скрипт."""
+    if not ok(mark):
+        return mark
+    return D(mark.v + 1, u"метку скрипта код видит в следующем кадре", mark)
+
+
 def D(value, why, *inputs):
     """Выведенное число: формула и входы."""
     src = "вывод: %s" % why
@@ -235,6 +243,108 @@ def trig_v(shift):
 
 def pair(x, y):
     return {"x": x, "y": y}
+
+
+# ------------------------------------------------------------ записи-таблицы
+
+LOC = re.compile(r"\bloc_([0-9A-F]{6})\b")
+
+
+def _hits(proc, needle, span=0x100):
+    needle = re.sub(r"\s+", " ", needle.strip())
+    return [a for a in E.ADDRS if proc <= a < proc + span and
+            needle in E.BY[a]]
+
+
+def entry(spec, note=None):
+    """Одно число по записи ("at", процедура, текст) / ("cmd", ...) / ...
+
+    Команда без непосредственного операнда (`tst`, `bsr loc_…`, `jmp`)
+    лишь свидетельствует о правиле: значение — адрес цели перехода или
+    строка из отчёта `note`. Два совпадения, между которыми нет `rts`, —
+    берётся первое, и это видно в происхождении.
+    """
+    kind = spec[0]
+    if kind == "at":
+        proc, text = spec[1], spec[2]
+        part = spec[3] if len(spec) > 3 else None
+        expect = spec[4] if len(spec) > 4 else None
+        want = spec[5] if len(spec) > 5 else None
+        span = next((s for s in (0x100, 0x200, 0x400)
+                     if _hits(proc, text, s)), 0x100)
+        hits = _hits(proc, text, span)
+        n = len(hits)
+        nth = 0 if n > 1 else None
+        if want is not None:
+            if want >= n:
+                return _fail("%s: «%s» — нужно совпадение %d, их %d" % (
+                    hexa(proc), text, want + 1, n))
+            nth = want
+        if expect is not None and hits:
+            if expect not in hits:
+                return _fail("%s: «%s» — ждали команду на %s, нашлись %s" % (
+                    hexa(proc), text, hexa(expect),
+                    ", ".join(hexa(h) for h in hits)))
+            nth = hits.index(expect) if n > 1 else None
+        has_imm = bool(IMM_HEX.search(text) or IMM_DEC.search(text) or
+                       PEA.match(text) or LEA.match(text))
+        if not has_imm:
+            m = LOC.search(text)
+            v = ("$%s" % m.group(1)) if m else (note or True)
+            r = at(proc, text, span=span, nth=nth, value=v)
+        else:
+            imm = IMM_HEX.search(text)
+            is_addr = bool(LEA.match(text)) or bool(
+                imm and text.startswith("move.l") and
+                0x100000 <= int(imm.group(1), 16) < 0x300000)
+            r = at(proc, text, span=span, nth=nth, part=part,
+                   addr=is_addr and not part)
+        if nth is not None and r.v is not None:
+            r = V(r.v, r.src + u" (%d-е из %d)" % (nth + 1, n))
+        return r
+    if kind == "cmd":
+        _k, a, head, size, signed = spec
+        return cmd(a, head, signed=signed, size=size)
+    if kind == "dw":
+        return dw(spec[1])
+    if kind == "dl":
+        v = dl(spec[1])
+        if ok(v) and 0x100000 <= v.v < 0x300000:
+            v = dl(spec[1], addr=True)
+        return v
+    if kind == "dws":
+        return [dw(spec[1] + 2 * i) for i in range(spec[2])]
+    raise SpecError("неизвестная запись: %r" % (spec,))
+
+
+def from_entries(rows, remap=()):
+    """[(ключ.через.точки, запись, значение из отчёта)] -> дерево.
+
+    `remap` — пары (префикс, замена) для ключей. Лист, у которого
+    появились дети, переезжает в ключ "_".
+    """
+    tree = {}
+    for key, spec, note in rows:
+        for a, b in remap:
+            if key.startswith(a):
+                key = b + key[len(a):]
+                break
+        parts = [p for p in key.split(".") if p]
+        node = tree
+        for p in parts[:-1]:
+            cur = node.get(p)
+            if cur is None or not isinstance(cur, dict):
+                node[p] = {"_": cur} if cur is not None else {}
+            node = node[p]
+        leaf = parts[-1]
+        val = entry(spec, note)
+        if isinstance(node.get(leaf), dict):
+            node[leaf]["_"] = val
+        elif leaf in node:
+            raise SpecError("ключ дважды: %s" % key)
+        else:
+            node[leaf] = val
+    return tree
 
 
 # ------------------------------------------------------------ разделы
@@ -315,9 +425,9 @@ def player():
             "movement": move, "hold": hold,
             "throw_from": dict(zip(("ahead", "up", "diagonal", "down"),
                                    throw)),
-            "ammo_per_pickup": at(0x29A0E0, "moveq #16,d0", nth=0),
+            "ammo_per_pickup": bcd(at(0x29A0E0, "moveq #16,d0", nth=0)),
             "body": body(), "ninja": ninja(), "small": small(),
-            "bungee": bungee()}
+            "bungee": bungee(), "unicycle": unicycle(), "moves": moves()}
 
 
 # ------------------------------------------------------------ скрипты игрока
@@ -350,14 +460,19 @@ def timeline(a, d26=None, cap=400):
             if hi < 0xD8:
                 w = struct.unpack_from(">H", ROM, a)[0]
                 a += 2
-                if w < 3:
-                    continue
+                if w == 1:
+                    # $296FB2: без бита 9 — +$28 = 1 и шаг назад, то есть
+                    # ждать на месте, пока код не восстановит кадр.
+                    return frames, writes, t, None
                 if dur is None and not frames and d26 is not None:
                     # Первый кадр: +$28 загружен из ПРЕЖНЕГО +$26 до того,
                     # как скрипт записал свой. Берём записанный скриптом —
                     # в игре тут остаток прошлой анимации.
                     dur = d26
-                frames.append((t, (w - AN.FRAMES) // 4, dur))
+                # Слово меньше 3 тоже кончает шаг, как кадр: 0 прячет кадр
+                # ($297006 clr.l $C), 2 строит сборку (PartsBuild).
+                frames.append((t, (w - AN.FRAMES) // 4 if w >= 3 else None,
+                               dur))
                 if dur is None:
                     raise SpecError("скрипт $%06X: длительность кадра зависит "
                                     "от прежнего +$26, задайте d26" % start)
@@ -416,6 +531,8 @@ def strike(a, d26=None):
     frames, writes, end, _st = timeline(a, d26)
     hit, hook, box = [], [], None
     for t, fr, dur in frames:
+        if fr is None:
+            continue
         v = F.U32(F.BASE + 4 * fr)
         items = F.parse(v)
         if items is None:
@@ -577,6 +694,282 @@ def bungee():
     }
 
 
+def moves():
+    """Остальные движения утки (behavior.md 1.10-1.14): разборы-записи
+    `tools/specmoves.py` плюс стойка, присед и восходящий поток."""
+    import specmoves
+    t = from_entries(specmoves.ROWS)
+    st, cr, up = 0x291F74, 0x292310, 0x2947B4
+    t["stand"] = {
+        "handler": hexa(st),
+        "turn_anim": at(st, "move.l #$001D71A2,$22(a0)", addr=True,
+                        span=0x200),
+        "walk_state": at(st, "move.b #$02,$4(a0)", span=0x200),
+        "walk_anim": at(st, "move.l #$001D717C,$22(a0)", addr=True,
+                        span=0x200),
+        "stop_decay_div": D(4, u"asr.w #2: вычесть четверть за кадр",
+                            at(st, "asr.w #2,d2", span=0x200, value=2)),
+        "crouch_state": at(st, "move.b #$08,$4(a0)", span=0x200),
+        "crouch_sound": at(st, "pea ($000017).w", span=0x200),
+        "crouch_anim": at(st, "move.l #$001D7042,$22(a0)", addr=True,
+                          span=0x200),
+        "idle_reset_anim": at(st, "move.l #$001D6E9E,$22(a0)", addr=True,
+                              span=0x200),
+        "aim_table": at(0x29228A, "lea ($1EAB8E).l,a2", addr=True),
+        "aim_anims": [dl(0x1EAB8E + 4 * i, addr=True) for i in range(4)],
+        "aim_rule": u"вверх — прицел +$6 = 1 (скрипт 0, из наискось — 1); "
+                    u"вверх со стороной — +$6 = 2 (скрипт 2, из вверх — "
+                    u"3), взгляд по стороне; скорость 0"}
+    t["crouch"] = {
+        "handler": hexa(cr),
+        "jump_v": at(cr, "move.w #$FA10,$18(a0)"),
+        "jump_state": at(cr, "move.b #$03,$4(a0)"),
+        "jump_anim": at(cr, "move.l #$001D71B0,$22(a0)", addr=True),
+        "throw_state": at(cr, "move.b #$09,$4(a0)"),
+        "throw_anim": at(cr, "move.l #$001D7390,$22(a0)", addr=True),
+        "stand_up_anim": at(cr, "move.l #$001D7052,$22(a0)", addr=True),
+        "transform_anim": at(cr, "move.l #$001D6EBE,$22(a0)", addr=True),
+        "rule": u"держат A 50 кадров и есть топливо — ниндзя (как стоя); "
+                u"B — прыжок; C — бросок из приседа (9); отпустили вниз — "
+                u"стойка"}
+    t["updraft"] = {
+        "terrain_codes": {"10": u"вправо: +$16 = $0200, взгляд вправо",
+                          "11": u"к середине клетки по 1 точке, +$16 = 0, "
+                                u"взгляд вправо",
+                          "12": u"влево: +$16 = $0200, взгляд влево"},
+        "state": at(up, "move.b #$16,$4(a0)"),
+        "sound_on_entry": at(up, "pea ($000074).w"),
+        "anim_form_offset": at(up, "move.w #$0020,d2"),
+        "flags": at(up, "ori.w #$0300,$30(a0)", signed=False),
+        "a": at(up, "addi.w #$FFC0,d2"),
+        "max_up_v": at(up, "cmpi.w #$F700,d2"),
+        "side_v": at(0x29480C, "move.w #$0200,$16(a0)"),
+        "center_step_px": at(0x29481C, "move.w #$0001,d3"),
+        "cell_middle_px": at(0x29481C, "subi.w #$0008,d2"),
+        "probe": u"код клетки в точке утки (16 над ногами)"}
+    return t
+
+
+def _slope_jump(sin, jump):
+    """Прибавка прыжка на наклоне: muls, add.l, swap — (v * sin * 2) >> 16."""
+    if not ok(sin, jump):
+        return sin if not ok(sin) else jump
+    return D((jump.v * sin.v * 2) >> 16, u"muls: прыжок × sin, add.l, swap",
+             jump, sin)
+
+
+def unicycle():
+    """Моноцикл бонус-игры: состояния 44 и 45 (bonus.md, 2)."""
+    s44, s45, ped, mv, slope = (0x2930EE, 0x29320A, 0x29307A, 0x29300E,
+                                0x292F62)
+    jump = at(s44, "move.w #$FB00,d3")
+    table = []
+    for k in range(5):
+        row = {"cos": dw(0x1EABAE + 4 * k, signed=False),
+               "sin": dw(0x1EABB0 + 4 * k, signed=False),
+               "slope_a": dw(0x1EABC2 + 2 * k)}
+        if k < 4:
+            row["jump_v"] = _slope_jump(row["sin"], jump)
+        table.append(row)
+    return {
+        "states": {"44": u"едет по земле ($2930EE)",
+                   "45": u"в воздухе ($29320A)"},
+        "entry": u"только процедура бонуса $2A601C и посадка из 45; "
+                 u"выхода нет — бонус кончается через $FF1A6C",
+        "wheel_below_px": at(slope, "addi.w #$000F,d1", span=0x10),
+        "speed": u"$FF04E4, от взгляда; педали утку не разворачивают",
+        "pedal": {
+            "a": at(ped, "moveq #24,d6"),
+            "max_v": at(ped, "cmpi.w #$0400,d7"),
+            "friction_a": neg(at(ped, "moveq #-4,d6")),
+            "stop_at_or_below_v": at(ped, "cmpi.w #$0004,d7"),
+            "both_held": u"как «влево»: бит 2 проверяется первым"},
+        "max_v": at(mv, "cmpi.w #$0800,d7"),
+        "slope": {
+            "first_code": at(slope, "subi.w #$003C,d2", span=0x20),
+            "codes": at(slope, "cmpi.w #$0008,d2", span=0x20),
+            "rising_right_below_index": at(slope, "cmpi.w #$0004,d2",
+                                           span=0x40),
+            "index": u"k = (код − $3C) & 3; $3C-$3F поднимаются вправо, "
+                     u"$40-$43 — влево; прочие коды — ровно (k = 4)",
+            "table": table,
+            "cos_sin": u"1.15; $8000 читается mulu как 1,0",
+            "path": u"Y ставится по профилю клетки, код даёт только "
+                    u"тягу и направление скорости"},
+        "jump": {
+            "v": jump,
+            "sin_table": at(s44, "lea ($1EABB0).l,a1", addr=True),
+            "allowed": u"на ровном — всегда; на наклоне — только если "
+                       u"едет в гору: $FF04E4 XOR «впереди подъём» < 0",
+            "then_state": at(s44, "move.b #$2D,$4(a0)")},
+        "air": {
+            "land_probe_px": at(s45, "addi.w #$000F,d1"),
+            "land_state": at(s45, "move.b #$2C,$4(a0)"),
+            "ahead_px": at(s45, "moveq #16,d2"),
+            "slope_ahead_vx_div": D(2, u"asr.w: vx пополам каждый кадр",
+                                    at(s45, "asr.w $16(a0)", value=1)),
+            "fall_out": at(s45, "move.w #$FFFF,($FF1A6C).l"),
+            "fall_out_rule": u"падает и Y не меньше высоты карты "
+                             u"$FFFFE12E — бонус проигран"},
+        "ground_window_px": at(0x2919A2, "cmpi.w #$0008,d6"),
+        "junction": {
+            "first_code": at(0x292FBA, "subi.w #$0045,d2"),
+            "sink_px": at(0x292FBA, "addq.w #2,$14(a0)"),
+            "rule": u"$45 при взгляде вправо, $46 — влево, скорость >= 0: "
+                    u"земли нет, полёт"},
+        "marks": [{"code": dw(0x1EABD6 + 6 * i),
+                   "proc": dl(0x1EABD8 + 6 * i, addr=True)}
+                  for i in range(3)],
+        "marks_what": [u"стена: скорость 0, x вплотную к клетке",
+                       u"смотреть вправо", u"смотреть влево"],
+        "wall": {"cell_mask": at(0x2931D0, "moveq #-16,d0"),
+                 "from_left_px": at(0x2931D0, "moveq #-1,d1"),
+                 "from_right_px": at(0x2931D0, "moveq #16,d1")},
+        "anim": {
+            "script": "$1D7732",
+            "sound": cmd(0x1D7732, [0xEA], size=1, signed=False),
+            "steps_per_loop": D(16, u"кадры 158…165…158"),
+            "ticks_table": at(0x292FA2, "lea ($1EABCC).l,a1", addr=True),
+            "ticks_by_speed_px": [db(0x1EABCC + i) for i in range(9)],
+            "start_ticks": at(0x2986EA, "move.b #$04,$26(a0)"),
+            "rule": u"+$26 = таблица[|v| >> 8] на земле; в воздухе не "
+                    u"меняется"},
+    }
+
+
+def bonus():
+    """Бонус-игра BABALUAU BABY, уровни 19-22 (bonus.md)."""
+    ent, hit, fly = 0x2982A0, 0x29FFF8, 0x29FFA0
+    music = []
+    for n in (19, 20, 21, 22):
+        rec = struct.unpack_from(">I", ROM, 0x1FCB50 + 4 * n)[0] & 0xFFFFFF
+        music.append(dw(rec + 0x3C))
+    prizes = []
+    for code, proc, name in ((32, 0x29FF0C, u"жизнь"),
+                             (54, 0x29FF30, u"продолжение"),
+                             (53, 0x29FF54, u"здоровье"),
+                             (5, 0x29FF78, u"серия ниндзя")):
+        k = len(prizes)
+        prizes.append({"code": code, "what": name,
+                       "stack_value": at(proc, "moveq #%d,d7" % k,
+                                         span=0x10),
+                       "sound": at(proc, "pea ($0000", span=0x20),
+                       "flyout_anim": dl(0x1FE982 + 4 * k, addr=True)})
+    tw = script_mark(0x1D9360, 5, 1)
+    sw = script_mark(0x1DB604, 5, 1, d26=4)
+    return {
+        "levels": [19, 20, 21, 22],
+        "entry": {
+            "token": "$FF1350",
+            "from_level": {"2": at(ent, "move.w #$0013,($FF1B14).l"),
+                           "9": at(ent, "move.w #$0014,($FF1B14).l"),
+                           "13": at(ent, "move.w #$0015,($FF1B14).l"),
+                           "17": at(ent, "move.w #$0016,($FF1B14).l")},
+            "reset": u"$2983E2: жетон, топливо, облик — утка",
+            "music": music,
+            "lives_health": u"не меняются: ни «минус жизнь», ни урона"},
+        "level_proc": {
+            "state": at(0x2A601C, "move.b #$2C,$4(a0)"),
+            "script": at(0x2A601C, "move.l #$001D7732,$22(a0)", addr=True),
+            "speed": at(0x2A601C, "clr.w ($FF04E4).l", value=0),
+            "stack": at(0x2A601C, "clr.w ($FF21F8).l", value=0)},
+        "ends": {
+            "win": at(0x2A4AF8, "move.w #$0001,($FF1A6C).l"),
+            "win_rule": u"точка утки в клетке кода 5",
+            "lose_hit": at(hit, "move.w #$FFFF,($FF1A6C).l"),
+            "lose_hit_rule": u"удар, после которого в стопке 0",
+            "lose_fall": at(0x29320A, "move.w #$FFFF,($FF1A6C).l")},
+        "stack": {
+            "count": "$FF21F8", "items": "$FF21FA",
+            "max": at(0x29FEEC, "cmpi.w #$000A,d0"),
+            "prizes": prizes,
+            "order": u"призы стоят правее старта: 5, 54, 53, 32; снимается "
+                     u"верхний — жизнь, здоровье, продолжение, потом "
+                     u"проигрыш"},
+        "hit": {
+            "touch_code": 240,
+            "sound": at(hit, "pea ($000002).w"),
+            "invulnerable_f": at(hit, "move.w #$005A,$A(a0)"),
+            "guards": u"ENEMY COLL = OFF ($FFFFFD81), $FF1342, "
+                      u"неуязвимость +$A"},
+        "flyout": {
+            "vy": at(fly, "move.w #$FA00,$18(a0)"),
+            "vx_rand_mask": at(fly, "andi.w #$07FF,d0", signed=False),
+            "vx_bias": neg(at(fly, "subi.w #$0400,d0")),
+            "catchable": False},
+        "awards": {
+            "table": "$1FE992",
+            "life_max": at(0x29FE58, "cmpi.w #$0009,($FF1344).l"),
+            "continue": at(0x29FE6A, "addq.w #1,($FF1354).l"),
+            "health_max_add": bcd(at(0x29FE72, "moveq #80,d0")),
+            "health_add": bcd(at(0x29FE72, "move.w #$0050,d0")),
+            "ninja_series_max": D(4, u"cmpi.w #5 / bge — не больше 4",
+                                  at(0x29FEAC, "cmpi.w #$0005,d6"))},
+        "shield_native": {
+            "codes": {"140": u"смотрит вправо", "141": u"смотрит влево"},
+            "cell_offset_px": pair(at(0x29FD88, "addq.w #8,d1", value=8),
+                                   at(0x29FD88, "addi.w #$0010,d2")),
+            "trigger_dy_px": at(0x29FDC2, "cmpi.w #$0005,d1"),
+            "trigger_ahead_px": at(0x29FDC2, "cmpi.w #$0060,d0"),
+            "trigger_rule": u"утка впереди по его взгляду и едет к нему",
+            "speed_div": D(2, u"asr.w $FF04E4",
+                           at(0x29FDC2, "asr.w ($FF04E4).l", value=1)),
+            "swing_ticks": cmd(0x1DB604, [0xE1, 0x26, 0x00], size=1),
+            "swing_mark_f": sw,
+            "knock_after_f": seen_next(sw),
+            "sound": cmd(0x1DB612, [0xEA], size=1, signed=False),
+            "knock_v": at(0x29FDC2, "move.w #$0600,($FF04E4).l"),
+            "knock_rule": u"утке — его взгляд и скорость езды $0600"},
+        "fire_native": {
+            "cell_offset_px": pair(at(0x2A00AE, "addq.w #8,d1", value=8),
+                                   at(0x2A00AE, "addi.w #$0010,d2")),
+            "twirls_between_142": D(2, u"+$8 = 1: бросок после каждого "
+                                       u"второго круга",
+                                    at(0x2A00AE, "move.w #$0001,$8(a0)")),
+            "twirls_between_143": D(1, u"+$8 = 0",
+                                    at(0x2A00E4, "clr.w $8(a0)", value=0)),
+            "twirl_f": tw,
+            "throw_at_f": seen_next(script_mark(0x1D9382, 6, 1)),
+            "sound": at(0x2A00F4, "pea ($00009C).w"),
+            "fire": {
+                "offset_px": pair(at(0x2A0156, "moveq #-16,d1"),
+                                  at(0x2A0156, "moveq #-32,d2")),
+                "touch_code": at(0x2A0156, "move.b #$F0,d4",
+                                 signed=False),
+                "v": pair(at(0x2A0156, "move.l #$0070F980,$16(a0)",
+                             part="hi"),
+                          at(0x2A0156, "move.l #$0070F980,$16(a0)",
+                             part="lo")),
+                "gone": u"падает до высоты появления — удалён, "
+                        u"туземец ловит"}},
+        "stone_native": {
+            "cell_offset_px": pair(at(0x2A01CE, "addq.w #8,d1", value=8),
+                                   D(0, u"Y клетки")),
+            "first_wait_mask": at(0x2A01CE, "andi.w #$003F,d0",
+                                  signed=False),
+            "wait_144": at(0x2A01CE, "move.w #$003C,$8(a0)"),
+            "wait_145": at(0x2A020A, "move.w #$0050,$8(a0)"),
+            "wait_rule": u"в покое, subq/bpl: n + 1 кадров",
+            "drop_anim": "$1D97EE",
+            "sound": cmd(0x1D9804, [0xEA], size=1, signed=False),
+            "disc_at_f": seen_next(script_mark(0x1D97EE, 6, 1)),
+            "disc": {
+                "ahead_px": at(0x2AA540, "moveq #16,d0"),
+                "below_px": at(0x2AA540, "addi.w #$0030,$14(a0)"),
+                "v": at(0x2AA540, "move.w #$0400,$18(a0)"),
+                "depth_px": at(0x2AA742, "addi.w #$0050,d0"),
+                "hang_f": at(0x2AA742, "move.w #$001E,$6(a0)"),
+                "rise_v": at(0x2AA742, "move.w #$FB00,$18(a0)"),
+                "gone_above_px": at(0x2AA742, "addi.w #$0014,d0"),
+                "touch_code": 240}},
+        "code_160": {
+            "on_maps": False,
+            "vy": at(0x2A0088, "move.w #$FA00,$18(a0)"),
+            "vx": at(0x2A0088, "move.w #$0300,$16(a0)"),
+            "state": at(0x2A0088, "move.b #$2D,$4(a0)")},
+    }
+
+
 def hook_release():
     out = []
     for i in range(10):
@@ -735,7 +1128,7 @@ def small():
         },
         "throw_from": {"ahead": offs[0], "up": offs[1], "diagonal": offs[2],
                        "crouching_or_air": low},
-        "throw_at_f": script_mark(0x1D7C86, 0x05, 1),
+        "throw_at_f": seen_next(script_mark(0x1D7C86, 0x05, 1)),
         "hurt_f": script_end(0x1D7E74),
     }
 
@@ -1903,9 +2296,10 @@ def b_guardian():
             "takes_touch_code": at(near, "cmpi.b #$E8,$29(a1)",
                                    signed=False),
             "takes_state_bit": at(near, "andi.w #$0002,d0"),
-            "takes": u"снаряд игрока с битом 1 в +$05: наборы 2, 3, 6, 7 — "
-                     u"те, что кладут (+$05 = 2, 3, 6, 6); брошенные "
-                     u"наборы 0, 1, 4, 5 не глотаются",
+            "takes": u"снаряд игрока с битом 1 в +$05: жуки наборов 2, "
+                     u"3, 6, 7 (+$05 = 2, 3, 6, 6) и пять выстрелов "
+                     u"лопнувшего жука набора 3 (+$05 = 3); брошенные "
+                     u"наборы 0, 1, 4, 5 и серпы набора 6 (4) — нет",
             "burst_f": script_mark(0x1DB022, 0x05, 2, 8),
             "damage_hp": at(0x2A6B0A, "subq.w #2,$1C(a0)", value=2),
             "burst_sound": at(0x2A6B0A, "pea ($00000F).w"),
@@ -2020,6 +2414,7 @@ def build():
         "touch": touch(),
         "enemies": enemies(),
         "bosses": bosses(),
+        "bonus": bonus(),
     }
 
 
