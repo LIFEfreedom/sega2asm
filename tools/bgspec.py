@@ -216,7 +216,7 @@ def limit_events():
                                   "($FF1A8C).l", span=0x60, part="lo")]),
             ("sound", at(0x29E586, "pea ($000054).w", span=0xC0))]),
         OrderedDict([
-            ("level", 13), ("object", u"зона воды $2A06FA"),
+            ("level", 13), ("object", u"шнур тарзанки $2A06FA"),
             ("trigger_x_px", at(0x2A06FA, "cmpi.w #$0CE0,d0", span=0x10)),
             ("left_start", u"камера X"),
             ("left_step_px_f", D(2, u"addq.w #2",

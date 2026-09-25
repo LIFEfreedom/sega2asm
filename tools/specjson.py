@@ -316,7 +316,8 @@ def player():
             "throw_from": dict(zip(("ahead", "up", "diagonal", "down"),
                                    throw)),
             "ammo_per_pickup": at(0x29A0E0, "moveq #16,d0", nth=0),
-            "body": body(), "ninja": ninja(), "small": small()}
+            "body": body(), "ninja": ninja(), "small": small(),
+            "bungee": bungee()}
 
 
 # ------------------------------------------------------------ скрипты игрока
@@ -467,6 +468,112 @@ def body():
             "wall_row_below_y_px": at(0x2A4CC0, "addq.w #8,d1", span=0x14),
             "head_probe_px": at(0x2942BC, "moveq #0,d7", span=8),
         },
+    }
+
+
+def _cord(ctor, where):
+    return {"ctor": hexa(ctor), "where": where,
+            "rest_px": at(ctor, "$4C(a0)", span=0x1A),
+            "release_px": at(ctor, "$4E(a0)", span=0x1A),
+            "shelf_floor_px": at(ctor, "$50(a0)", span=0x1A),
+            "stiffness_shift": at(ctor, "$52(a0)", span=0x1A)}
+
+
+def bungee():
+    """Тарзанка уровней 12 и 13 (то, что раньше звалось «водой»)."""
+    ctl, grab, st7, st24 = 0x2A0460, 0x2A0626, 0x293F54, 0x2941A0
+    return {
+        "levels": [12, 13],
+        "cords": {
+            "code_124": _cord(0x2A0406, u"уровень 12: (376, 352), "
+                                        u"(264, 1488)"),
+            "code_125": _cord(0x2A0424, u"уровень 12: (264, 2832)"),
+            "level_13": _cord(0x2A0442, u"уровень 13 со старта: процедура "
+                                        u"уровня $2A07A4"),
+            "cell_offset_px": pair(at(0x2A03DE, "addq.w #8,d1", value=8),
+                                   at(0x2A03DE, "addi.w #$0010,d2"))},
+        "lines": u"всё от точки крепления (Y шнура): +rest — линия покоя, "
+                 u"+release (отрицательное — выше) — линия отцепления, "
+                 u"+shelf_floor — ниже неё на полке не устоять",
+        "level13": {
+            "cord_cell_px": pair(at(0x2A07A4, "move.w #$00A0,d1"),
+                                 at(0x2A07A4, "move.w #$0050,d2")),
+            "shift_at_x": at(0x2A06FA, "cmpi.w #$0CE0,d0"),
+            "shift_up_px": at(0x2A06FA, "move.w #$0030,d0"),
+            "left_limit_to": at(0x2A06FA, "move.w #$0CA0,$4C(a0)"),
+            "left_limit_step": at(0x2A0756, "addq.w #2,d0", value=2)},
+        "grab": {
+            "touch_codes": [124, 125, 126],
+            "max_rise_v": at(grab, "cmpi.w #$FC00,d1"),
+            "probe_up_px": at(grab, "subi.w #$0020,d2"),
+            "probe_half_px": at(grab, "moveq #16,d3"),
+            "stop_v": at(0x2A05B6, "clr.w $18(a0)", value=0),
+            "snap": u"игрока ставят на высоту крепления",
+            "x_corridor_px": [neg(at(0x2A05B6, "subi.w #$0140,d0")),
+                              D(320, u"-320 + 640",
+                                at(0x2A05B6, "addi.w #$0280,d0"))],
+            "no_corridor_when_shift": at(0x2A05B6,
+                                         "cmpi.w #$0002,$52(a1)"),
+            "sound": at(0x2A0654, "pea ($00007D).w"),
+            "form_checked": False},
+        "pull": {
+            "rule": u"каждый кадр: s = Y - линия покоя; s >= 0 и "
+                    u"состояние не 24 и не 39 — скорость Y -= s >> k "
+                    u"(1/256 точки за кадр); выше линии покоя шнур "
+                    u"провисает",
+            "gravity_a": at(0x2A4F1C, "move.w #$003C,d0", span=0x10),
+            "equilibrium_px": [D(120, u"60 << 1: сила s >> 1 равна "
+                                      u"тяжести $3C"),
+                               D(240, u"60 << 2 на уровне 13")],
+            "ceiling_y_px": at(ctl, "cmpi.w #$0010,d0"),
+            "max_fall_v": at(0x2A4E50, "move.w #$0800,d1"),
+            "hard_landing_v": at(ctl, "cmpi.w #$0040,($FF138C).l"),
+            "hard_landing_pause_shift": at(ctl, "lsr.w #5,d4",
+                                           value=5),
+            "lift_off_pull": at(ctl, "cmpi.w #$003C,d1"),
+            "lift_off_anim": "$1D6F34",
+            "step_order": u"утка сначала движется, потом шнур меняет "
+                          u"скорость: раскачка энергии не набирает"},
+        "release": {
+            "rule": u"выше линии отцепления в состоянии 7",
+            "sound": at(0x293F26, "pea ($00007E).w"),
+            "then_state": at(st7, "move.b #$16,$4(a0)"),
+            "also_spikes": u"код местности 13 ($29498A)"},
+        "states": {
+            "7": {"what": u"прыжки на шнуре", "handler": hexa(st7),
+                  "on_ground_state": at(st7, "move.b #$00,$4(a0)"),
+                  "stretch_anim_from_px": at(0x293ED2,
+                                             "cmpi.w #$0180,d2"),
+                  "stretch_anim": "$1D6F14",
+                  "stretch_sound": cmd(0x1D6F26, [0xEA], size=1,
+                                       signed=False),
+                  "hang_anim": "$1D6F34", "fall_anim": "$1D6F46",
+                  "air_throw_state": at(st7, "move.b #$0D,$4(a0)"),
+                  "down": u"держат вниз — искать полку"},
+            "24": {"what": u"стоит на полке, шнур не тянет",
+                   "handler": hexa(st24),
+                   "walk_v": at(st24, "move.w #$0100,$16(a0)"),
+                   "leave": u"B, нет полки или ниже предела полки",
+                   "leave_up_px": at(0x294180, "subi.w #$0010,$14(a0)"),
+                   "no_shelf_f": at(0x294180,
+                                    "move.b #$1E,($FF2134).l"),
+                   "throw_state": at(st24, "move.b #$27,$4(a0)")},
+            "39": {"what": u"бросок с полки", "handler": "$2942A0",
+                   "shot_px": pair(D(42, u"младшее слово $0006002A",
+                                     at(0x29426C,
+                                        "move.l #$0006002A,d4")),
+                                   D(6, u"старшее слово: выше"))}},
+        "shelf": {
+            "probe_below_px": at(st7, "addi.w #$0010,d4"),
+            "terrain_codes": [at(0x294086, "cmpi.w #$0028,d2"),
+                              at(0x294086, "cmpi.w #$0030,d2")],
+            "profiles": "$1EAAE6",
+            "object_bit_mask": at(0x294086, "move.w #$2000,d7"),
+            "ride": u"на объекте — едет с ним ($FF2135, $2A4290), шнур "
+                    u"тоже; такие объекты — шесты уровня 13"},
+        "launch_height": u"из покоя на глубине s под линией покоя: "
+                         u"h = (s^2 / (2 * 2^k * 256) - 60 s / 256) / "
+                         u"(60 / 256) над линией покоя",
     }
 
 
@@ -1773,7 +1880,9 @@ def b_guardian():
             "hide_below_px": at(0x2A6942, "subi.w #$0100,d0"),
             "rule": u"прячется (состояние 0), когда голова Y − 256 > "
                     u"камера Y, в любом состоянии; появляется, когда "
-                    u"голова Y − 256 <= камера Y",
+                    u"голова Y − 256 <= камера Y; утка на шнуре, и "
+                    u"лягушка прячется, когда камера уходит вверх за "
+                    u"высоким отскоком",
             "side_dx_px": at(0x2A6942, "move.w #$FF18,d1"),
             "sides": u"первый круг — дом − 232, лицом вправо; второй — "
                      u"дом + 232, лицом влево",
@@ -1880,7 +1989,10 @@ def b_guardian():
             "phase_turn": [None, at(c, "move.w #$0100,$4C(a0)"),
                            at(c, "move.w #$0300,$4C(a0)")],
             "step_turn": at(0x2A0AC6, "addi.w #$0008,d0"),
-            "touch": u"нет: код $B4 -> rts; ни опора, ни мишень"},
+            "shelf_bit": at(pole, "move.w #$2000,$30(a0)"),
+            "touch": u"урона нет (код $B4 -> rts); бит 13 в +$30 делает "
+                     u"шест полкой для утки на шнуре: держа вниз, она "
+                     u"встаёт на него и едет (player.bungee)"},
         "refill": {
             "cell_code": D(182, u"клетка кода 182 уровня 13 -> $2A0B14"),
             "shows_when": u"второй запас $FF1A24 пуст ($2A0B40)",
