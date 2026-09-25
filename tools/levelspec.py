@@ -39,6 +39,7 @@ import enemies as E                                          # noqa: E402
 import levels as L                                           # noqa: E402
 import objects as O                                          # noqa: E402
 import scroll as SC                                          # noqa: E402
+import bgspec as BGS                                         # noqa: E402
 import specjson as SJ                                        # noqa: E402
 from paths import OUT                                        # noqa: E402
 from specjson import D, V, at, dw, dl, hexa                  # noqa: E402
@@ -160,7 +161,7 @@ BOSSES = {
                        u"по эллипсам (не разобран)"),
 }
 GENERATORS = set([0x29E698, 0x29E6A2, 0x29E6AC, 0x2A163C, 0x29D12C,
-                  0x29DFEC, 0x29E55E] +
+                  0x29DFEC] +
                  list(range(0x29B7A4, 0x29B893)))
 EXIT_UPDATE = 0x29C6C2
 # Механизмы облика игрока — по конструктору (behavior.md, 1.7 и 1.8).
@@ -169,6 +170,16 @@ FORM_OBJECTS = {
                            u"утку или возвращает рост ($29F410)"),
     0x29A4A4: ("brace_post", u"опора для распора ниндзя; рушится через 66 "
                              u"тактов после распора"),
+    # Камера (scrolling.md): пределы арены и землетрясение.
+    0x29E55E: ("camera_limit", u"запирает арену уровня 9: низ $E0, потом "
+                               u"по X $20..$230, музыка $54"),
+    0x29E4FC: ("camera_limit", u"игрок выше — дно арены с $200 по 8 за "
+                               u"кадр до $F0"),
+    0x29C018: ("camera_limit", u"заводит арену уровня 5: левый предел "
+                               u"ползёт по 2 к $0BB0"),
+    0x29BDCC: ("quake_trigger", u"ломается от объекта с битом 13; четвёртый "
+                                u"одного кода — землетрясение и отсчёт "
+                                u"$FF214A"),
 }
 
 
@@ -430,6 +441,8 @@ def level_facts(n, pl, tc, size):
             "background": SC.BG.get(bg, hexa(bg))}),
         ("sticky", dw(r + 0x3E)),
         ("cutscene_after", dw(r + 0x40)),
+        ("background", BGS.background(n, r)),
+        ("effects", BGS.effects(n, r)),
         ("tile_animation", dw(r + 0x3A)),
         ("palette_animation", dl(r + 0x1C, addr=True)
          if U32(r + 0x1C) else None),
@@ -456,6 +469,7 @@ def level_facts(n, pl, tc, size):
 
 def rules():
     return OrderedDict([
+        ("camera", BGS.camera()),
         ("level_end", {
             "signal": u"$FF1A6C: +1 пройден, -1 гибель ($298AB8, $298120)",
             "exit_tile_code": D(5, u"код местности 5 -> $2A4AF8",
@@ -473,8 +487,9 @@ def rules():
             "rising_liquid": u"$2A179A: игрок ниже $FF1390 (уровень 11)",
             "idol_lost": u"$2A2FDE (уровень 17)",
             "countdown_ff214a": u"$2994A8: таймер $FF214A кончился, а "
-                                u"игрок правее $A8; где заводится "
-                                u"($29BE7C) — не установлено",
+                                u"игрок не левее $A8; заводит его "
+                                u"$29BE7C на уровне 3, когда сломан "
+                                u"четвёртый объект кода 164 ($29BDCC)",
         }),
         ("respawn", {
             "checkpoint_touch": hexa(0x2A4664),
@@ -543,6 +558,37 @@ def tiles_png(n, g, path):
     L.S.png(path, w, h, buf)
 
 
+def tileanim_png(n, path):
+    """Кадры анимации тайлов: ряд на кадр, серая шкала по номеру цвета."""
+    r = L.record(n)
+    cnt = struct.unpack_from(">H", ROM, r + 0x3A)[0]
+    if not cnt:
+        return None
+    rows = []
+    t0 = U32(r + 0x18)
+    for k in range(cnt):
+        lst, frames = U32(t0 + 8 * k), struct.unpack_from(">H", ROM,
+                                                          t0 + 8 * k + 4)[0]
+        for f in range(frames):
+            e = lst + 8 * f
+            words = struct.unpack_from(">H", ROM, e)[0]
+            src = U32(e + 2) * 2
+            rows.append(ROM[src:src + words * 2])
+    per = max(len(x) for x in rows) // 32
+    w, h = per * 8, len(rows) * 8
+    buf = [(0, 0, 0, 0)] * (w * h)
+    for ry, data in enumerate(rows):
+        for i in range(len(data) // 32):
+            for y in range(8):
+                for xb in range(4):
+                    bt = data[i * 32 + y * 4 + xb]
+                    for half, c in ((0, bt >> 4), (1, bt & 15)):
+                        buf[(ry * 8 + y) * w + i * 8 + xb * 2 + half] = (
+                            (17 * c, 17 * c, 17 * c, 255 if c else 0))
+    L.S.png(path, w, h, buf)
+    return os.path.basename(path)
+
+
 def build(write):
     tree = OrderedDict([("rules", rules()), ("levels", [])])
     outdir = os.path.join(OUT("export"), "levels")
@@ -557,12 +603,16 @@ def build(write):
             m["objects"] = pl
             m["level"] = n
             m["tiles_png"] = "level%02d_tiles.png" % n
+            if struct.unpack_from(">H", ROM, L.record(n) + 0x3A)[0]:
+                m["tile_animation_png"] = "level%02d_tileanim.png" % n
             p = os.path.join(outdir, "level%02d.json" % n)
             with io.open(p, "w", encoding="utf-8", newline="\n") as f:
                 f.write(json.dumps(m, ensure_ascii=False,
                                    separators=(",", ":")))
                 f.write(u"\n")
             tiles_png(n, g, os.path.join(outdir, m["tiles_png"]))
+            tileanim_png(n, os.path.join(outdir,
+                                         "level%02d_tileanim.png" % n))
     return tree
 
 
