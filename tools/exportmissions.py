@@ -62,7 +62,12 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 - Гнёзда: тип 1 — игрока 1, типы 2…4 — игрока 2.
 - Юниты игроков видов 1…6: поза 3 — яйцо, 4 и 8 — падаль, прочие —
   ходьба. Направление — те же три бита, нумерация ремейка совпадает.
-- Нейтральные, декор и виды 8/9 не выгружаются — это отдельные задачи.
+- Ничьё, команда 0 (dyna #206, разбор в game-neutral.md): мясо — типы
+  69…74, падаль видов 1…6 (`unit_type` 0…5), поза `carcass`; кости —
+  тип 67, падаль с блоком ﾋﾟｰﾁｬﾝ (`unit_type` 5), поза `bones`; пустое
+  яйцо — тип 68, поза `empty_egg`.
+- Прочие нейтральные, части ﾒｶﾞｻﾞｳﾙｽ, падаль вида 20 (тип 75) и виды
+  8/9 игроков не выгружаются — это отдельные задачи.
 
 Деньги — BCD `+$34` и `+$38`. Доступность — слова подкоманд с `+$3C`
 по номеру команды (`data_177` `$024B52`): погода — команда 2
@@ -104,6 +109,9 @@ SKIP_ON = 0x7FC00000               # LoadPlacement: типы 22…30
 # HeavyRain 3, Earthquake 4, Meteorite 5, Lightning 6)
 WEATHER_ITEMS = (1, 3, 2, 0, 4, 6, 5)
 POSES = {3: "egg", 4: "carcass", 8: "carcass"}
+MEAT = range(69, 75)               # падаль видов 1…6, по классу типа
+BONES, EMPTY_EGG = 67, 68
+BONES_SPECIES = 6                  # дескриптор $06A4 -> блок ﾋﾟｰﾁｬﾝ $022AEA
 
 # тип ROM -> (местность, код растения ремейка)
 PLANTS = {}
@@ -246,6 +254,17 @@ def export_mission(c, m, r, recs, skipped):
             continue
         if typ == 1 or typ in (2, 3, 4):
             nests[1 if typ == 1 else 2].append({"x": x, "y": y})
+            continue
+        neutral = None
+        if typ in MEAT:
+            neutral = (typ - MEAT.start, "carcass")
+        elif typ == BONES:
+            neutral = (BONES_SPECIES - 1, "bones")
+        elif typ == EMPTY_EGG:
+            neutral = (0, "empty_egg")
+        if neutral:
+            units.append({"team_id": 0, "unit_type": neutral[0], "x": x,
+                          "y": y, "facing": d, "pose": neutral[1]})
             continue
         owner, sp, decor = unit_type(typ)
         if owner == 0:

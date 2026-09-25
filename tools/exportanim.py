@@ -400,6 +400,7 @@ def sheet(t, words, pal, path):
 
 EGG_SPECIES = 6                    # шесть видов, по три кадра на каждый
 EGG_STAGES = ((0x05, "rest"), (0x06, "stir"), (0x07, "ready"))
+EMPTY_EGG, BONES = 68, 67             # вид 25 и вид 26 без сторон
 EGG_SHARED = ((0x04, "lay"), (0x08, "crack"), (0x03, "hatch"))
 NESTS = ((1, "spawner", u"гнездо игрока 1"),
          (2, "spawner2", u"гнездо игрока 2"),
@@ -505,6 +506,22 @@ def export_props():
             sheet(t, [w for w, _d in seq], pal,
                   os.path.join(objects, fname + "_spark.png"))
             made += 1
+    # Нейтральное из расстановки (dyna #206), game-neutral.md: пустое яйцо
+    # (тип 68) — кадр покоя анимации 5; кости (тип 67) — кадр позы падали
+    # $20, один на пару курсов: 0–1, 2–3, 4–5, 6–7.
+    for t, an, facings, path in (
+            (EMPTY_EGG, 0x05, (0,), lambda k: os.path.join(eggs, "empty.png")),
+            (BONES, 0x20, (0, 2, 4, 6),
+             lambda k: os.path.join(objects, "bones", "%d.png" % (k // 2)))):
+        pal = unitgfx.row_palette(unitgfx.palette_row(t))
+        ent = unitanim.entry_map(t)
+        for k in facings:
+            seq, _l, ok, _n = unitanim.steps(
+                unitgfx.script_addr(t, an, k), ent)
+            if ok and seq:
+                os.makedirs(os.path.dirname(path(k)), exist_ok=True)
+                if single(t, seq[0][0], pal, path(k)):
+                    made += 1
     print(u"яйца и гнёзда: %d картинок -> %s"
           % (made, os.path.relpath(root, HERE)))
     print(u"кадр покоя по видам: %s"
