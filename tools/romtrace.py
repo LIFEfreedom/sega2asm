@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+"""Трасса ROM: сама игра на ядре 68000 без картинки и звука, по кадрам.
+
+    SEGA2ASM_CONFIG=platformer.yaml python tools/romtrace.py           все сценарии
+    SEGA2ASM_CONFIG=platformer.yaml python tools/romtrace.py idle      выбранные
+    SEGA2ASM_CONFIG=platformer.yaml python tools/romtrace.py --check   дважды, сверить
+    SEGA2ASM_CONFIG=platformer.yaml python tools/romtrace.py --list
+
+Нужен `unicorn` 2.1.4 (`pip install unicorn==2.1.4`, ядро QEMU под GPLv2 —
+только для этого инструмента). Пишет `out/mauimallard/export/traces/<имя>.json`:
+по кадру уровня — запись игрока `$FFFFE1CA` (`$54` байта) и участки ОЗУ из
+`LAYOUT` (переменные шага игрока, пульт, камера, счётчик кадров, ГСЧ).
+Ремейк проигрывает ту же запись пульта и сверяет каждый кадр.
+
+Машина. Картинки, звука и тактов нет, только то, от чего зависит логика:
+
+* ПЗУ, ОЗУ `$FF0000` с зеркалом `$FFFF0000` (адреса `.w` и `.l $FFFFxxxx`);
+* VDP: запись в порты пропускается, статус — FIFO пуст, DMA не занят, бит
+  кадра меняется на каждом чтении; счётчик HV — ноль;
+* Z80: шина выдана сразу, ОЗУ Z80 — просто память; YM — ноль;
+* пульт на 3 кнопки в первом порту, по линии TH, как его читает `$290B5E`;
+* кадр: основной поток — `BUDGET` команд, потом прерывание уровня 6
+  (`$2968FE`), если маска его пускает; обработчик идёт до своего `rte`.
+  В нём и выполняется вся логика кадра (списки `$FFFFE166`, `$FFFFE176`),
+  так что «лага» нет: следующий кадр — после `rte`. Прерывание, пришедшее
+  под маской, теряется (на железе оно бы дождалось снятия маски); на кадры
+  уровня это не влияет — там основной поток стоит в пустом цикле. HBlank
+  (`$296976`) не вызывается.
+
+Две особенности `unicorn` и что с ними сделано:
+
+* `rte` ядро само не выполняет, а отдаёт в хук прерываний (номер `$100`):
+  хук снимает со стека SR и PC (кадр 68000, без слова формата);
+* чтение SR через API портит флаги, которые QEMU держит лениво (после него
+  `bcs` видит чужой перенос), поэтому SR читает сам процессор: заглушка
+  `move.w sr,<ячейка>`. Вход в прерывание тоже через заглушку: PC кладётся
+  на стек извне, SR — командой `move.w sr,-(a7)`.
+
+Путь до уровня: с включения каждые 90 кадров 4 кадра держится Start (логотип,
+титульный экран, меню, заставка мира). На входе в `LevelSetup` (`$2984C2`)
+номер уровня `$FF1B14` подменяется на нужный, и Start больше не жмётся.
+Первый вход в задачу игрока `$298C44` — вход в уровень: снимок `entry` (до
+первого шага игрока); с этого кадра идёт запись пульта сценария, и после
+каждого кадра снимается `frames[k]`.
+
+Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
+в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
+клеток не заводятся. Заплатки перечислены в выходе.
+"""
+import argparse
+import ctypes
+import hashlib
+import io
+import json
+import os
+import struct
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import OUT, rom_bytes  # noqa: E402
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+try:
+    from unicorn import (Uc, UcError, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN, UC_PROT_ALL,
+                         UC_PROT_READ, UC_PROT_EXEC, UC_HOOK_INTR, UC_HOOK_CODE,
+                         UC_HOOK_MEM_UNMAPPED, __version__ as UC_VERSION)
+    import unicorn.m68k_const as M
+except ImportError:
+    sys.exit("нужен unicorn: pip install unicorn==2.1.4")
+
+VINT_VECTOR = 0x78
+LEVEL_SETUP = 0x2984C2
+PLAYER_TASK = 0x298C44
+LEVEL_NUMBER = 0xFF1B14
+DEMO = 0xFFFFFD90            # не ноль — идёт демо, пульт из записи
+PLAYER = 0xFFFFE1CA
+PLAYER_LENGTH = 0x54
+BUDGET = 12000             # команд основного потока между кадрами (~ такты / 10)
+HANDLER_LIMIT = 3_000_000  # команд обработчику кадра, дальше — ошибка
+BOOT_LIMIT = 6000          # кадров до входа в уровень
+
+# Кнопки в порядке байта пульта (активная единица): U D L R B C A S.
+BUTTONS = "UDLRBCAS"
+
+# Участки ОЗУ, снимаемые после каждого кадра: (адрес, длина, что это).
+LAYOUT = [
+    (0xFFFFE196, 2, "счётчик кадров"),
+    (0xFFFFE14E, 8, "ГСЧ $296B0C"),
+    (0xFFFFE1BC, 4, "камера с тряской (показанное окно)"),
+    (0xFF1314, 4, "скорость камеры"),
+    (0xFF131C, 4, "тряска камеры"),
+    (0xFF1322, 6, "сдвиг цели камеры, флаги шага"),
+    (0xFF1A5A, 4, "камера без тряски"),
+    (0xFF1A8C, 8, "пределы"),
+    (0xFF1A6C, 2, "сигнал выхода"),
+    (0xFF1A00, 0x20, "пульт: удержание A, держат, нажали, изменилось, кольца"),
+    (0xFF1330, 0x10, "таблицы формы, форма, полуширина, топливо"),
+    (0xFF1346, 2, "здоровье"),
+    (0xFF136A, 2, "тарзанка"),
+    (0xFF138C, 2, "скорость при посадке"),
+    (0xFF1B4E, 2, "потолок скорости падения"),
+    (0xFF04DC, 2, "потолок от объектов"),
+    (0xFF2130, 0x10, "шаг игрока: код клетки, вода, флаги, запреты"),
+    (0xFF2168, 8, "снос"),
+]
+
+# Сценарии: уровень, объекты, что по трассе сверять ремейку (camera — камера по
+# позициям игрока, player — запись игрока и переменные шага), запись пульта
+# [(кнопки, кадров), ...].
+SCENARIOS = {
+    "idle": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("", 600)],
+        "about": "уровень 0, пульт не трогают: покой и развилки его скрипта по жребию",
+    },
+    "walk_right": {
+        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "input": [("R", 90), ("", 60), ("L", 30), ("", 60)],
+        "about": "уровень 0: вправо, стоп, разворот влево, стоп",
+    },
+    "unicycle_19": {
+        "level": 19, "objects": False, "checks": ["camera"],
+        "input": [("", 600)],
+        "about": "бонус 19: моноцикл едет сам, пульт не трогают",
+    },
+}
+
+NO_OBJECTS = [
+    (0x2914EA, "4E96", "4E71", "обход столбца клеток: jsr (a6) — конструктор объекта клетки"),
+    (0x291800, "4E96", "4E71", "обход строки клеток: jsr (a6) — конструктор объекта клетки"),
+]
+
+
+def pad_byte(buttons):
+    v = 0
+    for ch in buttons:
+        v |= 1 << BUTTONS.index(ch)
+    return v
+
+
+class MegaDrive:
+    """Mega Drive без картинки и звука на ядре unicorn."""
+
+    SCRATCH = 0x00900000
+
+    def __init__(self, rom, patches=()):
+        rom = bytearray(rom)
+        for at, old, new, _ in patches:
+            old_b, new_b = bytes.fromhex(old), bytes.fromhex(new)
+            if rom[at:at + len(old_b)] != old_b:
+                raise ValueError("заплатка $%06X: в ROM не %s" % (at, old))
+            rom[at:at + len(new_b)] = new_b
+        self.rom = bytes(rom)
+        uc = self.uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
+        uc.ctl_set_cpu_model(M.UC_CPU_M68K_M68000)
+        uc.mem_map(0, 0x400000, UC_PROT_READ | UC_PROT_EXEC)
+        uc.mem_write(0, self.rom)
+        self.ram = ctypes.create_string_buffer(0x10000)
+        uc.mem_map_ptr(0x00FF0000, 0x10000, UC_PROT_ALL, self.ram)
+        uc.mem_map_ptr(0xFFFF0000, 0x10000, UC_PROT_ALL, self.ram)
+        self.z80 = bytearray(0x2000)
+        self.th = 1
+        self.pad = 0
+        self.status = 0
+        self.odd_io = {}
+        uc.mmio_map(0xA00000, 0x20000, self._io_read, None, self._io_write, None)
+        uc.mmio_map(0xC00000, 0x1000, self._vdp_read, None, self._vdp_write, None)
+        uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._unmapped)
+        uc.hook_add(UC_HOOK_INTR, self._intr)
+
+        # Заглушки: прочитать SR процессором; войти в прерывание кадра.
+        vint = struct.unpack_from(">I", self.rom, VINT_VECTOR)[0]
+        uc.mem_map(self.SCRATCH, 0x1000, UC_PROT_ALL)
+        self.stub_sr = self.SCRATCH
+        self.stub_irq = self.SCRATCH + 0x20
+        self.sr_cell = self.SCRATCH + 0x100
+        uc.mem_write(self.stub_sr, bytes.fromhex("40F9") + struct.pack(">I", self.sr_cell) + bytes.fromhex("4E71"))
+        uc.mem_write(self.stub_irq, bytes.fromhex("40E7" "46FC2600" "4EF9") + struct.pack(">I", vint))
+        self.frame_sp = None
+
+        ssp, pc = struct.unpack_from(">II", self.rom, 0)
+        uc.reg_write(M.UC_M68K_REG_SR, 0x2700)
+        uc.reg_write(M.UC_M68K_REG_A7, ssp)
+        self.pc = pc
+        self.fault = None
+
+    # --- память ---
+
+    def read(self, address, length):
+        a = address & 0xFFFF
+        return bytes(self.ram.raw[a:a + length])
+
+    def word(self, address):
+        return struct.unpack(">H", self.read(address, 2))[0]
+
+    def write(self, address, data):
+        a = address & 0xFFFF
+        ctypes.memmove(ctypes.addressof(self.ram) + a, data, len(data))
+
+    def _io_read(self, uc, offset, size, user):
+        a = 0xA00000 + offset
+        if a < 0xA04000:
+            v = self.z80[offset & 0x1FFF]
+            return (v << 8 | v) if size == 2 else v
+        if a < 0xA04004:
+            return 0
+        if a in (0xA10000, 0xA10001):
+            return 0xA0          # заграничная NTSC, без дисковода
+        if a in (0xA10002, 0xA10003):
+            p = self.pad
+            if self.th:
+                return 0x40 | (~p & 0x3F)
+            # TH = 0: A и Start на битах 4 и 5, биты 2 и 3 — ноль (пульт на 3 кнопки)
+            return ~((p & 3) | ((p >> 6) & 1) << 4 | ((p >> 7) & 1) << 5) & 0x33
+        if a < 0xA10020:
+            return 0x7F
+        if a in (0xA11100, 0xA11101):
+            return 0             # шина Z80 выдана
+        self.odd_io[a] = self.odd_io.get(a, 0) + 1
+        return 0
+
+    def _io_write(self, uc, offset, size, value, user):
+        a = 0xA00000 + offset
+        if a < 0xA04000:
+            if size == 2:
+                self.z80[offset & 0x1FFF] = (value >> 8) & 0xFF
+                self.z80[(offset + 1) & 0x1FFF] = value & 0xFF
+            else:
+                self.z80[offset & 0x1FFF] = value & 0xFF
+        elif a in (0xA10002, 0xA10003):
+            self.th = (value >> 6) & 1
+
+    def _vdp_read(self, uc, offset, size, user):
+        if 4 <= offset < 8:
+            self.status ^= 8
+            return 0x3600 | self.status if size == 2 else 0x36
+        return 0
+
+    def _vdp_write(self, uc, offset, size, value, user):
+        pass
+
+    def _unmapped(self, uc, access, address, size, value, user):
+        self.fault = "обращение к $%08X (вид %d) из $%08X" % (address, access, uc.reg_read(M.UC_M68K_REG_PC))
+        return False
+
+    def _intr(self, uc, intno, user):
+        if intno != 0x100:
+            self.fault = "исключение %d в $%08X" % (intno, uc.reg_read(M.UC_M68K_REG_PC))
+            uc.emu_stop()
+            return
+        # rte на 68000: слово SR, длинное PC, слова формата нет
+        sp = uc.reg_read(M.UC_M68K_REG_A7)
+        sr, pc = struct.unpack(">HI", bytes(uc.mem_read(sp, 6)))
+        uc.reg_write(M.UC_M68K_REG_A7, (sp + 6) & 0xFFFFFFFF)
+        uc.reg_write(M.UC_M68K_REG_SR, sr)
+        uc.reg_write(M.UC_M68K_REG_PC, pc)
+        if sp == self.frame_sp:
+            self.frame_sp = None
+            uc.emu_stop()
+
+    # --- исполнение ---
+
+    def _run(self, begin, until, count):
+        try:
+            self.uc.emu_start(begin, until, 0, count)
+        except UcError as e:
+            raise RuntimeError(self.fault or "%s в $%08X" % (e, self.uc.reg_read(M.UC_M68K_REG_PC)))
+        if self.fault:
+            raise RuntimeError(self.fault)
+
+    def _sr(self):
+        self._run(self.stub_sr, self.stub_sr + 6, 0)
+        return struct.unpack(">H", bytes(self.uc.mem_read(self.sr_cell, 2)))[0]
+
+    def frame(self):
+        """Кусок основного потока и прерывание кадра, если маска его пускает."""
+        self._run(self.pc, 0xFFFFFFFF, BUDGET)
+        self.pc = self.uc.reg_read(M.UC_M68K_REG_PC)
+        if (self._sr() >> 8) & 7 >= 6:
+            return False
+        sp = (self.uc.reg_read(M.UC_M68K_REG_A7) - 4) & 0xFFFFFFFF
+        self.uc.mem_write(sp, struct.pack(">I", self.pc))
+        self.uc.reg_write(M.UC_M68K_REG_A7, sp)
+        self.frame_sp = (sp - 2) & 0xFFFFFFFF
+        self._run(self.stub_irq, 0xFFFFFFFF, HANDLER_LIMIT)
+        if self.frame_sp is not None or self.uc.reg_read(M.UC_M68K_REG_PC) != self.pc:
+            raise RuntimeError("обработчик кадра не вернулся за %d команд" % HANDLER_LIMIT)
+        return True
+
+
+def snapshot(md):
+    return {
+        "player": md.read(PLAYER, PLAYER_LENGTH).hex().upper(),
+        "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in LAYOUT),
+    }
+
+
+def run(name, sc, rom):
+    patches = [] if sc["objects"] else NO_OBJECTS
+    md = MegaDrive(rom, patches)
+    pads = []
+    for buttons, n in sc["input"]:
+        pads += [pad_byte(buttons)] * n
+    state = {"setup": False, "entry": None, "frame": 0}
+
+    def on_setup(uc, address, size, user):
+        if not state["setup"]:
+            state["setup"] = True
+            state["setup_frame"] = boot_frame[0]
+            md.write(LEVEL_NUMBER, struct.pack(">H", sc["level"]))
+
+    def on_player(uc, address, size, user):
+        if state["entry"] is None:
+            state["entry"] = snapshot(md)
+            md.pad = pads[0]
+
+    md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
+    md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
+
+    boot = 0
+    boot_frame = [0]
+    while state["entry"] is None:
+        boot_frame[0] = boot
+        if boot >= BOOT_LIMIT:
+            raise RuntimeError("%s: за %d кадров до уровня не дошли" % (name, BOOT_LIMIT))
+        md.pad = 0 if state["setup"] else (pad_byte("S") if boot % 90 < 4 else 0)
+        md.frame()
+        boot += 1
+    if md.word(LEVEL_NUMBER) != sc["level"]:
+        raise RuntimeError("%s: вошли в уровень %d" % (name, md.word(LEVEL_NUMBER)))
+    if md.read(DEMO, 1) != b"\0":
+        raise RuntimeError("%s: вошли в демо, а не в игру" % name)
+
+    # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
+    frames = [dict(pad=pads[0], **snapshot(md))]
+    for k in range(1, len(pads)):
+        md.pad = pads[k]
+        while not md.frame():
+            pass
+        frames.append(dict(pad=pads[k], **snapshot(md)))
+
+    return {
+        "meta": {
+            "generator": "tools/romtrace.py",
+            "rom_sha1": hashlib.sha1(rom).hexdigest().upper(),
+            "core": "unicorn %s, M68000" % UC_VERSION,
+            "boot_frames": boot,
+            "setup_frame": state["setup_frame"],
+            "odd_io": {"$%06X" % a: n for a, n in sorted(md.odd_io.items())},
+            "pad_bits": BUTTONS,
+            "frame": "frames[k] — ОЗУ после k-го кадра уровня (после rte обработчика $2968FE); "
+                     "pad — пульт, который прочитала задача игрока в этом кадре; entry — "
+                     "ОЗУ на первом входе в задачу игрока $298C44, до шага игрока кадра 0",
+        },
+        "scenario": {
+            "name": name,
+            "about": sc["about"],
+            "level": sc["level"],
+            "objects": sc["objects"],
+            "checks": sc["checks"],
+            "input": [[b, n] for b, n in sc["input"]],
+            "patches": [{"at": "$%06X" % at, "was": old, "now": new, "why": why}
+                        for at, old, new, why in patches],
+        },
+        "layout": {
+            "player": {"at": "$%08X" % PLAYER, "length": PLAYER_LENGTH},
+            "ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in LAYOUT],
+        },
+        "entry": state["entry"],
+        "frames": frames,
+    }
+
+
+def dump(trace):
+    s = io.StringIO()
+    s.write("{\n")
+    keys = list(trace)
+    for i, key in enumerate(keys):
+        s.write("  %s: " % json.dumps(key))
+        if key == "frames":
+            s.write("[\n")
+            rows = trace[key]
+            for j, row in enumerate(rows):
+                s.write("    " + json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+                s.write(",\n" if j + 1 < len(rows) else "\n")
+            s.write("  ]")
+        else:
+            s.write(json.dumps(trace[key], ensure_ascii=False, indent=2).replace("\n", "\n  "))
+        s.write(",\n" if i + 1 < len(keys) else "\n")
+    s.write("}\n")
+    return s.getvalue()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("names", nargs="*", help="сценарии (по умолчанию все)")
+    ap.add_argument("--check", action="store_true", help="каждый прогнать дважды и сверить, не писать")
+    ap.add_argument("--list", action="store_true", help="перечислить сценарии")
+    args = ap.parse_args()
+    if args.list:
+        for name, sc in SCENARIOS.items():
+            print("%-14s уровень %2d  %s" % (name, sc["level"], sc["about"]))
+        return
+    names = args.names or list(SCENARIOS)
+    for name in names:
+        if name not in SCENARIOS:
+            sys.exit("нет сценария %s (--list)" % name)
+    rom = rom_bytes()
+    out = OUT("export", "traces")
+    if not args.check:
+        os.makedirs(out, exist_ok=True)
+    for name in names:
+        text = dump(run(name, SCENARIOS[name], rom))
+        if args.check:
+            again = dump(run(name, SCENARIOS[name], rom))
+            print("%s: %s" % (name, "повтор совпал" if text == again else "ПОВТОР РАЗОШЁЛСЯ"))
+            if text != again:
+                sys.exit(1)
+            continue
+        path = os.path.join(out, name + ".json")
+        with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        print("%s: %s" % (name, path))
+
+
+if __name__ == "__main__":
+    main()
