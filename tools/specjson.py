@@ -1739,12 +1739,162 @@ def b_final():
     }
 
 
+def b_guardian():
+    """Страж уровня 13: лягушка, которая глотает положенных жуков."""
+    c, h, pole = 0x2A0A4A, 0x2A099C, 0x2A0A14
+    st1, swal, bite_on, bite = 0x2A6A32, 0x2A6990, 0x2A69D8, 0x2A6B8E
+    near, lost, fire = 0x2A68F8, 0x2A6A74, 0x1D9FDA
+    fire_f = D(62, u"скрипт $1D9FDA: 12 кадров по +$26 = 5 ($2996E2) и "
+                   u"кадр 1086 на 2 такта, потом +$06 = 1 — объект снят",
+               at(0x2996C2, "move.b #$05,$26(a0)", signed=False),
+               cmd(0x1D9FF2, [0xD8], size=1, signed=False))
+    loop = cmd(0x1D87EA, [0xDC, 0x4C])
+    return {
+        "cell_code": D(160, u"клетка кода 160 -> конструктор $2A0A4A "
+                            u"(перепись клеток)"),
+        "ctor": hexa(c), "update": "$2A6E40", "states": "$1FF4B8",
+        "music": at(c, "pea ($000054).w"),
+        "touch_code": at(c, "move.w #$00B4,d4", signed=False),
+        "touch": u"код $B4 -> $2A526C (rts): касание головы и шестов "
+                 u"ничего не делает; ядра урона $2A2C48 голова не зовёт",
+        "hp": at(h, "move.w #$0008,$1C(a0)"),
+        "rounds": D(2, u"+$2C = 1: круг проигран — минус один, "
+                       u"меньше нуля — поражение",
+                    at(h, "move.w #$0001,$2C(a0)")),
+        "cell_level13": D([219, 40], u"клетка кода 160 на уровне 13 — "
+                                     u"перепись клеток (levels.json)"),
+        "home_from_cell_px": pair(at(h, "addq.w #8,d1", value=8),
+                        D(18, u"клетка + 16 ($2A0A50) + 2 ($2A09A4)",
+                          at(c, "addi.w #$0010,d2"),
+                          at(h, "addq.w #2,d2", value=2))),
+        "park_dx_px": at(h, "addi.w #$00E0,d1"),
+        "vram_bytes": at(h, "move.w #$1480,d0", nth=0, signed=False),
+        "show": {
+            "hide_below_px": at(0x2A6942, "subi.w #$0100,d0"),
+            "rule": u"прячется (состояние 0), когда голова Y − 256 > "
+                    u"камера Y, в любом состоянии; появляется, когда "
+                    u"голова Y − 256 <= камера Y",
+            "side_dx_px": at(0x2A6942, "move.w #$FF18,d1"),
+            "sides": u"первый круг — дом − 232, лицом вправо; второй — "
+                     u"дом + 232, лицом влево",
+            "bug": at(0x2A6C88, "cmpi.w #$0002,$4(a0)", value=u"не "
+                      u"срабатывает: слово +$04 при ненулевом состоянии "
+                      u"не бывает 2, так что прячется и посреди глотания")},
+        "idle": {
+            "anim": "$1DAFD0",
+            "sound": cmd(0x1DAFD0, [0xEA], size=1, signed=False),
+            "spit_every_f": every(at(st1, "move.w #$01E0,$8(a0)")),
+            "order": u"каждый кадр: глотание, язык, отсчёт плевка"},
+        "swallow": {
+            "anim": "$1DB022",
+            "point_ahead_px": at(swal, "moveq #20,d1"),
+            "point_up_px": neg(at(swal, "moveq #-8,d2")),
+            "half_px": pair(at(near, "cmpi.w #$0008,d0", nth=1),
+                            at(near, "cmpi.w #$0008,d0", nth=0)),
+            "takes_touch_code": at(near, "cmpi.b #$E8,$29(a1)",
+                                   signed=False),
+            "takes_state_bit": at(near, "andi.w #$0002,d0"),
+            "takes": u"снаряд игрока с битом 1 в +$05: наборы 2, 3, 6, 7 — "
+                     u"те, что кладут (+$05 = 2, 3, 6, 6); брошенные "
+                     u"наборы 0, 1, 4, 5 не глотаются",
+            "burst_f": script_mark(0x1DB022, 0x05, 2, 8),
+            "damage_hp": at(0x2A6B0A, "subq.w #2,$1C(a0)", value=2),
+            "burst_sound": at(0x2A6B0A, "pea ($00000F).w"),
+            "flame_f": script_mark(0x1DB022, 0x06, 1, 8),
+            "flame": {"ahead_px": at(0x2A6CBA, "moveq #56,d0"),
+                      "up_px": at(0x2A6CBA, "subi.w #$0018,d2"),
+                      "touch_code": at(0x2A6CBA, "move.w #$00F0,d4",
+                                       signed=False),
+                      "damage": dmg_default(),
+                      "life_f": fire_f, "anim": hexa(fire),
+                      "sound": at(0x2A6B0A, "pea ($00007F).w")},
+            "then_spit_f": script_mark(0x1DB022, 0x05, 1, 8),
+            "no_swallow_while": True},
+        "tongue": {
+            "anim": "$1DB056",
+            "trigger_ahead_px": at(bite_on, "move.w #$0072,d1"),
+            "trigger_back_px": at(bite_on, "subi.w #$0008,d1"),
+            "trigger_up_px": neg(at(bite_on, "move.w #$FFD4,d1")),
+            "trigger_half_px": pair(at(bite_on, "cmpi.w #$0010,d1", nth=0),
+                                    at(bite_on, "cmpi.w #$0010,d1",
+                                       nth=1)),
+            "hit_from_f": script_mark(0x1DB056, 0x06, 1, 8),
+            "hit_to_f": D(13, u"+$06 = 1 на такте 11, +$06 = 0 на 14",
+                          script_mark(0x1DB056, 0x06, 0, 8)),
+            "hit_ahead_px": at(bite, "subi.w #$0072,d0"),
+            "hit_up_px": neg(at(bite, "subi.w #$FFCC,d0")),
+            "hit_half_px": pair(at(bite, "cmpi.w #$0010,d0", nth=1),
+                                at(bite, "cmpi.w #$0010,d0", nth=0)),
+            "damage": bcd(at(bite, "moveq #16,d0")),
+            "sound": at(bite, "pea ($000083).w"),
+            "sound_rule": u"звук и проверка удара — каждый такт языка",
+            "total_f": script_mark(0x1DB056, 0x05, 1, 8)},
+        "spit": {
+            "anim": "$1DB086",
+            "shot_f_after_swallow": script_mark(0x1DB086, 0x06, 1, 5),
+            "shot_f_from_idle": script_mark(0x1DB086, 0x06, 1, 8),
+            "ahead_px": at(0x2A6DE8, "moveq #32,d0"),
+            "up_px": at(0x2A6DE8, "subi.w #$0018,d2"),
+            "v": at(0x2A6DE8, "move.w #$0400,$16(a0)"),
+            "touch_code": at(0x2A6DE8, "move.w #$00F0,d4", signed=False),
+            "damage": dmg_default(),
+            "life_f": fire_f,
+            "sound": at(0x2A6C1E, "pea ($00007F).w"),
+            "back_to_idle_f": script_mark(0x1DB086, 0x05, 1, 8)},
+        "round_lost": {
+            "hp_again": at(lost, "move.w #$0008,$1C(a0)"),
+            "explosion_up_px": at(lost, "subi.w #$0040,d2"),
+            "explosion_anim": "$1D8810",
+            "freeze_anim": "$1D87D2",
+            "fireball": {
+                "x_from_right_limit_px": neg(at(lost, "subi.w #$00E0,d1")),
+                "wait_f": every(at(0x2A6D0C, "move.w #$003C,$4C(a0)")),
+                "v": at(0x2A6D0C, "move.w #$0500,$16(a0)"),
+                "dir": u"влево: флаги $2801, бит 11",
+                "life_f": fire_f,
+                "sound": at(0x2A6D50, "pea ($00007F).w")},
+            "then": u"ждёт, пока голова спрячется от камеры, и "
+                    u"появляется с другой стороны"},
+        "defeat": {
+            "anim": "$1D87E4",
+            "cry_times": loop,
+            "cry_sound": cmd(0x1D87EE, [0xEA], size=1, signed=False),
+            "cry_every_f": D(26, u"тело петли: 10 + 4 + 8 + 4",
+                             cmd(0x1D87F0, [0xD8], size=1, signed=False),
+                             cmd(0x1D87F6, [0xD8], size=1, signed=False)),
+            "boom_f": D(138, u"4 x 26 + 4 + 30",
+                        cmd(0x1D8806, [0xD8], size=1, signed=False)),
+            "boom_sound": cmd(0x1D880A, [0xEA], size=1, signed=False),
+            "level_done_f": D(200, u"138 + 6 + 14 x 4 кадров взрыва "
+                                   u"$1D8810, потом +$06 = 1",
+                              cmd(0x1D8814, [0xD8], size=1, signed=False)),
+            "level_done": at(0x2A6AF0, "move.w #$0001,($FF1A6C).l")},
+        "poles": {
+            "anim": "$1DA642", "frame": 1902, "size_px": pair(104, 8),
+            "centers_dx_px": [D(0, u"клетка + 8"),
+                              at(c, "addi.w #$0050,d1"),
+                              neg(at(c, "subi.w #$0050,d1"))],
+            "radius_px": [amp(at(pole, "move.w #$0005,$4E(a0)")),
+                          amp(at(c, "move.w #$0006,$4E(a0)", nth=0)),
+                          amp(at(c, "move.w #$0006,$4E(a0)", nth=1))],
+            "phase_turn": [None, at(c, "move.w #$0100,$4C(a0)"),
+                           at(c, "move.w #$0300,$4C(a0)")],
+            "step_turn": at(0x2A0AC6, "addi.w #$0008,d0"),
+            "touch": u"нет: код $B4 -> rts; ни опора, ни мишень"},
+        "refill": {
+            "cell_code": D(182, u"клетка кода 182 уровня 13 -> $2A0B14"),
+            "shows_when": u"второй запас $FF1A24 пуст ($2A0B40)",
+            "ammo2": bcd(at(0x2A0B66, "moveq #5,d0"))},
+    }
+
+
 def bosses():
     return {
         "shaman": b_shaman(),
         "ninja_school": b_ninja_school(),
         "fire_serpents": b_serpents(),
         "flying_ship": b_ship(),
+        "guardian": b_guardian(),
         "final": b_final(),
     }
 
