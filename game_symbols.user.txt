@@ -2478,19 +2478,19 @@ DisasterPanicOnly              = $01BE78   ; девять обработчико
                              ; говорит, КОГО задевает: у этого $0110F87E, то есть виды 1…6,
                              ; 11…15, 20 и 24, и они только паникуют
 DisasterWalkOff                = $001BF00   ; маска $0137FFFE: яйцо гибнет, остальные уходят в ходьбу
-DisasterKnockDown              = $001BF82   ; маска $0730FFFE: яйцо гибнет, остальным бросок и поза падения
+DisasterKnockDown              = $001BF82   ; маска $0730FFFE: яйцо гибнет, остальные с шансом 255/256 гибнут в пламени (UnitDieFlame). Зовёт QuakeReshapeArea — конец метеорита
 DisasterStunPose               = $001BFEA   ; маска $0110FFFE: действие $00, анимация $11, курс 4
 DisasterWoundCharged           = $001C086   ; маска $0110FFFE: ActOnWound плюс AddLossCharge
 DisasterPanicUnit        = $01C11A   ; бедствие: паника $1A, затем с вероятностью 200/256 оглушение $32
 DisasterKillCharged            = $001C1C0   ; маска $07B0FFFE: AddLossCharge и KillUnit
-DisasterKillOrWound            = $001C242   ; маска $0730FFFE: в одних действиях убивает, в других ранит
+DisasterKillOrWound            = $001C242   ; маска $0730FFFE: действие из $01689C — исчезнуть без трупа ($01BB42 и KillUnit), иначе смерть в пламени (UnitDieFlame) и AddLossCharge
 DisasterKillAlways             = $001C2B4   ; маска $0110FFFE: убивает по обеим веткам
 StunAfterToss                  = $01C320   ; после броска: прежнее действие в +$1D, действие $25,
                              ; анимация $12, бит 2 в +$1C, дробные доли обнулены,
                              ; таймер $0A…$49 плюс ещё 0…7 кадров
 UnusedKillCharged              = $01C406   ; гибель с действием $0B и AddLossCharge, если действие в наборе
                              ; $0167EC. Ссылок не найдено: ни перехода, ни длинного слова в ROM
-DisasterPanicOrKill            = $001C448   ; маска $0790FFFE: идущим шанс $C8/256 на панику, прочим смерть
+DisasterPanicOrKill            = $001C448   ; маска $0790FFFE: действие из $016884 или идущий — исчезнуть без трупа ($01BB42 и KillUnit); прочие так же с шансом $C8/256, иначе паника
 StormTossUnit                  = $01C4DE   ; буря подбрасывает юнита: отсев по виду и гнезду, бросок
                              ; против d5, случайный поворот курса и AiRand_01C568 плюс
                              ; AiRand_01C320
