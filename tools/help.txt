@@ -52,6 +52,11 @@ Dyna Brothers 2 — проект дизассемблирования
               make levels LEVEL="--map 0"
               LEVEL="--solid 0" — профиль земли и преграды поверх карты
               LEVEL=--names — названия уровней, LEVEL="--title 0" — заставка
+              LEVEL=--passwords — пароли уровней и чит на меню DEBUG
+  coverage  — что в картридже разобрано, а что нет:  make coverage
+              COVARGS=--raw — сырые тайлы вне системы кадров
+  anim      — скрипт анимации объекта:  make anim ANIM=1D8980
+              ANIM=--forms — три формы игрока и их таблицы
   unlz      — распаковать блок LZSS:  make unlz UNLZ=221904
   sprites   — кадры спрайтов в PNG (Maui Mallard):
               make sprites SPRITE="--sheet 900 64 --pal 1F6F58"

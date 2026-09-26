@@ -111,11 +111,13 @@ segments:
     start: 0x290270
     end:   0x29080E
 
-  - name: data_08
-    type: bin
+  # Обработчики пунктов главного меню: START, OPTIONS, DEBUG, PASSWORD.
+  # Адреса берутся из описателей меню в $1FD43C, поэтому обход по потоку
+  # управления сюда не доходит.
+  - name: code_08a
+    type: m68k
     start: 0x29080E
     end:   0x290BB8
-    subdir: code_data
 
   - name: code_08
     type: m68k
@@ -430,59 +432,19 @@ segments:
     start: 0x296E96
     end:   0x2970D6
 
+  # Таблица переходов команд скрипта анимации: 20 записей по `bra.w`,
+  # $D8..$EB. Зовётся из $297082 как `jmp (data_37,pc,d0.w)`.
   - name: data_37
     type: bin
     start: 0x2970D6
-    end:   0x297124
+    end:   0x297126
     subdir: code_data
 
+  # Двадцать обработчиков команд. Обход по потоку управления сюда не
+  # доходит: попасть можно только через таблицу выше.
   - name: code_37
     type: m68k
-    start: 0x297124
-    end:   0x297138
-
-  - name: data_38
-    type: bin
-    start: 0x297138
-    end:   0x297230
-    subdir: code_data
-
-  - name: code_38
-    type: m68k
-    start: 0x297230
-    end:   0x29724C
-
-  - name: data_39
-    type: bin
-    start: 0x29724C
-    end:   0x297252
-    subdir: code_data
-
-  - name: code_39
-    type: m68k
-    start: 0x297252
-    end:   0x29726E
-
-  - name: data_40
-    type: bin
-    start: 0x29726E
-    end:   0x297298
-    subdir: code_data
-
-  - name: code_40
-    type: m68k
-    start: 0x297298
-    end:   0x2972AE
-
-  - name: data_41
-    type: bin
-    start: 0x2972AE
-    end:   0x2972D8
-    subdir: code_data
-
-  - name: code_41
-    type: m68k
-    start: 0x2972D8
+    start: 0x297126
     end:   0x2972EE
 
   - name: data_42
