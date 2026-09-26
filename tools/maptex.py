@@ -395,13 +395,18 @@ DrawCellTiles:                 ; $015B3C
 
 | файл | что |
 |---|---|
-| `cells.png` | клетка 32x32 каждого байта, у которого есть тип; байт `b` — столбец `b % 16`, строка `b // 16` |
-| `anim.png` | кадры анимированных тайлов 8x8, по 16 в строке |
+| `palette<P>/cells.png` | клетка 32x32 каждого байта, у которого есть тип, палитрой `P` записи; байт `b` — столбец `b % 16`, строка `b // 16` |
+| `palette<P>/anim.png` | кадры анимированных тайлов 8x8 той же палитрой, по 16 в строке |
 | `fire.png` | две плитки пламени, палитра ряда 0, нулевой цвет прозрачен |
 | `terrain.json` | байт -> тип, `data_36`, стыки, маска живых типов, маски пламени, расписание потоков, места анимированных тайлов в клетках |
 
-Палитра — нулевая палитра записи: её берут 95 миссий из 123. Анимированные
-тайлы в `cells.png` нарисованы кадром такта 0. Расписание каждого тайла
+Местность — и клетки, и анимированные тайлы — берёт только ряд CRAM 3, то
+есть палитру `+$4C` описания миссии (#205); ряды 1 и 2 (`+$28`, `+$29`) у
+неё не встречаются. Папка `palette<P>` пишется для нулевой палитры каждой
+записи и для каждой палитры, которую берёт хоть одна миссия: `+$4C`
+ненулевой у 28 миссий из 123, пар «запись, палитра» с ним 19. Номера кадров
+в `anim.png` от палитры не зависят, поэтому `terrain.json` на запись один.
+Анимированные тайлы в `cells.png` нарисованы кадром такта 0. Расписание каждого тайла
 сжато до его собственного цикла: у записи 0 вода крутится за 32 такта
 при общем периоде 480.
 
@@ -1587,13 +1592,21 @@ def _atlas(images, cols, size):
     return w, h, img
 
 
-def remake_record(k, rec, outdir):
+def record_palettes():
+    u"""{запись графики: палитры +$4C её миссий и нулевая}."""
+    out = collections.defaultdict(lambda: {0})
+    for _c, _m, r in missions():
+        out[r[0x2A]].add(r[0x4C])
+    return out
+
+
+def remake_record(k, rec, outdir, palnos=(0,)):
     u"""Одна запись StageGfxRecords для ремейка (#203): атласы и terrain.json.
 
-    `cells.png` — клетка каждого байта карты, у которого есть тип, 32x32,
-    палитрой 0 записи (её берёт большинство миссий), анимированные тайлы на
-    такте 0. `anim.png` — кадры анимированных тайлов 8x8, `fire.png` — две
-    плитки пламени палитрой ряда 0. В `terrain.json` — всё, чем ремейк
+    На каждую палитру из `palnos` (#205) — `palette<P>/cells.png`, клетка
+    каждого байта карты, у которого есть тип, 32x32, анимированные тайлы на
+    такте 0, и `palette<P>/anim.png`, кадры анимированных тайлов 8x8.
+    `fire.png` — две плитки пламени палитрой ряда 0. В `terrain.json` — всё, чем ремейк
     выбирает и складывает клетки: байт -> тип, добавка берега `data_36`,
     таблица стыков, маска живых типов, маски пламени, расписание потоков и
     места анимированных тайлов в клетках.
@@ -1601,19 +1614,17 @@ def remake_record(k, rec, outdir):
     typeof, celltab, metatab = meta_tables(rec)
     setno = rec[0x1CB]
     tiles0 = tileset(rec, 0)
-    pals = [array_palette(0), array_palette(1), array_palette(3),
-            rec_palette(rec, 0)]
     hot = animated_tiles(setno)
     rows_seen = collections.Counter()
 
-    # клетки всех байтов с типом
-    cells = [None] * 256
+    # клетки всех байтов с типом: где какой тайл; краски — ниже, по палитрам
+    placed = [None] * 256      # байт -> [(x, y, тайл, ряд, hf, vf)]
     spots = {}                 # байт -> [(x, y, тайл, ряд, отражения)]
     for b in range(1, 256):
         if typeof[b] >= 32:
             continue
         entry = celltab[b - 1]
-        px = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+        placed[b] = []
         for q in range(4):
             meta = metatab[entry[q] & 0x1FF]
             for s in range(4):
@@ -1626,13 +1637,7 @@ def remake_record(k, rec, outdir):
                 if t in hot:
                     spots.setdefault(b, []).append((bx, by, t, row,
                                                     hf | (vf << 1)))
-                g = tiles0.get(t)
-                if g is None:
-                    continue
-                blk = _tile_rgba(g, pals[row], hf, vf)
-                for y in range(8):
-                    px[by + y][bx:bx + 8] = blk[y]
-        cells[b] = px
+                placed[b].append((bx, by, t, row, hf, vf))
 
     # расписание анимированных тайлов: состояние на каждом такте смены
     streams = anim_streams(setno)
@@ -1640,7 +1645,7 @@ def remake_record(k, rec, outdir):
     ticks = streams_ticks(streams, period) if streams else [0]
     used = sorted({(t, row) for v in spots.values() for _x, _y, t, row, _f in v})
     states = [tileset(rec, tick) for tick in ticks]
-    frames, frame_index, timelines = [], {}, []
+    frames, frame_index, timelines = [], {}, []    # кадр: (тайл, ряд)
     for t, row in used:
         seq = []
         for i, tick in enumerate(ticks):
@@ -1648,7 +1653,7 @@ def remake_record(k, rec, outdir):
             key = (bytes(states[i].get(t, b"\0" * 32)), row)
             if key not in frame_index:
                 frame_index[key] = len(frames)
-                frames.append(_tile_rgba(key[0], pals[row]))
+                frames.append(key)
             f = frame_index[key]
             if seq and seq[-1][0] == f:
                 seq[-1][1] += dur
@@ -1658,11 +1663,29 @@ def remake_record(k, rec, outdir):
         timelines.append({"frames": [{"atlas": f, "dur": d} for f, d in seq]})
     tile_no = {tr: i for i, tr in enumerate(used)}
 
-    os.makedirs(outdir, exist_ok=True)
-    w, h, img = _atlas(cells, REMAKE_COLUMNS, CELL)
-    png(os.path.join(outdir, "cells.png"), w, h, img, alpha=True)
-    w, h, img = _atlas(frames, 16, 8)
-    png(os.path.join(outdir, "anim.png"), w, h, img, alpha=True)
+    for p in sorted(palnos):
+        pals = [array_palette(0), array_palette(1), array_palette(3),
+                rec_palette(rec, p)]
+        cells = [None] * 256
+        for b, places in enumerate(placed):
+            if places is None:
+                continue
+            px = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+            for bx, by, t, row, hf, vf in places:
+                g = tiles0.get(t)
+                if g is None:
+                    continue
+                blk = _tile_rgba(g, pals[row], hf, vf)
+                for y in range(8):
+                    px[by + y][bx:bx + 8] = blk[y]
+            cells[b] = px
+        d = os.path.join(outdir, "palette%d" % p)
+        os.makedirs(d, exist_ok=True)
+        w, h, img = _atlas(cells, REMAKE_COLUMNS, CELL)
+        png(os.path.join(d, "cells.png"), w, h, img, alpha=True)
+        w, h, img = _atlas([_tile_rgba(g, pals[row]) for g, row in frames],
+                           16, 8)
+        png(os.path.join(d, "anim.png"), w, h, img, alpha=True)
     flames = fire_tiles()
     fire = [_tile_rgba(g, array_palette(0), clear0=True) for g in flames]
     w, h, img = _atlas(fire, 2, 8)
@@ -1696,22 +1719,24 @@ def remake_record(k, rec, outdir):
                  encoding="utf-8", newline="\n") as f:
         json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
         f.write("\n")
-    return {"bytes": sum(1 for c in cells if c is not None),
+    return {"bytes": sum(1 for c in placed if c is not None),
             "anim_tiles": len(used), "frames": len(frames),
-            "period": period, "rows": dict(rows_seen)}
+            "period": period, "rows": dict(rows_seen),
+            "palettes": sorted(palnos)}
 
 
 def export_remake():
     u"""`--remake`: все 11 записей в раскладке ремейка (#203)."""
     root = out_path("export")
     recs = gfx_records()
+    palnos = record_palettes()
     for k, rec in enumerate(recs):
         d = os.path.join(root, "terrain", "record%d" % k)
-        r = remake_record(k, rec, d)
+        r = remake_record(k, rec, d, palnos[k])
         print(u"запись %2d: байтов %3d, анимированных тайлов %2d, кадров %3d,"
-              u" период %4d, ряды палитры %s"
+              u" период %4d, ряды палитры %s, палитры %s"
               % (k, r["bytes"], r["anim_tiles"], r["frames"], r["period"],
-                 r["rows"]))
+                 r["rows"], r["palettes"]))
     print(u"-> %s" % os.path.relpath(os.path.join(root, "terrain"), HERE))
     return 0
 
