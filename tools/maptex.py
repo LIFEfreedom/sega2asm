@@ -900,10 +900,13 @@ def autotile(cells):
     return bytes(out)
 
 
-def placement(a):
-    u"""[(x, y, направление, тип, поза)] расстановки."""
+def placement(a, lo=0x100000):
+    u"""[(x, y, направление, тип, поза)] расстановки.
+
+    Расстановки карт лежат от `$100000`; адрес ниже — не расстановка,
+    если вызывающий не знает, что она там (lo = 0: `data_245` этапа 222)."""
     out = []
-    if not (0x100000 <= a < len(ROM) - 4):
+    if not (lo <= a < len(ROM) - 4):
         return out
     for _ in range(400):
         v = U16(a)

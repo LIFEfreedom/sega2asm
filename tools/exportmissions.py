@@ -19,10 +19,9 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 
 Названия английские, как весь интерфейс ремейка: у сюжета и поединка —
 названия оригинала латиницей, у уроков — номер урока, у прочих
-названий в ROM нет. Кампании открыты целиком (`all_unlocked`): цели
-оригинала ещё не перенесены (dyna #207), и первый урок, где противника
-нет вовсе, не выиграть — последовательное открытие заперло бы всё за
-ним.
+названий в ROM нет. Кампании открыты целиком (`all_unlocked`): цели с
+ﾎﾟﾝﾎﾟﾝ и ﾒｶﾞｻﾞｳﾙｽ ещё отложены (dyna #206), а демо-бои Extra 9 и 14
+человеку не пройти — последовательное открытие заперло бы всё за ними.
 
 ## Карта
 
@@ -55,7 +54,10 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 ## Игроки
 
 Расстановка — `LoadPlacement` `$01EA54`: четыре байта на запись, запись
-на клетке типов 22…30 (маска `$7FC00000`) пропускается. Владелец и вид —
+на клетке типов 22…30 (маска `$7FC00000`) пропускается. К расстановке
+карты добавляется та, что грузит обработчик входа на карту: такой один,
+у этапа 222 (Extra 20) — `data_245`, 18 яиц ﾃｨﾗﾉ игрока 2, 18 ﾋﾟｰﾁｬﾝ
+игрока 1 и 38 пустых яиц. Владелец и вид —
 `UnitTypeTable` `$01FAEE`: младшие пять бит байта `+$1` — вид, бит 6 —
 «принадлежит игроку», знаковый бит — второму.
 
@@ -73,8 +75,25 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 по номеру команды (`data_177` `$024B52`): погода — команда 2
 (`+$3E`: полив, ливень, буря, засуха, землетрясение, молния,
 метеорит), яйца — команда 5 (`+$44`, подпункт через `EggMenuToRoster`
-`$00879E` в слот ростера `+$04`). Победа и поражение — по умолчанию
-игры: у противника не осталось юнитов.
+`$00879E` в слот ростера `+$04`).
+
+## Цели
+
+Разбор в [game-mission-end.md](../docs/game-mission-end.md). Вердикт
+у оригинала один на обоих, с точки зрения игрока 1, и цели выгружаются
+для него; у игрока 2 те же списки наоборот — его победа есть поражение
+первого. По умолчанию победа — `DestroyPlayer 2`, поражение —
+`DestroyPlayer 1`. Особое читается из ROM:
+
+- вход на карту (`table_stagestart` `$02CE90`) запрещает победу по
+  переписи на этапах 20, 51 и 222;
+- покадровый сценарий (`table_stageframe` `$02D0B8`) первым делом зовёт
+  тело цели: восемь травоядных на этапе 51 — `HerbivoresReach`;
+  исчезновение пустых яиц на этапе 222 — `AllOf [DestroyPlayer 2,
+  EmptyEggsGone]`, потому что оно победу лишь разрешает.
+
+ﾎﾟﾝﾎﾟﾝ (этапы 29, 30, 34, 36) и ﾒｶﾞｻﾞｳﾙｽ (этап 20) у ремейка ещё нет:
+эти миссии идут с обычной целью, отложенное перечислено в `report.md`.
 """
 import collections
 import io
@@ -112,6 +131,18 @@ POSES = {3: "egg", 4: "carcass", 8: "carcass"}
 MEAT = range(69, 75)               # падаль видов 1…6, по классу типа
 BONES, EMPTY_EGG = 67, 68
 BONES_SPECIES = 6                  # дескриптор $06A4 -> блок ﾋﾟｰﾁｬﾝ $022AEA
+PONPON = 50                        # нейтрал, за которым следят этапы 29, 30, 34, 36
+
+START_TABLE = 0x02CE90             # table_stagestart: вход на карту
+FRAME_TABLE = 0x02D0B8             # table_stageframe: каждый тик
+ENABLE_WIPEOUT, DISABLE_WIPEOUT = 0x01673C, 0x016754
+LOAD_PLACEMENT = 0x01EA12
+GOAL_BODIES = {0x02EAF6: "herbivores",       # WinIfHerbivoresReach
+               0x02EB50: "allow_if_gone",    # AllowWinIfNeutralTypeGone
+               0x02EB16: "lose_if_gone"}     # LoseIfNeutralTypeGone
+
+# ConditionType ремейка
+DESTROY_PLAYER, HERBIVORES_REACH, EMPTY_EGGS_GONE, ALL_OF = 0, 5, 6, 7
 
 # тип ROM -> (местность, код растения ремейка)
 PLANTS = {}
@@ -217,12 +248,119 @@ def mission_name(c, m):
     return u""
 
 
-def conditions(team):
-    other = 2 if team == 1 else 1
-    cond = lambda target: {"type": 0, "target_player_id": target,
-                           "target_unit_type": 0, "target_amount": 0,
-                           "target_x": 0, "target_y": 0, "radius": 0}
-    return [cond(other)], [cond(team)]
+def s16(a):
+    return struct.unpack_from(">h", ROM, a)[0]
+
+
+def start_hook(st):
+    u"""(победа по переписи разрешена, адреса расстановок) — обработчик
+    входа на карту этапа st.
+
+    Тела короткие и прямые (game-events.md, «Что делается при входе на
+    карту»), так что хватает разобрать их коды подряд до `rts`. Незнакомый
+    код — остановка: значит, тело устроено иначе, чем разобрано. В `bsr.w`
+    не заходим, это местность и ﾒｶﾞｻﾞｳﾙｽ."""
+    a = START_TABLE + u16(ROM, START_TABLE + 2 * st)
+    allowed, placements, a6 = None, [], None
+    while u16(ROM, a) != 0x4E75:                     # rts
+        op = u16(ROM, a)
+        if op == 0x4EB9:                             # jsr (xxx).l
+            t = mt.U32(a + 2)
+            if t in (ENABLE_WIPEOUT, DISABLE_WIPEOUT):
+                allowed = t == ENABLE_WIPEOUT
+            elif t == LOAD_PLACEMENT:
+                placements.append(a6)
+            a += 6
+        elif op == 0x4DFA:                           # lea (d16,pc),a6
+            a6 = a + 2 + s16(a + 2)
+            a += 4
+        elif op == 0x6100:                           # bsr.w
+            a += 4
+        elif op in (0x0280, 0x23C0):                 # andi.l #,d0 / move.l d0,(xxx).l
+            a += 6
+        else:
+            raise AssertionError(u"этап %d: код $%04X по $%06X" % (st, op, a))
+    assert allowed is not None, st
+    return allowed, placements
+
+
+def frame_goals(st):
+    u"""[(цель, d7)] — тела целей, которые покадровый сценарий этапа st
+    зовёт первым делом: `move.b #d7,d7`, затем `bsr.w` или `jsr`.
+
+    Смотрим только до первого `rts`: сценарии лежат впритык, и за ним уже
+    чужой — у этапа 45 весь сценарий это `rts` прямо перед этапом 51."""
+    a = FRAME_TABLE + u16(ROM, FRAME_TABLE + 2 * st)
+    out = []
+    for o in range(a, a + 16, 2):
+        if u16(ROM, o) == 0x4E75:
+            break
+        if u16(ROM, o) != 0x1E3C:
+            continue
+        c = o + 4
+        if u16(ROM, c) == 0x6100:
+            t = c + 2 + s16(c + 2)
+        elif u16(ROM, c) == 0x4EB9:
+            t = mt.U32(c + 2)
+        else:
+            continue
+        if t in GOAL_BODIES:
+            out.append((GOAL_BODIES[t], ROM[o + 3]))
+    return out
+
+
+def cond(kind, player=0, amount=0, parts=None):
+    d = collections.OrderedDict([
+        ("type", kind), ("target_player_id", player), ("target_unit_type", 0),
+        ("target_amount", amount), ("target_x", 0), ("target_y", 0),
+        ("radius", 0)])
+    if parts is not None:
+        d["conditions"] = parts
+    return d
+
+
+def goals(st):
+    u"""(победа игрока 1, его поражение, что отложено).
+
+    Вердикт оригинала — `$0166B2`, один на обоих с точки зрения игрока 1:
+    навязанный исход, перепись игрока 1 пуста — поражение, перепись
+    игрока 2 пуста — победа, если её не запретил вход на карту.
+    У игрока 2 списки те же, только наоборот."""
+    allowed, _ = start_hook(st)
+    frame = frame_goals(st)
+    win, lose, later = [], [cond(DESTROY_PLAYER, 1)], []
+    for body, d7 in frame:
+        if body == "herbivores":
+            win.append(cond(HERBIVORES_REACH, 1, d7))
+        elif body == "lose_if_gone":
+            assert d7 == PONPON, (st, d7)
+            later.append(u"поражение, если не осталось ﾎﾟﾝﾎﾟﾝ (тип 50)")
+    if allowed:
+        win.append(cond(DESTROY_PLAYER, 2))
+    elif ("allow_if_gone", EMPTY_EGG) in frame:
+        win.append(cond(ALL_OF, parts=[cond(DESTROY_PLAYER, 2),
+                                       cond(EMPTY_EGGS_GONE)]))
+    elif not win:
+        # Этап 20: победу разрешает гибель ﾒｶﾞｻﾞｳﾙｽ (Species18Collapse), а
+        # его марш к гнезду — поражение. У ремейка его нет, и пока цель
+        # остаётся обычной, иначе миссию не выиграть.
+        win.append(cond(DESTROY_PLAYER, 2))
+        later.append(u"победу разрешает гибель ﾒｶﾞｻﾞｳﾙｽ, поражение — "
+                     u"его приход к гнезду")
+    assert all(b != "allow_if_gone" or d7 == EMPTY_EGG for b, d7 in frame), st
+    return win, lose, later
+
+
+def describe(c):
+    kind = c["type"]
+    if kind == DESTROY_PLAYER:
+        return u"у игрока %d пусто" % c["target_player_id"]
+    if kind == HERBIVORES_REACH:
+        return u"травоядных у игрока %d не меньше %d" % (
+            c["target_player_id"], c["target_amount"])
+    if kind == EMPTY_EGGS_GONE:
+        return u"пустых яиц не осталось"
+    return u" и ".join(describe(p) for p in c["conditions"])
 
 
 def export_mission(c, m, r, recs, skipped):
@@ -246,9 +384,16 @@ def export_mission(c, m, r, recs, skipped):
             terrain.append(t)
             veg.append(0)
 
+    # Сначала расстановка карты, затем то, что грузит вход на карту: так
+    # идёт и сам StartMatch — LoadPlacement, потом RunStageStartHook.
+    _allowed, extra = start_hook(st)
+    records = mt.placement(pl)
+    for a in extra:
+        records += mt.placement(a, lo=0)
+
     nests = {1: [], 2: []}
     units = []
-    for x, y, d, typ, pose in mt.placement(pl):
+    for x, y, d, typ, pose in records:
         if (SKIP_ON >> types[y * W + x]) & 1:
             skipped[u"клетка типов 22…30"] += 1
             continue
@@ -287,12 +432,13 @@ def export_mission(c, m, r, recs, skipped):
     avail2 = sorted({unit_type(t)[1] - 1 for t in r[0x0E:0x18]
                      if 1 <= unit_type(t)[1] <= 6})
 
+    win1, lose1, later = goals(st)
     players = []
     for team, money, avail, wth in ((1, bcd(r[0x34:0x38]), avail1, weathers1),
                                     (2, bcd(r[0x38:0x3C]), avail2,
                                      sorted(WEATHER_ITEMS))):
         first = nests[team][0] if nests[team] else {"x": -1, "y": -1}
-        win, lose = conditions(team)
+        win, lose = (win1, lose1) if team == 1 else (lose1, win1)
         players.append({"team_id": team, "start_x": first["x"],
                         "start_y": first["y"], "nests": nests[team],
                         "victory_conditions": win, "defeat_conditions": lose,
@@ -314,7 +460,7 @@ def export_mission(c, m, r, recs, skipped):
         ("units", units),
         ("players", players),
     ])
-    return doc, len(units), len(nests[2])
+    return doc, len(units), len(nests[2]), later
 
 
 def write_json(path, doc, **kw):
@@ -328,20 +474,30 @@ def main():
     root = out_path("export", "campaigns")
     if os.path.isdir(root):
         shutil.rmtree(root)            # всё здесь пишет только этот скрипт
+    # Победу по переписи запрещают три этапа (game-mission-end.md); если
+    # таблица входа скажет иное, разбор устарел.
+    closed = [st for st in range(256) if not start_hook(st)[0]]
+    assert closed == [20, 51, 222], closed
     recs = mt.gfx_records()
     skipped = collections.Counter()
     by_chapter = collections.defaultdict(list)
     for c, m, r in mt.missions():
         by_chapter[c].append((m, r))
-    rows, n = [], 0
+    rows, special, n = [], [], 0
     for order, (folder, title, c) in enumerate(CAMPAIGNS, 1):
         for m, r in by_chapter[c]:
             n += 1
-            doc, nunits, nests2 = export_mission(c, m, r, recs, skipped)
+            doc, nunits, nests2, later = export_mission(c, m, r, recs, skipped)
             write_json(os.path.join(root, folder, "maps", str(m), "mission.json"),
                        doc, separators=(",", ":"))
             rows.append((folder, m, doc["name"], r[3], nunits, nests2,
                          doc["map"]["starting_energy"]))
+            p1 = doc["map"]["players"][0]
+            if later or [x["type"] for x in p1["victory_conditions"]] != [DESTROY_PLAYER]:
+                special.append((folder, m, r[3],
+                                u"; ".join(map(describe, p1["victory_conditions"])),
+                                u"; ".join(map(describe, p1["defeat_conditions"])),
+                                u"; ".join(later) or u"—"))
         write_json(os.path.join(root, folder, "campaign.json"),
                    collections.OrderedDict([("name", title), ("order", order),
                                             ("all_unlocked", True)]),
@@ -353,6 +509,14 @@ def main():
         p(u"## Не выгружено\n\n| что | записей |\n|---|---:|\n")
         for k, v in sorted(skipped.items()):
             p(u"| %s | %d |\n" % (k, v))
+        p(u"\n## Цели\n\nУ остальных миссий победа — у игрока 2 пусто, поражение — "
+          u"у игрока 1 пусто. Цели игрока 2 — те же, наоборот. «Отложено» — "
+          u"правило оригинала, которое ждёт нейтралов ремейка (dyna #206, "
+          u"часть 2); пока миссия идёт с обычной целью.\n\n"
+          u"| кампания | № | этап | победа игрока 1 | поражение | отложено |\n"
+          u"|---|---:|---:|---|---|---|\n")
+        for row in special:
+            p(u"| %s | %d | %d | %s | %s | %s |\n" % row)
         p(u"\n## Миссии\n\n| кампания | № | название | этап | юнитов | гнёзд у игрока 2 | деньги |\n"
           u"|---|---:|---|---:|---:|---:|---:|\n")
         for row in rows:
