@@ -50,7 +50,9 @@
 шипы, восходящие потоки, выход и запрет урона на уровнях 2, 3, 10, 12, 16 (гибель
 от урона — `hazard_death_16`); присед, лианы уровней 0, 1, 7 и облик «тень»
 уровня 0; `set` и `poke` задают слова записи игрока и байты
-ОЗУ на входе, до снимка; вход в каждый
+ОЗУ на входе, до снимка; `sprites_*` (проверка sprites) снимают ещё
+таблицу спрайтов `$FF050C`, её счётчик `$FFFFE1BA` и распределитель VRAM
+(`SPRITE_LAYOUT`) на уровнях 0, 1 и 10; вход в каждый
 уровень 0-18 (`enter_NN`, один кадр); три демо (`demo_N`: запись пульта
 взята из потока ROM `$1FD7DC` и развёрнута обратно через раскладку 0, кадры
 не снимаются — ремейк проигрывает запись сам); моноцикл бонуса 19 — только
@@ -129,9 +131,20 @@ LAYOUT = [
     (0xFFFFFD84, 6, "отладочный полёт, точка возрождения"),
 ]
 
+# Сценарии с проверкой sprites снимают ещё таблицу спрайтов и распределитель VRAM.
+SAT_ENTRIES = 20           # записей $FF050C: утка с объектом сноса и HUD — до 11 на пробах
+HEAP_NODES = 16            # узлов распределителя: при выключенных объектах занято не больше пяти
+SPRITE_LAYOUT = [
+    (0xFFFFE1BA, 2, "сколько записей в таблице спрайтов ($2962EC)"),
+    (0xFF050C, 8 * SAT_ENTRIES, "таблица спрайтов $29612E: Y, размер и связь, имя, X"),
+    (0xFFFFE0A4, 8, "распределитель VRAM: свободный узел, первый свободный участок, заглушка"),
+    (0xFFFFDEC4, 6 * HEAP_NODES, "распределитель VRAM: узлы (следующий, начало, длина)"),
+]
+
 # Сценарии: уровень, объекты, что по трассе сверять ремейку (camera — шаг камеры
 # $297748 по позициям игрока, player — запись игрока, переменные шага и камера,
-# entry — вход в уровень, demo — только запись пульта), точка возрождения at
+# entry — вход в уровень, demo — только запись пульта, sprites — ещё таблица
+# спрайтов и распределитель VRAM, SPRITE_LAYOUT), точка возрождения at
 # (x, y) вместо старта уровня (подменяется $FFFFFD86 перед $2987B8), fly —
 # отладочный полёт с камерой $29798E, set — слова записи игрока [(смещение,
 # слово)] и poke — байты ОЗУ [(адрес, байты)] на входе, до снимка, запись
@@ -312,6 +325,31 @@ SCENARIOS = {
                  "лиане второй карты, прыжок на её пол, снос, падение назад через 24; нижний предел $FF1A92 "
                  "опущен (его опускают объекты уровня); кончается до того, как низ уровня выйдет на экран "
                  "(там просыпаются объекты процедуры $2A5EC6 и тянут ГСЧ)",
+    },
+    "sprites_0": {
+        "level": 0, "objects": False, "checks": ["camera", "player", "sprites"],
+        "input": [("", 10), ("R", 60), ("L", 8), ("", 20), ("C", 30), ("", 20), ("RC", 40), ("R", 20),
+                  ("", 10), ("D", 30), ("", 10), ("U", 20), ("L", 30), ("", 20)],
+        "about": "уровень 0: таблица спрайтов и VRAM — ход, разворот, прыжки, присед, взгляд вверх; "
+                 "HUD въезжает в кадре ~5",
+    },
+    "sprites_shadow_0": {
+        "level": 0, "objects": False, "checks": ["camera", "player", "sprites"], "at": (1356, 540),
+        "poke": [(0xFF1A92, bytes([0x03, 0x80]))],
+        "input": [("U", 3), ("", 20), ("D", 80), ("U", 125), ("CR", 1), ("R", 45), ("", 85)],
+        "about": "уровень 0: таблица спрайтов в облике «тень» — приоритет снят, объект сноса со скриптом "
+                 "утки рисуется и берёт VRAM; ввод как у shadow_0",
+    },
+    "sprites_vine_1": {
+        "level": 1, "objects": False, "checks": ["camera", "player", "sprites"], "at": (104, 1050),
+        "input": [("", 20), ("CU", 31), ("U", 30), ("", 40), ("DC", 1), ("", 40)],
+        "about": "уровень 1: таблица спрайтов на лиане, два блока VRAM процедуры $2A5EC6; ввод как у vine_jump_1",
+    },
+    "sprites_10": {
+        "level": 10, "objects": False, "checks": ["camera", "player", "sprites"], "record": 260,
+        "input": [("R", 400)],
+        "about": "уровень 10: таблица спрайтов при уроне и мигании, блок $700 процедуры уровня; "
+                 "начало hazard_10",
     },
     "fly_0": {
         "level": 0, "objects": False, "checks": ["player"], "fly": True,
@@ -521,10 +559,14 @@ class MegaDrive:
         return True
 
 
-def snapshot(md):
+def layout_of(sc):
+    return LAYOUT + (SPRITE_LAYOUT if "sprites" in sc["checks"] else [])
+
+
+def snapshot(md, layout=LAYOUT):
     return {
         "player": md.read(PLAYER, PLAYER_LENGTH).hex().upper(),
-        "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in LAYOUT),
+        "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in layout),
     }
 
 
@@ -537,6 +579,7 @@ def run(name, sc, rom):
     for buttons, n in sc["input"]:
         pads += [pad_byte(buttons)] * n
     state = {"setup": False, "entry": None, "frame": 0}
+    layout = layout_of(sc)
 
     def on_setup(uc, address, size, user):
         if not state["setup"]:
@@ -556,7 +599,7 @@ def run(name, sc, rom):
                 md.write(address, data)
             if sc.get("fly"):
                 md.write(DEBUG_FLIGHT, b"\x01")
-            state["entry"] = snapshot(md)
+            state["entry"] = snapshot(md, layout)
             md.pad = pads[0]
 
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
@@ -579,14 +622,14 @@ def run(name, sc, rom):
 
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
     # Уровень кончается первым кадром с сигналом выхода (гибель, выход).
-    frames = [dict(pad=pads[0], **snapshot(md))]
+    frames = [dict(pad=pads[0], **snapshot(md, layout))]
     for k in range(1, min(len(pads), sc.get("record", len(pads)))):
         if md.word(EXIT) != 0:
             break
         md.pad = pads[k]
         while not md.frame():
             pass
-        frames.append(dict(pad=pads[k], **snapshot(md)))
+        frames.append(dict(pad=pads[k], **snapshot(md, layout)))
 
     return {
         "meta": {
@@ -617,7 +660,7 @@ def run(name, sc, rom):
         },
         "layout": {
             "player": {"at": "$%08X" % PLAYER, "length": PLAYER_LENGTH},
-            "ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in LAYOUT],
+            "ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in layout],
         },
         "entry": state["entry"],
         "frames": frames,
