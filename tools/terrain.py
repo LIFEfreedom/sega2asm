@@ -78,6 +78,11 @@ U32 = lambda o: struct.unpack_from(">I", ROM, o)[0]
 DESC = 0x01FC5A
 SPECIES = [("1 ｽﾃｺﾞ", 0x064), ("2 ﾄﾘｹﾗ", 0x094), ("3 ｱﾛ", 0x0C4),
            ("4 ﾃｨﾗﾉ", 0x0F4), ("5 ﾌﾟﾃﾗ", 0x124), ("6 ﾋﾟｰﾁｬﾝ", 0x154)]
+# Подвижные нейтралы (dyna #206, game-neutral.md): имён в ROM нет. Их блоки
+# короче `$146`: у 11, 12 и 13 — `$C4` байт до соседнего блока, у 20 —
+# `$D8`. Улучшенные таблицы с `+$D8` у них поэтому чужие байты, а улучшенным
+# нейтрал не бывает; `--json` пишет вместо них обычные.
+NEUTRALS = [("11 -", 0x274), ("12 -", 0x2D4), ("13 -", 0x454), ("20 -", 0x4A4)]
 # таблица -> (смещение обычной, смещение улучшенной, длина, ширина элемента)
 TABLES = [("A", 0x3A, 0xD8, 22, 1), ("B", 0x50, 0xEE, 22, 2),
           ("C", 0x7C, 0x11A, 22, 2)]
@@ -112,9 +117,11 @@ def export_json():
     u"""`--json`: правила местности для ремейка (#204) — `terrain_rules.json`.
 
     Таблицы A, B и C (22 значения, типы 0…21) обычные и улучшенные по
-    шести видам, маски шага по приказам `$08`…`$0C` (наборы A и B), маска
-    непроходимых типов и смертельные типы. Числа — как в ROM: урон в
-    единицах здоровья оригинала, шаг — делитель накопителя.
+    шести видам и четырём подвижным нейтралам (11, 12, 13, 20; у них
+    улучшенные — копия обычных, см. `NEUTRALS`), маски шага по приказам
+    `$08`…`$0C` (наборы A и B), маска непроходимых типов и смертельные типы.
+    Числа — как в ROM: урон в единицах здоровья оригинала, шаг — делитель
+    накопителя.
     """
     import json
     from paths import OUT as out_path
@@ -126,14 +133,16 @@ def export_json():
            "fissure_type": FISSURE,
            "vent_type": VENT,
            "species": []}
-    for nm, off in SPECIES:
+    for nm, off in SPECIES + NEUTRALS:
         p = block(off)
-        entry = {"species": int(nm.split()[0]), "name": nm.split()[1]}
+        neutral = (nm, off) in NEUTRALS
+        entry = {"species": int(nm.split()[0]),
+                 "name": "" if neutral else nm.split()[1]}
         for which, key in (("A", "step"), ("B", "walk_damage"),
                            ("C", "entry_damage")):
             _n, a, b, n, w = next(t for t in TABLES if t[0] == which)
             entry[key] = row(p, a, n, w)
-            entry["elite_" + key] = row(p, b, n, w)
+            entry["elite_" + key] = row(p, a if neutral else b, n, w)
         entry["step_masks_a"] = [U32(p + STEP_MASK_A + 4 * (o - 8))
                                  for o in ORDERS]
         entry["step_masks_b"] = [U32(p + STEP_MASK_B + 4 * (o - 8))

@@ -19,9 +19,9 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 
 Названия английские, как весь интерфейс ремейка: у сюжета и поединка —
 названия оригинала латиницей, у уроков — номер урока, у прочих
-названий в ROM нет. Кампании открыты целиком (`all_unlocked`): цели с
-ﾎﾟﾝﾎﾟﾝ и ﾒｶﾞｻﾞｳﾙｽ ещё отложены (dyna #206), а демо-бои Extra 9 и 14
-человеку не пройти — последовательное открытие заперло бы всё за ними.
+названий в ROM нет. Кампании открыты целиком (`all_unlocked`): цель с
+ﾒｶﾞｻﾞｳﾙｽ ещё отложена, а демо-бои Extra 9 и 14 человеку не пройти —
+последовательное открытие заперло бы всё за ними.
 
 ## Карта
 
@@ -72,8 +72,13 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
   69…74, падаль видов 1…6 (`unit_type` 0…5), поза `carcass`; кости —
   тип 67, падаль с блоком ﾋﾟｰﾁｬﾝ (`unit_type` 5), поза `bones`; пустое
   яйцо — тип 68, поза `empty_egg`.
-- Прочие нейтральные, части ﾒｶﾞｻﾞｳﾙｽ, падаль вида 20 (тип 75) и виды
-  8/9 игроков не выгружаются — это отдельные задачи.
+- Подвижные нейтралы, команда 0 (dyna #206, часть 2): виды 11, 12, 13 и
+  20 — `unit_type` 6…9 ремейка. Поза 4 и 8 — падаль, прочие (0, 1, 2) —
+  ходьба с курсом записи: гнездовую позу и «стоит лицом» ремейк не
+  различает. Тип 57 — тот же вид 13 в другой палитре, выгружается им же.
+  Тип 75 — падаль вида 20, поза `carcass`.
+- Виды 16 и 18, части ﾒｶﾞｻﾞｳﾙｽ и виды 8/9 игроков не выгружаются — это
+  отдельные задачи.
 
 Деньги — BCD `+$34` и `+$38`. Доступность — слова подкоманд с `+$3C`
 по номеру команды (`data_177` `$024B52`): погода — команда 2
@@ -94,10 +99,12 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 - покадровый сценарий (`table_stageframe` `$02D0B8`) первым делом зовёт
   тело цели: восемь травоядных на этапе 51 — `HerbivoresReach`;
   исчезновение пустых яиц на этапе 222 — `AllOf [DestroyPlayer 2,
-  EmptyEggsGone]`, потому что оно победу лишь разрешает.
+  EmptyEggsGone]`, потому что оно победу лишь разрешает; гибель последнего
+  ﾎﾟﾝﾎﾟﾝ на этапах 29, 30, 34, 36 (`LoseIfNeutralTypeGone`, d7 = 50) —
+  поражение `NeutralTypeGone` с видом 11 (dyna #206).
 
-ﾎﾟﾝﾎﾟﾝ (этапы 29, 30, 34, 36) и ﾒｶﾞｻﾞｳﾙｽ (этап 20) у ремейка ещё нет:
-эти миссии идут с обычной целью, отложенное перечислено в `report.md`.
+ﾒｶﾞｻﾞｳﾙｽ (этап 20) у ремейка ещё нет: эта миссия идёт с обычной целью,
+отложенное перечислено в `report.md`.
 """
 import collections
 import io
@@ -136,6 +143,10 @@ MEAT = range(69, 75)               # падаль видов 1…6, по кла�
 BONES, EMPTY_EGG = 67, 68
 BONES_SPECIES = 6                  # дескриптор $06A4 -> блок ﾋﾟｰﾁｬﾝ $022AEA
 PONPON = 50                        # нейтрал, за которым следят этапы 29, 30, 34, 36
+SPECIES20_MEAT = 75                # падаль вида 20
+# подвижный нейтральный вид оригинала -> UnitType ремейка (dyna #206)
+NEUTRAL = {11: 6, 12: 7, 13: 8, 20: 9}
+NEUTRAL_POSES = {4: "carcass", 8: "carcass"}
 
 START_TABLE = 0x02CE90             # table_stagestart: вход на карту
 FRAME_TABLE = 0x02D0B8             # table_stageframe: каждый тик
@@ -147,6 +158,7 @@ GOAL_BODIES = {0x02EAF6: "herbivores",       # WinIfHerbivoresReach
 
 # ConditionType ремейка
 DESTROY_PLAYER, HERBIVORES_REACH, EMPTY_EGGS_GONE, ALL_OF = 0, 5, 6, 7
+NEUTRAL_TYPE_GONE = 8
 
 # тип ROM -> (местность, код растения ремейка)
 PLANTS = {}
@@ -313,9 +325,9 @@ def frame_goals(st):
     return out
 
 
-def cond(kind, player=0, amount=0, parts=None):
+def cond(kind, player=0, amount=0, parts=None, unit=0):
     d = collections.OrderedDict([
-        ("type", kind), ("target_player_id", player), ("target_unit_type", 0),
+        ("type", kind), ("target_player_id", player), ("target_unit_type", unit),
         ("target_amount", amount), ("target_x", 0), ("target_y", 0),
         ("radius", 0)])
     if parts is not None:
@@ -338,7 +350,9 @@ def goals(st):
             win.append(cond(HERBIVORES_REACH, 1, d7))
         elif body == "lose_if_gone":
             assert d7 == PONPON, (st, d7)
-            later.append(u"поражение, если не осталось ﾎﾟﾝﾎﾟﾝ (тип 50)")
+            owner, sp, _decor = unit_type(PONPON)
+            assert owner == 0 and sp in NEUTRAL, (owner, sp)
+            lose.append(cond(NEUTRAL_TYPE_GONE, unit=NEUTRAL[sp]))
     if allowed:
         win.append(cond(DESTROY_PLAYER, 2))
     elif ("allow_if_gone", EMPTY_EGG) in frame:
@@ -364,6 +378,9 @@ def describe(c):
             c["target_player_id"], c["target_amount"])
     if kind == EMPTY_EGGS_GONE:
         return u"пустых яиц не осталось"
+    if kind == NEUTRAL_TYPE_GONE:
+        return u"не осталось ничьих юнитов вида %d" % next(
+            sp for sp, t in NEUTRAL.items() if t == c["target_unit_type"])
     return u" и ".join(describe(p) for p in c["conditions"])
 
 
@@ -411,6 +428,12 @@ def export_mission(c, m, r, recs, skipped):
             neutral = (BONES_SPECIES - 1, "bones")
         elif typ == EMPTY_EGG:
             neutral = (0, "empty_egg")
+        elif typ == SPECIES20_MEAT:
+            neutral = (NEUTRAL[20], "carcass")
+        else:
+            owner, sp, decor = unit_type(typ)
+            if owner == 0 and not decor and sp in NEUTRAL:
+                neutral = (NEUTRAL[sp], NEUTRAL_POSES.get(pose, "walk"))
         if neutral:
             units.append({"team_id": 0, "unit_type": neutral[0], "x": x,
                           "y": y, "facing": d, "pose": neutral[1]})
@@ -498,7 +521,9 @@ def main():
             rows.append((folder, m, doc["name"], r[3], nunits, nests2,
                          doc["map"]["starting_energy"]))
             p1 = doc["map"]["players"][0]
-            if later or [x["type"] for x in p1["victory_conditions"]] != [DESTROY_PLAYER]:
+            goals_special = ([x["type"] for x in p1["victory_conditions"]] != [DESTROY_PLAYER]
+                             or [x["type"] for x in p1["defeat_conditions"]] != [DESTROY_PLAYER])
+            if later or goals_special:
                 special.append((folder, m, r[3],
                                 u"; ".join(map(describe, p1["victory_conditions"])),
                                 u"; ".join(map(describe, p1["defeat_conditions"])),
@@ -516,8 +541,8 @@ def main():
             p(u"| %s | %d |\n" % (k, v))
         p(u"\n## Цели\n\nУ остальных миссий победа — у игрока 2 пусто, поражение — "
           u"у игрока 1 пусто. Цели игрока 2 — те же, наоборот. «Отложено» — "
-          u"правило оригинала, которое ждёт нейтралов ремейка (dyna #206, "
-          u"часть 2); пока миссия идёт с обычной целью.\n\n"
+          u"правило оригинала, которое ждёт ﾒｶﾞｻﾞｳﾙｽ в ремейке (отдельная "
+          u"задача после dyna #206); пока миссия идёт с обычной целью.\n\n"
           u"| кампания | № | этап | победа игрока 1 | поражение | отложено |\n"
           u"|---|---:|---:|---|---|---|\n")
         for row in special:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-u"""Анимации шести видов в раскладке ремейка Dyna.
+u"""Анимации шести видов и четырёх нейтралов в раскладке ремейка Dyna.
 
-    python tools/exportanim.py          # шесть видов игрока 1
+    python tools/exportanim.py          # шесть видов игрока 1 и нейтралы
     python tools/exportanim.py --all    # все 45 различных наборов
     python tools/exportanim.py --props  # яйца и гнёзда под имена ремейка
     python tools/exportanim.py --scale 2  # любое из них, увеличенное вдвое
@@ -143,6 +143,13 @@ u"""Анимации шести видов в раскладке ремейка 
 | `hunter` | 4 ﾃｨﾗﾉ | 8 |
 | `scout` | 5 ﾌﾟﾃﾗ | 9 |
 | `egg_eater` | 6 ﾋﾟｰﾁｬﾝ | 10 |
+| `species11` | 11 ﾎﾟﾝﾎﾟﾝ, ничей | 50 |
+| `species12` | 12, ничей | 51 |
+| `species13` | 13, ничей | 52 |
+| `species20` | 20, ничей | 58 |
+
+Четыре подвижных нейтрала (dyna #206) выводятся вместе с шестью видами и
+под теми же именами анимаций: у ремейка они такие же юниты.
 
 ## Остальные наборы (`--all`)
 
@@ -304,6 +311,14 @@ PLAYABLE = {1: ("pacific", u"ｽﾃｺﾞ"), 2: ("fat", u"ﾄﾘｹﾗ"),
 # типы игрока 1: у них ряд палитры 1 и они дают папку без суффикса
 PLAYER1 = {1: 5, 2: 6, 3: 7, 4: 8, 5: 9, 6: 10}
 
+# Подвижные нейтралы (dyna #206): вид -> (папка, тип расстановки). Выводятся
+# вместе с шестью видами и под их именами анимаций — у ремейка это такие же
+# юниты. Тип берётся сам, а не представитель набора: у 50, 51 и 52 набор
+# общий с запасными ростерами 25, 26 и 27, но ряд палитры свой — у 52 это
+# ряд 1, у 27 ряд 2. Тип 57 (тот же вид 13 в ряду 2) не выводится.
+NEUTRAL = {11: ("species11", 50), 12: ("species12", 51),
+           13: ("species13", 52), 20: ("species20", 58)}
+
 # представитель набора -> папка, для всего, что не шестёрка видов
 OTHERS = {
     1: "nest_p1", 2: "nest_p2_a", 3: "nest_p2_b", 4: "nest_p2_c",
@@ -345,8 +360,10 @@ def sets_all():
 
 
 def sets_six():
-    return [(PLAYABLE[sp][0], PLAYER1[sp], sp, PLAYABLE[sp][1])
-            for sp in sorted(PLAYABLE)]
+    return ([(PLAYABLE[sp][0], PLAYER1[sp], sp, PLAYABLE[sp][1])
+             for sp in sorted(PLAYABLE)]
+            + [(NEUTRAL[sp][0], NEUTRAL[sp][1], sp, u"вид %d" % sp)
+               for sp in sorted(NEUTRAL)])
 
 # имя в ремейке -> номер анимации оригинала на чётной и нечётной стороне
 ANIMS = (("idle", 0x0A, 0x0B), ("walking", 0x18, 0x19),
@@ -641,7 +658,7 @@ def main():
                          "cell": FRAME * SCALE,
                          "directions": [n for _s, n in FACINGS],
                          "anims": {}}
-        playable = sp in PLAYABLE
+        playable = sp in PLAYABLE or (sp in NEUTRAL and t == NEUTRAL[sp][1])
         if playable:
             manifest[key]["select"] = selection(t)
         written = set()
