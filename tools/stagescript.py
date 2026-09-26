@@ -120,10 +120,12 @@ def digest(ins):
     return d6, d7, ticks, music, calls, arg7
 
 
-SWEEPS = {"SpreadTerrainRandom": "38x38, шанс 10%",
+SWEEPS = {"SpreadTerrainRandom": "38x38, шанс 25/256 на клетку",
           "ConvertTerrainInner": "38x38, все клетки",
           "ConvertTerrainAll": "40x40, все клетки",
-          "SeedEmptyTerrain": "только пустые, шанс 25%"}
+          "SeedEmptyTerrain": "одна клетка ровно типа d4, с конца поля, шанс 64/256 на каждую",
+          "RepaintLastCellOfType": "последняя клетка ровно типа d4",
+          "SpreadTypeMapWide": "соседи клеток типа d5, кроме типов маски d4"}
 
 
 def terrain_ops(ins):
@@ -139,12 +141,17 @@ def terrain_ops(ins):
         m = re.match(r"move\.l\s+#\$([0-9A-F]+),d4", t)
         if m:
             d4 = int(m.group(1), 16)
+        m = re.match(r"move\.w\s+#\$([0-9A-F]+),d4", t)
+        if m:
+            d4 = 1 << int(m.group(1), 16)     # один тип, а не маска
         if re.match(r"moveq\s+#1,d4", t):
             d4 = 1
         m = re.match(r"move\.w\s+#\$([0-9A-F]+),d5", t)
         if m:
             cand.append(int(m.group(1), 16))
         m = re.match(r"(?:bsr\.w|jsr)\s+\(?(\w+)", t)
+        if m and m.group(1) == "loc_020EE4":
+            d4, cand = 0xF8004000, [0x13]     # параметры StageSpreadWideTick
         if m and m.group(1) in SWEEPS:
             types = [b for b in range(32) if d4 and d4 >> b & 1]
             if not cand and out:
@@ -217,9 +224,13 @@ def main():
     p("Сценарии формульны: задать пару порогов в `d6`/`d7` и позвать общую\n"
       "процедуру, либо сверить `GameTick` с точным числом и что-то\n"
       "сделать — сменить музыку, подсыпать юнитов, включить отсчёт.\n"
-      "**`d7` — тик, на котором событие начинается, `d6` — период\n"
-      "повторения**; счётчик живёт в `$FFE0BC`. При 60 кадрах в секунду\n"
-      "`$0708` это полминуты, `$2A30` — три минуты.\n\n")
+      "`d7` — порог: событие начинается на первом тике, **младшее слово**\n"
+      "которого больше `d7`; `d6` — период. Счётчик один на этап, `$FFE0BC`.\n\n")
+    p("Это обзор, собранный по листингу эвристикой. Точный разбор — автомат\n"
+      "счётчика, режимы тел, проходы по местности, особые этапы 6, 31, 33\n"
+      "и 117 — в [game-stage-events.md](game-stage-events.md), а данные для\n"
+      "ремейка пишет `tools/stageevents.py`. Где таблица ниже с ним\n"
+      "расходится, прав тот.\n\n")
     p("Из 256 этапов на собственный сценарий указывают %d, остальные ведут\n"
       "на общую заглушку `$%06X`.\n\n" % (len(live), STUB))
     rows = []
@@ -245,7 +256,7 @@ def main():
             if c not in seen:
                 seen.append(c)
         if seen:
-            bits.append("зовёт " + ", ".join(seen[:4]))
+            bits.append("зовёт " + ", ".join(seen))
         rows.append((i, tgt[i], start[i], "; ".join(bits)))
     p("Из них непустых — %d; прочие это один `rts`.\n\n" % len(rows))
     p("| этап | миссии | сценарий | что делает |\n|---|---|---|---|\n")
@@ -324,6 +335,10 @@ def main():
         ops = terrain_ops(ins)
         if ops:
             what = "; ".join(
+                ("соседи типа %s, кроме типов %s -> %s (`%s`)"
+                 % (" либо ".join(str(x) for x in d5), ", ".join(str(t) for t in ts),
+                    " либо ".join(str(x) for x in d5), fn))
+                if fn == "SpreadTypeMapWide" else
                 "%s -> %s (`%s`)"
                 % ("типы " + ", ".join(str(t) for t in ts) if ts else "пусто",
                    " либо ".join(str(x) for x in d5) or "?", fn)
@@ -333,7 +348,7 @@ def main():
             for c in digest(ins)[4]:
                 if c not in seen and c not in SWEEPS:
                     seen.append(c)
-            what = "местность не трогает; зовёт " + ", ".join(seen[:5])
+            what = "зовёт " + ", ".join(seen)
         p("| `%s` | %s | %s |\n"
           % (name, ", ".join(str(x) for x in sorted(set(users[name]))), what))
     f.close()

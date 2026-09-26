@@ -34,7 +34,7 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 | 1…4 | 0 | трава, стадии 0…3 (коды 1…4) |
 | 5, 6, 7 | 0 | цветы: росток, малый, выросший (коды 5, 6, 8) |
 | 21, 22, 23 | 0 | колючки: росток, малый, выросший (коды 9, 10, 12) |
-| 24…26 | 0 | дерево (код 13) |
+| 24, 25, 26 | 0 | дерево, коды 13, 14, 15: у ремейка одно дерево по правилам, но сценарии этапов различают три |
 | прочие | как есть | — |
 
 Стадии совпадают по часам (`TerrainCounterSeeds` `$02246C`: ростки 5 и
@@ -105,6 +105,15 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 
 ﾒｶﾞｻﾞｳﾙｽ (этап 20) у ремейка ещё нет: эта миссия идёт с обычной целью,
 отложенное перечислено в `report.md`.
+
+## События
+
+Покадровый сценарий этапа по таймеру (dyna #207, часть 2) — `map.events`:
+счётчик этапа, проходы по местности, подкрепления. Разбирает его
+`tools/stageevents.py`, разбор — [game-stage-events.md](../docs/game-stage-events.md).
+Подкрепления переводятся в юнитов по тем же правилам, что расстановка
+карты. Что сценарии делают, по миссиям, и что из них отложено — в
+`report.md`.
 """
 import collections
 import io
@@ -125,6 +134,7 @@ except Exception:
 import maptex as mt                                          # noqa: E402
 import missions as ms                                        # noqa: E402
 import dumptext as dt                                        # noqa: E402
+import stageevents as se                                     # noqa: E402
 from unpack import unpack                                    # noqa: E402
 from paths import OUT as out_path                            # noqa: E402
 
@@ -167,7 +177,7 @@ for _t in range(1, 5):
 PLANTS.update({5: 5, 6: 6, 7: 8})          # цветы: росток, малый, выросший
 PLANTS.update({21: 9, 22: 10, 23: 12})     # колючки: то же
 for _t in range(24, 27):
-    PLANTS[_t] = 13                # дерево
+    PLANTS[_t] = 13 + _t - 24      # три дерева оригинала, коды 13…15 (dyna #207)
 
 
 def u16(r, o):
@@ -384,6 +394,60 @@ def describe(c):
     return u" и ".join(describe(p) for p in c["conditions"])
 
 
+def map_unit(x, y, d, typ, pose, skipped):
+    u"""Запись расстановки -> юнит `map.units`, или None, если ремейк её
+    не выгружает (причина — в `skipped`). Гнёзда разбирает вызывающий."""
+    neutral = None
+    if typ in MEAT:
+        neutral = (typ - MEAT.start, "carcass")
+    elif typ == BONES:
+        neutral = (BONES_SPECIES - 1, "bones")
+    elif typ == EMPTY_EGG:
+        neutral = (0, "empty_egg")
+    elif typ == SPECIES20_MEAT:
+        neutral = (NEUTRAL[20], "carcass")
+    else:
+        owner, sp, decor = unit_type(typ)
+        if owner == 0 and not decor and sp in NEUTRAL:
+            neutral = (NEUTRAL[sp], NEUTRAL_POSES.get(pose, "walk"))
+    if neutral:
+        return {"team_id": 0, "unit_type": neutral[0], "x": x, "y": y,
+                "facing": d, "pose": neutral[1]}
+    owner, sp, decor = unit_type(typ)
+    if owner == 0:
+        skipped[u"декор" if decor else u"нейтральный вид %d" % sp] += 1
+        return None
+    if not 1 <= sp <= 6:
+        skipped[u"вид %d игрока" % sp] += 1
+        return None
+    return {"team_id": owner, "unit_type": sp - 1, "x": x, "y": y,
+            "facing": d, "pose": POSES.get(pose, "walk")}
+
+
+def stage_events(st, skipped):
+    u"""Сценарий этапа st как `map.events` (или None) и что из него отложено.
+
+    Подкрепление — операция `place`: юниты выводятся по тику, клетку типов
+    22…30 `LoadPlacement` и тут пропускает, но решает это ремейк на месте —
+    к тому тику местность могла измениться."""
+    def place(a):
+        units = [u for u in (map_unit(x, y, d, typ, pose, skipped)
+                             for x, y, d, typ, pose in mt.placement(a, lo=0))
+                 if u]
+        assert units and all(u["team_id"] == 0 for u in units), (st, hex(a))
+        return collections.OrderedDict([("pass", "place"), ("units", units)])
+
+    timers, ticks, later = se.stage_events(st, place)
+    if not timers and not ticks:
+        return None, later
+    ev = collections.OrderedDict()
+    if timers:
+        ev["timers"] = timers
+    if ticks:
+        ev["ticks"] = ticks
+    return ev, later
+
+
 def export_mission(c, m, r, recs, skipped):
     st = r[3]
     o = mt.STAGES + (st - 1) * 8
@@ -421,32 +485,9 @@ def export_mission(c, m, r, recs, skipped):
         if typ == 1 or typ in (2, 3, 4):
             nests[1 if typ == 1 else 2].append({"x": x, "y": y})
             continue
-        neutral = None
-        if typ in MEAT:
-            neutral = (typ - MEAT.start, "carcass")
-        elif typ == BONES:
-            neutral = (BONES_SPECIES - 1, "bones")
-        elif typ == EMPTY_EGG:
-            neutral = (0, "empty_egg")
-        elif typ == SPECIES20_MEAT:
-            neutral = (NEUTRAL[20], "carcass")
-        else:
-            owner, sp, decor = unit_type(typ)
-            if owner == 0 and not decor and sp in NEUTRAL:
-                neutral = (NEUTRAL[sp], NEUTRAL_POSES.get(pose, "walk"))
-        if neutral:
-            units.append({"team_id": 0, "unit_type": neutral[0], "x": x,
-                          "y": y, "facing": d, "pose": neutral[1]})
-            continue
-        owner, sp, decor = unit_type(typ)
-        if owner == 0:
-            skipped[u"декор" if decor else u"нейтральный вид %d" % sp] += 1
-            continue
-        if not 1 <= sp <= 6:
-            skipped[u"вид %d игрока" % sp] += 1
-            continue
-        units.append({"team_id": owner, "unit_type": sp - 1, "x": x, "y": y,
-                      "facing": d, "pose": POSES.get(pose, "walk")})
+        u = map_unit(x, y, d, typ, pose, skipped)
+        if u:
+            units.append(u)
 
     roster1 = r[0x04:0x0E]
     eggs = u16(r, 0x44)
@@ -460,6 +501,7 @@ def export_mission(c, m, r, recs, skipped):
                      if 1 <= unit_type(t)[1] <= 6})
 
     win1, lose1, later = goals(st)
+    events, events_later = stage_events(st, skipped)
     players = []
     for team, money, avail, wth in ((1, bcd(r[0x34:0x38]), avail1, weathers1),
                                     (2, bcd(r[0x38:0x3C]), avail2,
@@ -486,9 +528,46 @@ def export_mission(c, m, r, recs, skipped):
         ("map_bytes", list(cells)),
         ("vegetation", veg),
         ("units", units),
-        ("players", players),
     ])
-    return doc, len(units), len(nests[2]), later
+    if events:
+        doc["map"]["events"] = events
+    doc["map"]["players"] = players
+    return doc, len(units), len(nests[2]), later, events, events_later
+
+
+def events_summary(ev):
+    u"""Одна строка отчёта: что и когда делает сценарий."""
+    if not ev:
+        return u"—"
+    def ops(lst):
+        out = []
+        for o in lst:
+            k = o["pass"]
+            if k == "place":
+                out.append(u"подкрепление %d" % len(o["units"]))
+            elif k in ("stop_fishing", "reset_timer"):
+                out.append(k)
+            elif k == "paint_cells":
+                out.append(u"%d клеток -> %d" % (len(o["cells"]), o["to"]))
+            else:
+                src = o.get("from") or [o["to"]]
+                dst = o.get("to", u"/".join(str(c[0]) for c in o.get("choice", [])))
+                out.append(u"%s %s -> %s" % (k, u",".join(map(str, src)), dst))
+        return u", ".join(out)
+    parts = []
+    for t in ev.get("timers", []):
+        s = u"после %d" % t["after"]
+        if t["start"]:
+            s += u": %s" % ops(t["start"])
+        if t["fire"]:
+            s += u"; раз в %d: %s" % (t["period"], ops(t["fire"]))
+        elif t.get("rearm", True) is False:
+            s += u"; повтор через %d" % (t["period"] + 1)
+        parts.append(s)
+    for k in ev.get("ticks", []):
+        at = (u"тик %d" % k["tick"]) if "tick" in k else (u"каждые %d" % k["every"])
+        parts.append(u"%s: %s" % (at, ops(k["ops"])))
+    return u"<br>".join(parts)
 
 
 def write_json(path, doc, **kw):
@@ -511,11 +590,15 @@ def main():
     by_chapter = collections.defaultdict(list)
     for c, m, r in mt.missions():
         by_chapter[c].append((m, r))
-    rows, special, n = [], [], 0
+    rows, special, scripted, n = [], [], [], 0
     for order, (folder, title, c) in enumerate(CAMPAIGNS, 1):
         for m, r in by_chapter[c]:
             n += 1
-            doc, nunits, nests2, later = export_mission(c, m, r, recs, skipped)
+            doc, nunits, nests2, later, events, events_later = export_mission(
+                c, m, r, recs, skipped)
+            if events or events_later:
+                scripted.append((folder, m, r[3], events_summary(events),
+                                 u"; ".join(events_later) or u"—"))
             write_json(os.path.join(root, folder, "maps", str(m), "mission.json"),
                        doc, separators=(",", ":"))
             rows.append((folder, m, doc["name"], r[3], nunits, nests2,
@@ -547,6 +630,12 @@ def main():
           u"|---|---:|---:|---|---|---|\n")
         for row in special:
             p(u"| %s | %d | %d | %s | %s | %s |\n" % row)
+        p(u"\n## Сценарии этапов\n\nСобрано `tools/stageevents.py`, разбор — "
+          u"`docs/game-stage-events.md`. Тик — тик оригинала, 40 в секунду. "
+          u"«Отложено» — то, что ремейк пока не исполняет, со своей задачей.\n\n"
+          u"| кампания | № | этап | события | отложено |\n|---|---:|---:|---|---|\n")
+        for row in scripted:
+            p(u"| %s | %d | %d | %s | %s |\n" % row)
         p(u"\n## Миссии\n\n| кампания | № | название | этап | юнитов | гнёзд у игрока 2 | деньги |\n"
           u"|---|---:|---|---:|---:|---:|---:|\n")
         for row in rows:

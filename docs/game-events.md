@@ -13,9 +13,14 @@
 Сценарии формульны: задать пару порогов в `d6`/`d7` и позвать общую
 процедуру, либо сверить `GameTick` с точным числом и что-то
 сделать — сменить музыку, подсыпать юнитов, включить отсчёт.
-**`d7` — тик, на котором событие начинается, `d6` — период
-повторения**; счётчик живёт в `$FFE0BC`. При 60 кадрах в секунду
-`$0708` это полминуты, `$2A30` — три минуты.
+`d7` — порог: событие начинается на первом тике, **младшее слово**
+которого больше `d7`; `d6` — период. Счётчик один на этап, `$FFE0BC`.
+
+Это обзор, собранный по листингу эвристикой. Точный разбор — автомат
+счётчика, режимы тел, проходы по местности, особые этапы 6, 31, 33
+и 117 — в [game-stage-events.md](game-stage-events.md), а данные для
+ремейка пишет `tools/stageevents.py`. Где таблица ниже с ним
+расходится, прав тот.
 
 Из 256 этапов на собственный сценарий указывают 175, остальные ведут
 на общую заглушку `$02E8FA`.
@@ -28,7 +33,7 @@
 | 3 | гл.1 м.7 | `$02D2CA` | старт на тике $1C20; повтор каждые $D2F0; зовёт StageConvertAll14Once |
 | 4 | гл.1 м.9 | `$02D2D8` | старт на тике $189C; повтор каждые $012C; на тике 6300; на тике 6450; музыка 19 = банк 3 песня $87; зовёт PlaySound, StageSpreadRandomTypeTick, LoadPlacement |
 | 5 | гл.1 м.10 | `$02D32C` | старт на тике $0E10; повтор каждые $0078; зовёт StageSeedType25Tick |
-| 6 | гл.1 м.37 | `$02D9FA` | на тике 9015; на тике 9030; на тике 9045; на тике 9000; музыка 19 = банк 3 песня $87; зовёт ScrollCursorToTarget, SetupFadeToPalette60, StepFadeAndUploadRow3, PlaySound |
+| 6 | гл.1 м.37 | `$02D9FA` | на тике 9015; на тике 9030; на тике 9045; на тике 9000; музыка 19 = банк 3 песня $87; зовёт ScrollCursorToTarget, SetupFadeToPalette60, StepFadeAndUploadRow3, PlaySound, ShakeScreen, SpreadTerrainRandom, ConvertTerrainAll |
 | 7 | гл.1 м.13 | `$02D33A` | старт на тике $2328; повтор каждые $0708; зовёт StageShudderTick |
 | 9 | гл.1 м.22 | `$02D34A` | старт на тике $2328; повтор каждые $00FA; зовёт TickLavaEruption |
 | 10 | гл.1 м.38 | `$02D358` | на тике 5385; на тике 5401; на тике 5460; на тике 5400; музыка 105 = банк 4 песня $85; зовёт PlaySound, ScrollCursorToTarget, LoadPlacement |
@@ -37,7 +42,7 @@
 | 13 | гл.1 м.26 | `$02D534` | старт на тике $2A30; на тике 10800; музыка 101 = банк 4 песня $8D; зовёт PlaySound, StageSoundLoopTick |
 | 14 | гл.1 м.31 | `$02D560` | старт на тике $6978; повтор каждые $0003; зовёт StagePoisonTick |
 | 16 | гл.1 м.25 | `$02D588` | старт на тике $4650; повтор каждые $0258; на тике 18000; музыка 59 = банк 3 песня $86; зовёт PlaySound, StageConvertWaveTick |
-| 17 | гл.1 м.36 | `$02D5B8` | старт на тике $19C8; повтор каждые $005A; на тике 300; на тике 4200; музыка 67 = банк 3 песня $85; зовёт FindUnitFromRandomStart, loc_01F410, ScrollToClampedCell, PlaySound |
+| 17 | гл.1 м.36 | `$02D5B8` | старт на тике $19C8; повтор каждые $005A; на тике 300; на тике 4200; музыка 67 = банк 3 песня $85; зовёт FindUnitFromRandomStart, loc_01F410, ScrollToClampedCell, PlaySound, StageShakeAtTick708, StageBurnRandomUnitCell |
 | 19 | гл.1 м.43 | `$02D652` | старт на тике $AFC8; на тике 45000; музыка 101 = банк 4 песня $8D; зовёт PlaySound, StageSoundLoopTick |
 | 20 | гл.1 м.45 | `$02D67E` | зовёт StageSpecies18MarchTick |
 | 23 | гл.1 м.4 | `$02D688` | старт на тике $2328; повтор каждые $0E10; зовёт StageSpreadWideTick |
@@ -48,9 +53,9 @@
 | 28 | гл.1 м.12 | `$02D74C` | на тике 7200; на тике 7200; музыка 67 = банк 3 песня $85; зовёт PlaySound, LoadStagePalette10 |
 | 29 | гл.1 м.16 | `$02D844` | параметр d7 = 50; зовёт LoseIfNeutralTypeGone |
 | 30 | гл.1 м.18 | `$02D8EE` | старт на тике $3840; повтор каждые $0708; параметр d7 = 50; на тике 13500; на тике 13500; музыка 21 = банк 3 песня $88; зовёт LoseIfNeutralTypeGone, PlaySound, FadePaletteSlow, StageSpreadTerrainTick |
-| 31 | гл.1 м.34 | `$02DC1E` | старт на тике $1FA4; повтор каждые $0708; на тике 8100; музыка 73 = банк 2 песня $8A; зовёт LoadStagePalette, PlaySound, RepaintLastCellOfType, ShakeScreen |
+| 31 | гл.1 м.34 | `$02DC1E` | старт на тике $1FA4; повтор каждые $0708; на тике 8100; музыка 73 = банк 2 песня $8A; зовёт LoadStagePalette, PlaySound, RepaintLastCellOfType, ShakeScreen, SpreadTypeMapWide, ConvertTerrainAll |
 | 32 | гл.1 м.35 | `$02DD54` | старт на тике $8CA0; зовёт StageSoundLoopTick |
-| 33 | гл.1 м.15 | `$02D946` | старт на тике $34BC; повтор каждые $0258; на тике 13500; музыка 59 = банк 3 песня $86; зовёт PlaySound, StageConvertWaveTick, StartScreenShudder, ConvertTerrainInner |
+| 33 | гл.1 м.15 | `$02D946` | старт на тике $34BC; повтор каждые $0258; на тике 13500; музыка 59 = банк 3 песня $86; зовёт PlaySound, StageConvertWaveTick, StartScreenShudder, ConvertTerrainInner, FlushScreenCellMarks, DrawTerrainEdges, StopScreenShudder |
 | 34 | гл.1 м.17 | `$02D8E4` | параметр d7 = 50; зовёт LoseIfNeutralTypeGone |
 | 35 | гл.1 м.20 | `$02D87E` | старт на тике $2328; повтор каждые $012C; на тике 9000; на тике 9005; музыка 19 = банк 3 песня $87; зовёт PlaySound, StageSpreadRandom89Tick, LoadPlacement |
 | 36 | гл.1 м.23 | `$02D93C` | параметр d7 = 50; зовёт LoseIfNeutralTypeGone |
@@ -90,7 +95,7 @@
 | 113 | гл.5 м.4 | `$02E404` | старт на тике $1518; повтор каждые $0708; на тике 5400; музыка 19 = банк 3 песня $87; зовёт PlaySound, StageSpreadRandomTypeTick |
 | 114 | гл.5 м.2 | `$02E434` | старт на тике $0708; повтор каждые $0078; зовёт StageSeedType25Tick |
 | 116 | — | `$02E442` | старт на тике $2A30; повтор каждые $0708; на тике 9000; на тике 9000; музыка 21 = банк 3 песня $88; зовёт PlaySound, FadePaletteSlow, StageSpreadTerrainTick |
-| 117 | гл.8 м.21 | `$02E488` | повтор каждые $0708; на тике 5400; зовёт StageSpreadRandomTypeTick, StartScreenShudder, ConvertTerrainInner, FlushScreenCellMarks |
+| 117 | гл.8 м.21 | `$02E488` | повтор каждые $0708; на тике 5400; зовёт StageSpreadRandomTypeTick, StartScreenShudder, ConvertTerrainInner, FlushScreenCellMarks, DrawTerrainEdges, StopScreenShudder, LoadPlacement |
 | 119 | гл.5 м.5 | `$02E570` | старт на тике $1C20; на тике 7200; музыка 101 = банк 4 песня $8D; зовёт PlaySound, StageSoundLoopTick |
 | 120 | гл.5 м.6 | `$02E59C` | старт на тике $2A30; повтор каждые $0708; на тике 10800; музыка 67 = банк 3 песня $85; зовёт PlaySound, StageShudderTick |
 | 121 | — | `$02E5CC` | старт на тике $2A30; повтор каждые $00FA; на тике 10800; музыка 67 = банк 3 песня $85; зовёт PlaySound, TickLavaEruption |
@@ -100,7 +105,7 @@
 | 129 | — | `$02E648` | старт на тике $34BC; повтор каждые $0708; на тике 5400; на тике 12600; музыка 21 = банк 3 песня $88; зовёт PlaySound, FadePaletteSlow, StageSpreadTerrainTick |
 | 130 | гл.5 м.7 | `$02E6AA` | старт на тике $3840; на тике 14400; музыка 101 = банк 4 песня $8D; зовёт PlaySound, StageSoundLoopTick |
 | 131 | гл.5 м.3 | `$02E6E4` | на тике 7200; на тике 7200; музыка 67 = банк 3 песня $85; зовёт PlaySound, LoadStagePalette |
-| 132 | — | `$02E722` | на тике 4500; музыка 19 = банк 3 песня $87; зовёт PlaySound, ShakeScreen, SpreadTerrainRandom, ConvertTerrainAll |
+| 132 | — | `$02E722` | на тике 4500; музыка 19 = банк 3 песня $87; зовёт PlaySound, ShakeScreen, SpreadTerrainRandom, ConvertTerrainAll, PlaceTerrainListFiltered, LoadPlacement, LoadStagePalette |
 | 217 | гл.8 м.12 | `$02E6D6` | старт на тике $5B68; повтор каждые $0E10; зовёт StageSpreadType8Tick |
 | 222 | гл.8 м.20 | `$02E836` | параметр d7 = 68; зовёт AllowWinIfNeutralTypeGone |
 | 223 | гл.8 м.24 | `$02E8C6` | зовёт FindUnitFromRandomStart, loc_01F410, ScrollToClampedCell |
@@ -170,8 +175,10 @@
 |---|---|
 | `ConvertTerrainAll` | 40x40, все клетки |
 | `ConvertTerrainInner` | 38x38, все клетки |
-| `SeedEmptyTerrain` | только пустые, шанс 25% |
-| `SpreadTerrainRandom` | 38x38, шанс 10% |
+| `RepaintLastCellOfType` | последняя клетка ровно типа d4 |
+| `SeedEmptyTerrain` | одна клетка ровно типа d4, с конца поля, шанс 64/256 на каждую |
+| `SpreadTerrainRandom` | 38x38, шанс 25/256 на клетку |
+| `SpreadTypeMapWide` | соседи клеток типа d5, кроме типов маски d4 |
 
 Несколько тел местность не трогают, а **проверяют цель миссии**.
 У них `d7` значит не тик, а тип или число, и кладут его байтом:
@@ -189,30 +196,30 @@
 
 | тело | этапы | действие |
 |---|---|---|
-| `StageSpreadWideTick` | 23, 43, 72, 73, 80, 83, 84, 122 | местность не трогает; зовёт RunEventAnimation60, loc_020EE4, SpreadTypeMapWide |
-| `ShowMissionNotice` | 51, 52, 53, 54, 55, 56, 57, 58 | местность не трогает; зовёт CheckNoticeConditions |
+| `StageSpreadWideTick` | 23, 43, 72, 73, 80, 83, 84, 122 | соседи типа 19, кроме типов 14, 27, 28, 29, 30, 31 -> 19 (`SpreadTypeMapWide`) |
+| `ShowMissionNotice` | 51, 52, 53, 54, 55, 56, 57, 58 | зовёт CheckNoticeConditions |
 | `StageSpreadTerrainTick` | 24, 25, 30, 40, 76, 116, 129 | типы 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 17, 18, 21 -> 16 (`SpreadTerrainRandom`) |
 | `StageSpreadRandomTypeTick` | 4, 71, 112, 113, 117 | типы 16 -> 8 либо 9 либо 5 (`SpreadTerrainRandom`); типы 14 -> 19 (`ConvertTerrainInner`) |
-| `TickLavaEruption` | 9, 37, 41, 121, 125 | местность не трогает; зовёт LavaFlowWide, RebuildGrowthFlagMap, EruptionFlashAndShake, LavaFlowDown |
-| `StageSoundLoopTick` | 13, 19, 32, 119, 130 | местность не трогает; зовёт RefreshScreenKeepFlags |
-| `StagePoisonTick` | 14, 39, 44, 89 | местность не трогает; зовёт ForEachUnitBothPlayers, ShowPoisonEventIcon |
-| `StageSeedType25Tick` | 5, 66, 67, 114 | пусто -> 25 (`SeedEmptyTerrain`) |
+| `TickLavaEruption` | 9, 37, 41, 121, 125 | зовёт LavaFlowWide, RebuildGrowthFlagMap, EruptionFlashAndShake, LavaFlowDown |
+| `StageSoundLoopTick` | 13, 19, 32, 119, 130 | зовёт RefreshScreenKeepFlags |
+| `StagePoisonTick` | 14, 39, 44, 89 | зовёт ForEachUnitBothPlayers, ShowPoisonEventIcon |
+| `StageSeedType25Tick` | 5, 66, 67, 114 | типы 24 -> 25 (`SeedEmptyTerrain`) |
 | `StageConvertWaveTick` | 16, 26, 33, 70 | типы 0 -> 8 (`SpreadTerrainRandom`); типы 1, 2, 3, 4, 5, 6, 7 -> 9 (`SpreadTerrainRandom`); типы 17, 18 -> 0 (`SpreadTerrainRandom`) |
 | `StageSpreadType8Tick` | 27, 85, 127, 217 | типы 19 -> 8 (`SpreadTerrainRandom`) |
-| `LoseIfNeutralTypeGone` | 29, 30, 34, 36 | местность не трогает; зовёт ForceMissionLoss |
+| `LoseIfNeutralTypeGone` | 29, 30, 34, 36 | зовёт ForceMissionLoss |
 | `StageConvertInner14Tick` | 11, 77, 81 | типы 19 -> 14 (`ConvertTerrainInner`) |
-| `ScrollToClampedCell` | 12, 17, 223 | местность не трогает; зовёт ClampMapCoords, ScrollCursorToTarget, DrawMarkAtCell, PaintCellFire |
+| `ScrollToClampedCell` | 12, 17, 223 | зовёт ClampMapCoords, ScrollCursorToTarget, DrawMarkAtCell, PaintCellFire |
 | `StageConvertAll14Once` | 3, 86 | типы 19 -> 14 (`ConvertTerrainAll`) |
 | `StageShudderTick` | 7, 120 | типы 19 -> 8 (`ConvertTerrainInner`) |
-| `Species18StepGate` | 37 | местность не трогает; зовёт  |
+| `Species18StepGate` | 37 | зовёт  |
 | `StageConvertAll14Tick` | 78, 82 | типы 19 -> 14 (`ConvertTerrainAll`) |
 | `StageSpreadType25Tick` | 2 | типы 24 -> 25 (`SpreadTerrainRandom`) |
-| `StageShakeAtTick708` | 17 | местность не трогает; зовёт ShakeScreen, SetStageAnimByte0, FadePaletteRow3, SetSceneMode1, SetSceneByte5 |
-| `StageBurnRandomUnitCell` | 17 | местность не трогает; зовёт FindUnitFromRandomStart, PaintCellFire |
-| `StageSpecies18MarchTick` | 20 | местность не трогает; зовёт TickSpecies18March |
+| `StageShakeAtTick708` | 17 | зовёт ShakeScreen, SetStageAnimByte0, FadePaletteRow3, SetSceneMode1, SetSceneByte5, SetSceneMode3 |
+| `StageBurnRandomUnitCell` | 17 | зовёт FindUnitFromRandomStart, PaintCellFire |
+| `StageSpecies18MarchTick` | 20 | зовёт TickSpecies18March |
 | `StageSpreadRandom89Tick` | 35 | типы 16 -> 8 либо 9 либо 5 (`SpreadTerrainRandom`); типы 14 -> 19 (`ConvertTerrainAll`) |
-| `WinIfHerbivoresReach` | 51 | местность не трогает; зовёт ForceMissionWin |
-| `RaiseNotice10` | 55 | местность не трогает; зовёт SessionSetBit32 |
-| `RaiseNotice14` | 57 | местность не трогает; зовёт SessionSetBit32 |
-| `PlaceTerrainListFiltered` | 132 | местность не трогает; зовёт PaintCellAtIndex |
-| `AllowWinIfNeutralTypeGone` | 222 | местность не трогает; зовёт EnableWipeoutWin |
+| `WinIfHerbivoresReach` | 51 | зовёт ForceMissionWin |
+| `RaiseNotice10` | 55 | зовёт SessionSetBit32 |
+| `RaiseNotice14` | 57 | зовёт SessionSetBit32 |
+| `PlaceTerrainListFiltered` | 132 | зовёт PaintCellAtIndex |
+| `AllowWinIfNeutralTypeGone` | 222 | зовёт EnableWipeoutWin |
