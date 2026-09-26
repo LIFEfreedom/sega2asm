@@ -76,7 +76,15 @@
 
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
-клеток не заводятся. Заплатки перечислены в выходе.
+клеток не заводятся. Сценарий со списком кодов (`objects: [22, 23, …]`) зовёт
+конструктор только для этих кодов: `movea.l (a6,dN.w),a6` / `jsr (a6)` обоих
+обходов (`$2914E6`, `$2917FC`) заменяются на `jsr` заглушки, которая берёт
+обработчик так же, смотрит код в таблице разрешённых и зовёт обработчик или
+возвращается, как заглушка `$2A526C` (регистры обработчику — те же). Проверка
+`objects` снимает ещё окно порождения `$FFFFE130`-`$FFFFE137`, головы списков
+пула `$FFFFE1C0`/`$FFFFE1C2` и занятые записи по цепочке (адрес и `$54` байта
+каждой) — поле `pool` кадра, а на входе ещё весь пул (`pool_ram`, 80 записей: чего
+вход не пишет, то осталось от прежних хозяев записей). Заплатки перечислены в выходе.
 """
 import argparse
 import ctypes
@@ -381,6 +389,43 @@ SCENARIOS = {
     },
 }
 
+# Коды клеток, чьи конструкторы есть у ремейка (M4a): подбираемое, мешки, точки возврата, украшение 60,
+# пружина 176 (levels.md 2.7); в каждом из этих уровней код ведёт к одному из них (levelNN.json objects[].ctor).
+PICKUP_CODES = [3, 4, 5, 6, 7, 22, 23, 24, 25, 32, 40, 41, 42, 44, 45, 46, 47, 48, 49, 50, 52, 53, 54, 60, 176]
+
+SCENARIOS.update({
+    "objects_fly_0": {
+        "level": 0, "objects": PICKUP_CODES, "checks": ["player", "objects"], "fly": True, "pictures": [40, 150],
+        "input": [("RA", 150), ("DA", 50), ("LAC", 45), ("UA", 60), ("RAC", 20), ("DRAC", 30), ("ULAC", 30),
+                  ("", 10)],
+        "about": "уровень 0, отладочный полёт: подбираемое заводится по окну и снимается за ним, "
+                 "пул и окно порождения по кадрам; наискось — столбцы и ряды в одном кадре",
+    },
+    "objects_fly_1": {
+        "level": 1, "objects": PICKUP_CODES, "checks": ["player", "objects"], "fly": True,
+        "input": [("RA", 80), ("UA", 90), ("LAC", 30), ("DAC", 50), ("", 20)],
+        "about": "уровень 1, отладочный полёт: подбираемое, поплавки процедуры $2A5EC6 (низ уровня на экране "
+                 "— скрипт с $DB тянет ГСЧ)",
+    },
+    "objects_fly_2": {
+        "level": 2, "objects": PICKUP_CODES + [221], "checks": ["player", "objects"], "fly": True,
+        "input": [("UABC", 145), ("", 60), ("DAC", 30), ("", 10)],
+        "about": "уровень 2, отладочный полёт вверх: пружины, подбираемое, предел камеры $29E4FC (код 221) — "
+                 "нижний предел $FF1A92 = $200 и вниз по 8 до $F0",
+    },
+    "objects_fly_3": {
+        "level": 3, "objects": PICKUP_CODES, "checks": ["player", "objects"], "fly": True, "pictures": [60],
+        "input": [("LA", 60), ("UA", 50), ("RAC", 60), ("DA", 70), ("ULABC", 25), ("DRABC", 25), ("", 10)],
+        "about": "уровень 3, отладочный полёт: топливо, значки топлива ($2A4862 читает запас $FF133E), "
+                 "украшение 60; наискось — столбцы и ряды в одном кадре",
+    },
+    "objects_fly_14": {
+        "level": 14, "objects": PICKUP_CODES, "checks": ["player", "objects"], "fly": True,
+        "input": [("RA", 90), ("DA", 40), ("LAC", 30), ("UA", 40), ("", 40)],
+        "about": "уровень 14, отладочный полёт: подбираемое, источник звука корабля $2A60A8 (ГСЧ)",
+    },
+})
+
 for _level in range(19):          # 19-22 — бонус, утка с входа на моноцикле
     SCENARIOS["enter_%02d" % _level] = {
         "level": _level, "objects": False, "checks": ["entry"], "pictures": [20],
@@ -420,6 +465,32 @@ NO_OBJECTS = [
 ]
 
 
+# Обходы клеток с разрешёнными кодами: movea.l (a6,dN.w),a6 и jsr (a6) (6 байт) -> jsr заглушки.
+SPAWN_SITES = [
+    (0x2914E6, "2C7600004E96", 0, "обход столбца клеток: конструктор только для разрешённых кодов"),
+    (0x2917FC, "2C7650004E96", 5, "обход строки клеток: конструктор только для разрешённых кодов"),
+]
+SPAWN_STUB = 0x200            # заглушки в SCRATCH, по 0x20 байт
+SPAWN_ALLOW = 0x400           # таблица разрешённых: байт на код * 4 (как индекс в таблице обработчиков)
+
+
+def spawn_stub(reg, allow):
+    """movea.l 0(a6,dN.w),a6; move.l a0,-(a7); lea allow,a0; tst.b 0(a0,dN.w); movea.l (a7)+,a0;
+    beq.s +2; jmp (a6); rts — movea флаги не трогает."""
+    ext = "%04X" % (reg << 12)
+    return bytes.fromhex("2C76" + ext + "2F08" + "41F9" + "%08X" % allow + "4A30" + ext + "205F" + "6702" + "4ED6"
+                         + "4E75")
+
+
+def spawn_patches(codes):
+    if codes is False:
+        return list(NO_OBJECTS)
+    if codes is True:
+        return []
+    return [(at, old, "4EB9%08X" % (MegaDrive.SCRATCH + SPAWN_STUB + 0x20 * i), why)
+            for i, (at, old, _, why) in enumerate(SPAWN_SITES)]
+
+
 def pad_byte(buttons):
     v = 0
     for ch in buttons:
@@ -432,7 +503,7 @@ class MegaDrive:
 
     SCRATCH = 0x00900000
 
-    def __init__(self, rom, patches=()):
+    def __init__(self, rom, patches=(), spawn_codes=()):
         rom = bytearray(rom)
         for at, old, new, _ in patches:
             old_b, new_b = bytes.fromhex(old), bytes.fromhex(new)
@@ -470,6 +541,12 @@ class MegaDrive:
         uc.mem_write(self.stub_sr, bytes.fromhex("40F9") + struct.pack(">I", self.sr_cell) + bytes.fromhex("4E71"))
         uc.mem_write(self.stub_irq, bytes.fromhex("40E7" "46FC2600" "4EF9") + struct.pack(">I", vint))
         self.frame_sp = None
+        for i, (_, _, reg, _) in enumerate(SPAWN_SITES):
+            uc.mem_write(self.SCRATCH + SPAWN_STUB + 0x20 * i, spawn_stub(reg, self.SCRATCH + SPAWN_ALLOW))
+        allow = bytearray(0x400)
+        for code in spawn_codes or ():
+            allow[code * 4] = 1
+        uc.mem_write(self.SCRATCH + SPAWN_ALLOW, bytes(allow))
 
         ssp, pc = struct.unpack_from(">II", self.rom, 0)
         uc.reg_write(M.UC_M68K_REG_SR, 0x2700)
@@ -601,16 +678,40 @@ def layout_of(sc):
     return LAYOUT + (SPRITE_LAYOUT if "sprites" in sc["checks"] else [])
 
 
-def snapshot(md, layout=LAYOUT):
-    return {
+POOL_WINDOW = 0xFFFFE130       # окно порождения: столбец, ряд, их пределы
+POOL_HEADS = 0xFFFFE1C0        # головы свободных и занятых
+POOL_RECORDS = 80
+
+
+def pool(md):
+    """Окно, головы и занятые записи по цепочке от $FFFFE1C2: адрес (слово) и $54 байта каждой."""
+    out = md.read(POOL_WINDOW, 8) + md.read(POOL_HEADS, 4)
+    at = md.word(POOL_HEADS + 2)
+    for _ in range(POOL_RECORDS):
+        if not at:
+            break
+        out += struct.pack(">H", at) + md.read(0xFFFF0000 | at, PLAYER_LENGTH)
+        at = md.word(0xFFFF0000 | (at + 2))
+    else:
+        if at:
+            raise RuntimeError("цепочка пула длиннее %d записей" % POOL_RECORDS)
+    return out.hex().upper()
+
+
+def snapshot(md, layout=LAYOUT, objects=False):
+    shot = {
         "player": md.read(PLAYER, PLAYER_LENGTH).hex().upper(),
         "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in layout),
     }
+    if objects:
+        shot["pool"] = pool(md)
+    return shot
 
 
 def run(name, sc, rom):
-    patches = [] if sc["objects"] else NO_OBJECTS
-    md = MegaDrive(rom, patches)
+    patches = spawn_patches(sc["objects"])
+    md = MegaDrive(rom, patches, sc["objects"] if isinstance(sc["objects"], list) else ())
+    with_pool = "objects" in sc["checks"]
     if "demo" in sc:
         sc = dict(sc, input=demo_input(rom, sc["demo"]))
     pads = []
@@ -640,7 +741,10 @@ def run(name, sc, rom):
                 md.write(address, data)
             if sc.get("fly"):
                 md.write(DEBUG_FLIGHT, b"\x01")
-            state["entry"] = snapshot(md, layout)
+            state["entry"] = snapshot(md, layout, with_pool)
+            if with_pool:
+                # Весь пул на входе: чего вход не пишет, то в записях осталось от прежних хозяев.
+                state["entry"]["pool_ram"] = md.read(PLAYER, POOL_RECORDS * PLAYER_LENGTH).hex().upper()
             md.pad = pads[0]
             state["skip"] = hidden_tiles(md)
         elif state["done"] - 1 in wanted and state["done"] - 1 not in pictures:
@@ -680,7 +784,7 @@ def run(name, sc, rom):
 
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
     # Уровень кончается первым кадром с сигналом выхода (гибель, выход).
-    frames.append(dict(pad=pads[0], **snapshot(md, layout)))
+    frames.append(dict(pad=pads[0], **snapshot(md, layout, with_pool)))
     state["done"] = 1
     for k in range(1, min(len(pads), sc.get("record", len(pads)))):
         if md.word(EXIT) != 0:
@@ -689,7 +793,7 @@ def run(name, sc, rom):
         while not md.frame():
             pass
         state["done"] += 1
-        frames.append(dict(pad=pads[k], **snapshot(md, layout)))
+        frames.append(dict(pad=pads[k], **snapshot(md, layout, with_pool)))
     # Картинки после записанных кадров: игра идёт дальше с отпущенным пультом (картинке кадра k
     # нужен кадр k + 1).
     md.pad = 0
@@ -731,6 +835,9 @@ def run(name, sc, rom):
         "layout": {
             "player": {"at": "$%08X" % PLAYER, "length": PLAYER_LENGTH},
             "ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in layout],
+            **({"pool": {"window": "$%08X" % POOL_WINDOW, "window_length": 8, "heads": "$%08X" % POOL_HEADS,
+                         "heads_length": 4, "record": "адрес (слово) и $%02X байт, по цепочке от $FFFFE1C2" % PLAYER_LENGTH}}
+               if with_pool else {}),
         },
         "entry": state["entry"],
         "frames": frames,
