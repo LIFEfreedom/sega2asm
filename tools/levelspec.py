@@ -626,6 +626,10 @@ def level_facts(n, pl, tc, size):
          if U32(r + 0x1C) else None),
         ("spawn_table", dl(r + 0x20, addr=True)),
         ("touch_table", dl(r + 0x24, addr=True)),
+        # Таблица касаний мира целиком, кроме заглушки: касаются и объекты без клетки (код 0, $EE).
+        ("touch_handlers", OrderedDict(
+            (str(c), hexa(U32(U32(r + 0x24) + 4 * c))) for c in range(256)
+            if U32(U32(r + 0x24) + 4 * c) != STUB)),
         ("level_proc", dl(r + 0x2C, addr=True)),
         ("level_proc_does", notes.get(proc, u"не прочитано")),
         ("password_to_here", password_for(n)),

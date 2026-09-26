@@ -426,6 +426,35 @@ SCENARIOS.update({
     },
 })
 
+# Подбор (M4b): утка появляется рядом с предметом (at) и идёт к нему; где предмет лечит, запас здоровья
+# $FF1346 опущен (poke), чтобы лечение было видно.
+_LOW_HEALTH = [(0xFF1346, bytes([0x00, 0x30]))]
+_PICKUPS = [
+    ("pickups_weapon_0", 0, None, None, [("R", 30), ("", 10)], "ружьё (22) у старта"),
+    ("pickups_checkpoint_0", 0, (120, 316), None, [("R", 40), ("", 10)], "точка возврата (49)"),
+    ("pickups_heal_full_0", 0, (600, 500), _LOW_HEALTH, [("R", 40), ("", 10)], "здоровье до потолка (52)"),
+    ("pickups_treasure_0", 0, (920, 284), None, [("R", 50), ("", 10)], "мешок денег (44)"),
+    ("pickups_ammo_0", 0, (1352, 300), None, [("R", 40), ("", 10)], "жук-припас 1 (23)"),
+    ("pickups_life_1", 1, (360, 44), None, [("R", 40), ("", 10)], "жизнь (32)"),
+    ("pickups_heal_big_1", 1, (70, 796), _LOW_HEALTH, [("L", 40), ("", 10)], "здоровье +50 с потолком (53)"),
+    ("pickups_spring_2", 2, (160, 757), _LOW_HEALTH, [("R", 40), ("", 30)],
+     "здоровье +25 (7), потом пружина (176): подброс, состояние 18"),
+    ("pickups_fuel_3", 3, (632, 12), None, [("R", 50), ("", 10)], "топливо (3)"),
+    ("pickups_fuel_icon_3", 3, (170, 220), None, [("R", 40), ("", 10)], "значок топлива (4)"),
+    ("pickups_fuel_full_3", 3, (90, 92), None, [("R", 40), ("", 10)], "полный бак (6) и мешок"),
+    ("pickups_combo_3", 3, (656, 84), None, [("R", 40), ("", 10)], "серия ниндзя (5)"),
+]
+for _name, _level, _at, _poke, _input, _what in _PICKUPS:
+    SCENARIOS[_name] = {
+        "level": _level, "objects": PICKUP_CODES, "checks": ["camera", "player", "objects", "sounds"],
+        "input": _input,
+        "about": "уровень %d, подбор: %s — запасы, пул (снятие предмета, искра) и звуки по кадрам" % (_level, _what),
+    }
+    if _at:
+        SCENARIOS[_name]["at"] = _at
+    if _poke:
+        SCENARIOS[_name]["poke"] = _poke
+
 for _level in range(19):          # 19-22 — бонус, утка с входа на моноцикле
     SCENARIOS["enter_%02d" % _level] = {
         "level": _level, "objects": False, "checks": ["entry"], "pictures": [20],
@@ -674,8 +703,21 @@ class MegaDrive:
         return True
 
 
+# Сценарии с проверкой objects снимают ещё то, что пишут касания подбираемого (levels.md 2.3, 2.7).
+OBJECT_LAYOUT = [
+    (0xFF1A20, 8, "ружьё открыто, запасы 1-3 (двоично-десятичные)"),
+    (0xFFFFFD8A, 2, "номер последней точки возврата"),
+    (0xFF1164, 6, "$FF1104 кодов 48-50: точка возврата отмечена"),
+]
+
+# Проверка sounds: звуки, которые кадр начал и остановил (SoundStart, SoundStop; номер — длинное слово на стеке).
+SOUND_START = 0x2F8DCC
+SOUND_STOP = 0x2F8DEA
+
+
 def layout_of(sc):
-    return LAYOUT + (SPRITE_LAYOUT if "sprites" in sc["checks"] else [])
+    return (LAYOUT + (SPRITE_LAYOUT if "sprites" in sc["checks"] else [])
+            + (OBJECT_LAYOUT if "objects" in sc["checks"] else []))
 
 
 POOL_WINDOW = 0xFFFFE130       # окно порождения: столбец, ряд, их пределы
@@ -742,6 +784,8 @@ def run(name, sc, rom):
             if sc.get("fly"):
                 md.write(DEBUG_FLIGHT, b"\x01")
             state["entry"] = snapshot(md, layout, with_pool)
+            sounds["start"].clear()
+            sounds["stop"].clear()
             if with_pool:
                 # Весь пул на входе: чего вход не пишет, то в записях осталось от прежних хозяев.
                 state["entry"]["pool_ram"] = md.read(PLAYER, POOL_RECORDS * PLAYER_LENGTH).hex().upper()
@@ -767,6 +811,22 @@ def run(name, sc, rom):
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
     md.uc.hook_add(UC_HOOK_CODE, on_position, None, PLAYER_POSITION, PLAYER_POSITION)
+    with_sounds = "sounds" in sc["checks"]
+    sounds = {"start": [], "stop": []}
+
+    def on_sound(uc, address, size, kind):
+        sp = uc.reg_read(M.UC_M68K_REG_A7)
+        sounds[kind].append(struct.unpack(">I", bytes(uc.mem_read(sp + 4, 4)))[0])
+
+    def heard():
+        out = {"sounds": sounds["start"][:], "stopped": sounds["stop"][:]} if with_sounds else {}
+        sounds["start"].clear()
+        sounds["stop"].clear()
+        return out
+
+    if with_sounds:
+        md.uc.hook_add(UC_HOOK_CODE, on_sound, "start", SOUND_START, SOUND_START)
+        md.uc.hook_add(UC_HOOK_CODE, on_sound, "stop", SOUND_STOP, SOUND_STOP)
 
     boot = 0
     boot_frame = [0]
@@ -784,7 +844,7 @@ def run(name, sc, rom):
 
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
     # Уровень кончается первым кадром с сигналом выхода (гибель, выход).
-    frames.append(dict(pad=pads[0], **snapshot(md, layout, with_pool)))
+    frames.append(dict(pad=pads[0], **snapshot(md, layout, with_pool), **heard()))
     state["done"] = 1
     for k in range(1, min(len(pads), sc.get("record", len(pads)))):
         if md.word(EXIT) != 0:
@@ -793,7 +853,7 @@ def run(name, sc, rom):
         while not md.frame():
             pass
         state["done"] += 1
-        frames.append(dict(pad=pads[k], **snapshot(md, layout, with_pool)))
+        frames.append(dict(pad=pads[k], **snapshot(md, layout, with_pool), **heard()))
     # Картинки после записанных кадров: игра идёт дальше с отпущенным пультом (картинке кадра k
     # нужен кадр k + 1).
     md.pad = 0

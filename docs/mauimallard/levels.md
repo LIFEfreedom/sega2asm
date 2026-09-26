@@ -37,7 +37,7 @@ python tools/levelspec.py --level 7    # кто стоит на уровне, п
 | `+$0C`, `+$10`, `+$14`, `+$34` | прокрутка и фон ([camera.md](camera.md)) | `scroll` |
 | `+$18`, `+$3A` / `+$1C` | анимация тайлов / палитры | `tile_animation`, `palette_animation` |
 | `+$20` | таблица порождения: код клетки -> конструктор | `spawn_table` |
-| `+$24` | таблица касаний: код -> обработчик ([behavior.md](behavior.md), 2.2) | `touch_table` |
+| `+$24` | таблица касаний: код -> обработчик ([behavior.md](behavior.md), 2.2) | `touch_table`; все её записи, кроме заглушки `$2A526C`, — `touch_handlers` |
 | `+$2C` | процедура уровня: всё, чего нет на карте | `level_proc`, `level_proc_does` |
 | `+$36` | старт игрока, X и Y | `start_px` |
 | `+$3C` | номер музыки | `music` |
