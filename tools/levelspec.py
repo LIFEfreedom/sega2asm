@@ -15,7 +15,8 @@
 * `levels/levelNN.json` — сам уровень для движка: сетка клеток (номер
   метатайла), метатайлы (четыре имени VDP), свойства метатайлов (профиль
   высоты, код местности, код порождения), профили высоты, фон 64x32,
-  палитра и **расстановка объектов** с ролями;
+  палитра и **расстановка объектов** с ролями; у уровня 0 ещё `shadow` —
+  вторая карта столкновений облика «тень» и две заплатки палитры;
 * `levels/levelNN_tiles.png` — тайлы 8x8 по 32 в ряд, **индексами**:
   серый `17 * i` — цвет i ряда палитры, цвет 0 прозрачен. Ряд берётся из
   битов 13-14 имени VDP, отражения — из битов 11 и 12.
@@ -37,6 +38,7 @@ from collections import Counter, OrderedDict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import enemies as E                                          # noqa: E402
 import levels as L                                           # noqa: E402
+import lzss                                                  # noqa: E402
 import objects as O                                          # noqa: E402
 import scroll as SC                                          # noqa: E402
 import bgspec as BGS                                         # noqa: E402
@@ -75,7 +77,8 @@ TERRAIN = OrderedDict([
     (0, u"пусто"),
     (1, u"лиана: утка хватается (состояние 5), не на тарзанке"),
     (2, u"стена: не пройти"),
-    (3, u"лиана, второй вид (ещё и бит 8 в +$30)"),
+    (3, u"лиана уровня 7: и на тарзанке; висит без дела — сползает "
+        u"(+$18 = $0100)"),
     (4, u"упор для толкаемого ящика ($2A30EE)"),
     (5, u"ВЫХОД с уровня: $FF1A6C = 1"),
     (7, u"опасная клетка: урон 25, кроме состояния 15"),
@@ -84,9 +87,13 @@ TERRAIN = OrderedDict([
     (12, u"восходящий поток влево"),
     (13, u"шипы снизу: урон 25 и подброс -$0680"),
     (15, u"без обработчика у игрока"),
-    (16, u"облик игрока: снять бит 10, палитра $288B80"),
+    (16, u"облик «тень»: снять бит 10, вторая карта столкновений, "
+         u"палитра $288B80, снос -$0200"),
+    (17, u"обратно из тени (только во второй карте): бит 10, основная "
+         u"карта, палитра $288B98"),
     (20, u"разворот катящейся бочки ($29F9C2)"),
-    (23, u"облик игрока: снять бит 10 и схватиться за лиану"),
+    (23, u"как 16 и лиана (код 1)"),
+    (24, u"как 17 и лиана (код 1; только во второй карте)"),
     (28, u"стена (бит 1 никем не читается)"),
     (32, u"шипы сверху: урон 25 и сброс +$0800"),
     (33, u"пасть в земле: проверка на 16 ниже"),
@@ -384,6 +391,49 @@ def spawn_offset(ctor, depth=0):
 
 # ------------------------------------------------------------ уровень
 
+# Облик «тень» ($294ADE, $294AFC): вторая карта столкновений из записи
+# графики (+$18 — сжата ли, +$1A -> $FFFFE120, загрузчик $291176) и две
+# заплатки палитры, которые обработчики шлют заданием кадра $2A5830: слово
+# — номер цвета CRAM, слово — сколько, дальше цвета.
+SHADOW_PALETTES = (("to_shadow", 0x294AE8, 0x288B80),
+                   ("to_normal", 0x294B06, 0x288B98))
+
+
+def second_map(g, mw, mh):
+    """-> (адрес, клетки) второй карты столкновений или None.
+
+    Ширину и высоту игра берёт у основной карты (таблица строк $FF0020),
+    поэтому вторая обязана с ней совпасть.
+    """
+    at = U32(g["at"] + 0x1A)
+    if not at:
+        return None
+    if U16(g["at"] + 0x18):
+        d = lzss.unpack(at)[0]
+    else:
+        w, h = struct.unpack_from(">HH", ROM, at)
+        d = ROM[at:at + 4 + w * h * 2]
+    w, h = struct.unpack_from(">HH", d, 0)
+    if (w, h) != (mw, mh):
+        raise ValueError("вторая карта $%06X: %dx%d, основная %dx%d"
+                         % (at, w, h, mw, mh))
+    return at, [[struct.unpack_from(">H", d, 4 + (y * w + x) * 2)[0] // 8
+                 for x in range(w)] for y in range(h)]
+
+
+def shadow_palettes():
+    out = OrderedDict()
+    for key, code, table in SHADOW_PALETTES:
+        # lea ($xxxxxx).l,a1 в обработчике
+        if ROM[code:code + 2] != b"\x43\xF9" or U32(code + 2) != table:
+            raise ValueError("$%06X: не lea ($%06X).l,a1" % (code, table))
+        index, count = struct.unpack_from(">HH", ROM, table)
+        out[key] = OrderedDict([
+            ("at", hexa(table)), ("cram_index", index),
+            ("colors", [U16(table + 4 + 2 * i) for i in range(count)])])
+    return out
+
+
 def level_map(n):
     """Сетки и таблицы уровня -> словарь (без происхождения)."""
     g = L.gfx(n)
@@ -392,6 +442,15 @@ def level_map(n):
     cells = [[struct.unpack_from(">H", d, 4 + (y * mw + x) * 2)[0] // 8
               for x in range(mw)] for y in range(mh)]
     meta = L.metatiles(g)
+    shadow = second_map(g, mw, mh)
+    # Свойства ($FFFFE140) — по индексам обеих карт: вторая ссылается и на
+    # метатайлы, которых нет в таблице рисования.
+    nprops = len(meta)
+    if shadow:
+        nprops = max(nprops, 1 + max(max(r) for r in shadow[1]))
+    if nprops > len(pr):
+        raise ValueError("уровень %d: свойств %d, нужно %d"
+                         % (n, len(pr), nprops))
     prof = U32(L.record(n) + 4)
     used = sorted(set(p[0] for p in pr if p[0]))
     bg = g["bg_data"]
@@ -401,12 +460,12 @@ def level_map(n):
     for i in range(64):
         v = struct.unpack_from(">H", ROM, pa + 2 * i)[0]
         pal.append(v)
-    return {
+    m = {
         "size_cells": [mw, mh], "cell_px": 16,
         "cells": cells,
         "metatiles": [list(m) for m in meta],
         "metatile_props": [{"profile": p[0], "terrain": p[1],
-                            "spawn": p[2]} for p in pr[:len(meta)]],
+                            "spawn": p[2]} for p in pr[:nprops]],
         "profiles": {str(o): list(ROM[prof + o:prof + o + 16])
                      for o in used},
         "profile_table": hexa(prof),
@@ -415,7 +474,12 @@ def level_map(n):
             for y in range(bh)],
         "palette_cram": pal,
         "tiles": len(g["tiles_data"]) // 32,
-    }, g, pr, cells
+    }
+    if shadow:
+        m["shadow"] = OrderedDict([
+            ("map_at", hexa(shadow[0])), ("cells", shadow[1])])
+        m["shadow"].update(shadow_palettes())
+    return m, g, pr, cells
 
 
 def placements(n, pr, cells):
