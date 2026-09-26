@@ -15,8 +15,14 @@
 Машина. Картинки, звука и тактов нет, только то, от чего зависит логика:
 
 * ПЗУ, ОЗУ `$FF0000` с зеркалом `$FFFF0000` (адреса `.w` и `.l $FFFFxxxx`);
-* VDP: запись в порты пропускается, статус — FIFO пуст, DMA не занят, бит
-  кадра меняется на каждом чтении; счётчик HV — ноль;
+* VDP: записи в порты идут в модель памяти `tools/vdp.py` (регистры, VRAM,
+  CRAM, VSRAM, DMA); её начальные регистры — таблица `$297A72` (+26): загрузку
+  `$297A1C` ROM здесь пропускает, потому что порт `$A10008` читается не нулём,
+  как при тёплом перезапуске. Чтения портов от модели не зависят: статус —
+  FIFO пуст, DMA не занят, бит 3 (кадровое гашение) внутри прерывания кадра
+  поднят (очередь цветов `$2A5726` сбрасывается, только увидев его), а в
+  основном потоке меняется на каждом чтении, чтобы ожидание кадра не висело;
+  чтение статуса сбрасывает недописанную команду; счётчик HV — ноль;
 * Z80: шина выдана сразу, ОЗУ Z80 — просто память; YM — ноль;
 * пульт на 3 кнопки в первом порту, по линии TH, как его читает `$290B5E`;
 * кадр: основной поток — `BUDGET` команд, потом прерывание уровня 6
@@ -58,6 +64,16 @@
 не снимаются — ремейк проигрывает запись сам); моноцикл бонуса 19 — только
 для камеры.
 
+Картинки: сценарий с `pictures` рисует кадры k из памяти VDP так, как их
+показывает приставка — то, что очередь DMA кадра k отправила в начале
+прерывания кадра k + 1, на входе в задачу игрока `$298C44` (после записанных
+кадров игра идёт дальше с отпущенным пультом). В `export/pictures/`:
+`<сценарий>_<k>.png` — без спрайтов с тайлами VRAM, занятой при входе после
+тайлов уровня (HUD, объекты процедуры уровня — их у ремейка пока нет),
+`<сценарий>_<k>_planes.png` — без спрайтов вовсе, и `pictures.json` —
+уровень, кадр, камера, счётчик кадров, CRAM. Кадр в режиме тени и подсветки
+(уровень 1) не рисуется: в индексе остаётся причина.
+
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
 клеток не заводятся. Заплатки перечислены в выходе.
@@ -73,6 +89,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT, rom_bytes  # noqa: E402
+from vdp import Vdp  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -88,6 +105,7 @@ except ImportError:
     sys.exit("нужен unicorn: pip install unicorn==2.1.4")
 
 VINT_VECTOR = 0x78
+VDP_INIT = 0x297A72 + 26       # data_46: d5-d7, a0-a4, затем 24 байта регистров VDP
 LEVEL_SETUP = 0x2984C2
 PLAYER_POSITION = 0x2987B8     # move.l ($FFFFFD86).w,$12(a0): точка возрождения становится позицией
 RESPAWN = 0xFFFFFD86
@@ -166,7 +184,7 @@ SCENARIOS = {
         "about": "уровень 0: прыжок, C держат один кадр — короткий прыжок",
     },
     "jump_full": {
-        "level": 0, "objects": False, "checks": ["camera", "player"],
+        "level": 0, "objects": False, "checks": ["camera", "player"], "pictures": [50],
         "input": [("", 10), ("C", 45), ("", 40), ("C", 6), ("", 60)],
         "about": "уровень 0: полный прыжок с места, потом C на 6 кадров",
     },
@@ -201,27 +219,27 @@ SCENARIOS = {
         "about": "уровень 1: вправо, с уступа в яму ниже нижнего предела — гибель",
     },
     "ledges_3": {
-        "level": 3, "objects": False, "checks": ["camera", "player"],
+        "level": 3, "objects": False, "checks": ["camera", "player"], "pictures": [60, 200],
         "input": [("R", 300)],
         "about": "уровень 3: вправо, два срыва с уступов, упор",
     },
     "ledges_5": {
-        "level": 5, "objects": False, "checks": ["camera", "player"],
+        "level": 5, "objects": False, "checks": ["camera", "player"], "pictures": [60],
         "input": [("R", 20), ("RC", 40), ("R", 30), ("RC", 40), ("R", 30), ("RC", 40), ("R", 60)],
         "about": "уровень 5: вправо с прыжками, срывы с уступов, склоны",
     },
     "ledges_17": {
-        "level": 17, "objects": False, "checks": ["camera", "player"],
+        "level": 17, "objects": False, "checks": ["camera", "player"], "pictures": [150],
         "input": [("L", 300)],
         "about": "уровень 17: влево, срыв с уступа, упор",
     },
     "viscous_14": {
-        "level": 14, "objects": False, "checks": ["camera", "player"],
+        "level": 14, "objects": False, "checks": ["camera", "player"], "pictures": [150],
         "input": [("R", 300)],
         "about": "уровень 14, вязкий: вправо, упор, срыв с уступа",
     },
     "viscous_15": {
-        "level": 15, "objects": False, "checks": ["camera", "player"],
+        "level": 15, "objects": False, "checks": ["camera", "player"], "pictures": [100],
         "input": [("R", 20), ("RC", 40), ("R", 30), ("RC", 20), ("RCL", 20), ("L", 30), ("", 40)],
         "about": "уровень 15, вязкий: прыжки с разбега, разворот в воздухе",
     },
@@ -236,7 +254,7 @@ SCENARIOS = {
         "about": "уровень 1, утка под потолком в 3 клетках: прыжок в потолок",
     },
     "pit_7": {
-        "level": 7, "objects": False, "checks": ["camera", "player"], "at": (160, 400),
+        "level": 7, "objects": False, "checks": ["camera", "player"], "pictures": [15], "at": (160, 400),
         "input": [("", 40)],
         "about": "уровень 7: падение в яму до гибели; зонд стены у дна читает строки за картой (таблица $FF0020 повторяет последнюю строку)",
     },
@@ -246,7 +264,7 @@ SCENARIOS = {
         "about": "уровень 10: вправо по опасным клеткам (код 7), урон, неуязвимость, выпрыгивание",
     },
     "hazard_death_16": {
-        "level": 16, "objects": False, "checks": ["camera", "player"],
+        "level": 16, "objects": False, "checks": ["camera", "player"], "pictures": [200],
         "input": [("R", 900)],
         "about": "уровень 16: вправо по опасным клеткам до гибели, запас 100 -> 0",
     },
@@ -262,7 +280,7 @@ SCENARIOS = {
         "about": "уровень 12: утка летит вверх (состояние 4, +$18 = $FA00) в шипы сверху (код 32), сброс вниз",
     },
     "updraft_2": {
-        "level": 2, "objects": False, "checks": ["camera", "player"], "at": (264, 250),
+        "level": 2, "objects": False, "checks": ["camera", "player"], "pictures": [40], "at": (264, 250),
         "input": [("", 60), ("R", 20), ("", 60)],
         "about": "уровень 2: восходящий поток (коды 10-12, состояние 22), выход из шахты",
     },
@@ -312,7 +330,7 @@ SCENARIOS = {
         "about": "уровень 1: захват лианы в прыжке (+$18 ≥ −$0200), подъём, сброс «вниз» и прыжок",
     },
     "vine_slide_7": {
-        "level": 7, "objects": False, "checks": ["camera", "player"], "at": (760, 340),
+        "level": 7, "objects": False, "checks": ["camera", "player"], "pictures": [80], "at": (760, 340),
         "input": [("U", 3), ("", 40), ("U", 60), ("", 57)],
         "about": "уровень 7: лиана кода 3 — висит без дела и сползает, подъём до края, снова сползает; "
                  "кончается до пасти внизу",
@@ -327,14 +345,14 @@ SCENARIOS = {
                  "(там просыпаются объекты процедуры $2A5EC6 и тянут ГСЧ)",
     },
     "sprites_0": {
-        "level": 0, "objects": False, "checks": ["camera", "player", "sprites"],
+        "level": 0, "objects": False, "checks": ["camera", "player", "sprites"], "pictures": [5, 40, 75, 130, 200],
         "input": [("", 10), ("R", 60), ("L", 8), ("", 20), ("C", 30), ("", 20), ("RC", 40), ("R", 20),
                   ("", 10), ("D", 30), ("", 10), ("U", 20), ("L", 30), ("", 20)],
         "about": "уровень 0: таблица спрайтов и VRAM — ход, разворот, прыжки, присед, взгляд вверх; "
                  "HUD въезжает в кадре ~5",
     },
     "sprites_shadow_0": {
-        "level": 0, "objects": False, "checks": ["camera", "player", "sprites"], "at": (1356, 540),
+        "level": 0, "objects": False, "checks": ["camera", "player", "sprites"], "pictures": [30, 90, 200, 300], "at": (1356, 540),
         "poke": [(0xFF1A92, bytes([0x03, 0x80]))],
         "input": [("U", 3), ("", 20), ("D", 80), ("U", 125), ("CR", 1), ("R", 45), ("", 85)],
         "about": "уровень 0: таблица спрайтов в облике «тень» — приоритет снят, объект сноса со скриптом "
@@ -346,7 +364,7 @@ SCENARIOS = {
         "about": "уровень 1: таблица спрайтов на лиане, два блока VRAM процедуры $2A5EC6; ввод как у vine_jump_1",
     },
     "sprites_10": {
-        "level": 10, "objects": False, "checks": ["camera", "player", "sprites"], "record": 260,
+        "level": 10, "objects": False, "checks": ["camera", "player", "sprites"], "pictures": [20, 41, 100], "record": 260,
         "input": [("R", 400)],
         "about": "уровень 10: таблица спрайтов при уроне и мигании, блок $700 процедуры уровня; "
                  "начало hazard_10",
@@ -365,7 +383,7 @@ SCENARIOS = {
 
 for _level in range(19):          # 19-22 — бонус, утка с входа на моноцикле
     SCENARIOS["enter_%02d" % _level] = {
-        "level": _level, "objects": False, "checks": ["entry"],
+        "level": _level, "objects": False, "checks": ["entry"], "pictures": [20],
         "input": [("", 1)],
         "about": "вход в уровень %d: запись игрока и переменные, которые ставит вход" % _level,
     }
@@ -436,6 +454,10 @@ class MegaDrive:
         self.odd_io = {}
         uc.mmio_map(0xA00000, 0x20000, self._io_read, None, self._io_write, None)
         uc.mmio_map(0xC00000, 0x1000, self._vdp_read, None, self._vdp_write, None)
+        # Регистры VDP с включения: загрузку `$297A1C` из таблицы `$297A72` (+26, 24 байта) ROM
+        # пропускает — порт `$A10008` здесь читается не нулём, как при тёплом перезапуске, — а часть
+        # регистров (2, 3 — адреса плоскости A и окна) игра потом не пишет.
+        self.vdp = Vdp(self._bus_word, list(self.rom[VDP_INIT:VDP_INIT + 24]))
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._unmapped)
         uc.hook_add(UC_HOOK_INTR, self._intr)
 
@@ -503,12 +525,28 @@ class MegaDrive:
 
     def _vdp_read(self, uc, offset, size, user):
         if 4 <= offset < 8:
+            # Чтение статуса сбрасывает у VDP недописанную команду (первое слово без второго).
+            self.vdp.pending = False
+            # Бит 3 — кадровое гашение. Внутри прерывания кадра оно идёт (очередь цветов `$2A5726`
+            # сбрасывается, только увидев его); в основном потоке бит меняется на каждом чтении,
+            # чтобы циклы ожидания кадра не висели.
+            if self.frame_sp is not None:
+                return 0x3608 if size == 2 else 0x36
             self.status ^= 8
             return 0x3600 | self.status if size == 2 else 0x36
         return 0
 
     def _vdp_write(self, uc, offset, size, value, user):
-        pass
+        self.vdp.write(offset, size, value)
+
+    def _bus_word(self, address):
+        """Слово шины 68000 для DMA: ROM или ОЗУ."""
+        a = address & 0xFFFFFE
+        if a < len(self.rom):
+            return struct.unpack_from(">H", self.rom, a)[0]
+        if a >= 0xFF0000:
+            return struct.unpack_from(">H", self.ram.raw, a & 0xFFFF)[0]
+        return 0
 
     def _unmapped(self, uc, access, address, size, value, user):
         self.fault = "обращение к $%08X (вид %d) из $%08X" % (address, access, uc.reg_read(M.UC_M68K_REG_PC))
@@ -578,8 +616,11 @@ def run(name, sc, rom):
     pads = []
     for buttons, n in sc["input"]:
         pads += [pad_byte(buttons)] * n
-    state = {"setup": False, "entry": None, "frame": 0}
+    state = {"setup": False, "entry": None, "frame": 0, "done": 0}
     layout = layout_of(sc)
+    frames = []
+    pictures = {}
+    wanted = set(sc.get("pictures", ()))
 
     def on_setup(uc, address, size, user):
         if not state["setup"]:
@@ -601,6 +642,23 @@ def run(name, sc, rom):
                 md.write(DEBUG_FLIGHT, b"\x01")
             state["entry"] = snapshot(md, layout)
             md.pad = pads[0]
+            state["skip"] = hidden_tiles(md)
+        elif state["done"] - 1 in wanted and state["done"] - 1 not in pictures:
+            # Кадр k показывает то, что очередь DMA кадра k отправила в начале прерывания кадра
+            # k + 1: к задаче игрока кадра k + 1 оно уже в VRAM.
+            k = state["done"] - 1
+            pictures[k] = {
+                "camera": list(struct.unpack(">hh", md.read(0xFFFFE1BC, 4))),
+                "t": md.word(0xFFFFE196) - 1,
+                "cram": "".join("%04X" % c for c in md.vdp.cram),
+                "vsram": "".join("%04X" % c for c in md.vdp.vsram[:2]),
+            }
+            why = md.vdp.check()
+            if why:
+                pictures[k]["skipped"] = why
+            else:
+                pictures[k]["full"] = md.vdp.picture(skip_tiles=state["skip"])
+                pictures[k]["planes"] = md.vdp.picture(sprites=False)
 
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
@@ -622,14 +680,26 @@ def run(name, sc, rom):
 
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
     # Уровень кончается первым кадром с сигналом выхода (гибель, выход).
-    frames = [dict(pad=pads[0], **snapshot(md, layout))]
+    frames.append(dict(pad=pads[0], **snapshot(md, layout)))
+    state["done"] = 1
     for k in range(1, min(len(pads), sc.get("record", len(pads)))):
         if md.word(EXIT) != 0:
             break
         md.pad = pads[k]
         while not md.frame():
             pass
+        state["done"] += 1
         frames.append(dict(pad=pads[k], **snapshot(md, layout)))
+    # Картинки после записанных кадров: игра идёт дальше с отпущенным пультом (картинке кадра k
+    # нужен кадр k + 1).
+    md.pad = 0
+    while wanted and state["done"] <= max(wanted) + 1 and md.word(EXIT) == 0:
+        while not md.frame():
+            pass
+        state["done"] += 1
+    missing = wanted - set(pictures)
+    if missing:
+        raise RuntimeError("%s: нет картинок кадров %s" % (name, sorted(missing)))
 
     return {
         "meta": {
@@ -664,7 +734,42 @@ def run(name, sc, rom):
         },
         "entry": state["entry"],
         "frames": frames,
+        "_pictures": pictures,
     }
+
+
+def hidden_tiles(md):
+    """Тайлы VRAM, которые на входе в уровень заняли после тайлов уровня (HUD, объекты процедуры
+    уровня; graphics.md): ремейк их объектов пока не заводит, их спрайты картинка пропускает."""
+    size, address = struct.unpack(">HH", md.read(0xFFFFE138, 4))
+    node = md.word(0xFFFFE0A6)
+    first_free = md.word(0xFFFF0000 | (node + 2)) if node else 0x10000
+    return range((address + size) >> 5, first_free >> 5)
+
+
+def write_pictures(name, level, pictures):
+    import sprites as S
+    out = OUT("export", "pictures")
+    os.makedirs(out, exist_ok=True)
+    index_path = os.path.join(out, "pictures.json")
+    index = {}
+    if os.path.exists(index_path):
+        with io.open(index_path, encoding="utf-8") as f:
+            index = json.load(f)
+    index = {k: v for k, v in index.items() if v["scenario"] != name}
+    for k, pic in sorted(pictures.items()):
+        entry = {"scenario": name, "level": level, "frame": k, "camera": pic["camera"], "t": pic["t"],
+                 "cram": pic["cram"], "vsram": pic["vsram"]}
+        if "skipped" in pic:
+            entry["skipped"] = pic["skipped"]
+        else:
+            for kind in ("full", "planes"):
+                stem = "%s_%d%s" % (name, k, "" if kind == "full" else "_planes")
+                S.png(os.path.join(out, stem + ".png"), 320, 224, [c + (255,) for c in pic[kind]])
+        index["%s_%d" % (name, k)] = entry
+    with io.open(index_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(dict(sorted(index.items())), ensure_ascii=False, indent=1))
+        f.write("\n")
 
 
 def dump(trace):
@@ -706,9 +811,13 @@ def main():
     if not args.check:
         os.makedirs(out, exist_ok=True)
     for name in names:
-        text = dump(run(name, SCENARIOS[name], rom))
+        trace = run(name, SCENARIOS[name], rom)
+        pictures = trace.pop("_pictures")
+        text = dump(trace)
         if args.check:
-            again = dump(run(name, SCENARIOS[name], rom))
+            again = run(name, SCENARIOS[name], rom)
+            again.pop("_pictures")
+            again = dump(again)
             print("%s: %s" % (name, "повтор совпал" if text == again else "ПОВТОР РАЗОШЁЛСЯ"))
             if text != again:
                 sys.exit(1)
@@ -716,6 +825,8 @@ def main():
         path = os.path.join(out, name + ".json")
         with io.open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+        if pictures:
+            write_pictures(name, SCENARIOS[name]["level"], pictures)
         print("%s: %s" % (name, path))
 
 
