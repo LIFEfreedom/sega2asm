@@ -69,7 +69,12 @@
 носитель жетона и сам жетон, генератор 207 уровня 2 со зверьком, клин, маски
 вуду, дворецкий (и он же под обликом «тень») — с открытым ружьём, пул, утка,
 здоровье, жетон `$FF1350` и звуки по кадрам; проверка carry снимает ещё
-процедуру «везти» `$FF1B42` и место держателя `$FF2140` (`CARRY_LAYOUT`).
+процедуру «везти» `$FF1B42` и место держателя `$FF2140` (`CARRY_LAYOUT`);
+наборы 2-7 (M4c2): самонаведение `throw_homing_0`/`enemies_homing_0`,
+положенные жуки, лопание и бомба `throw_lay_0`/`enemies_lay_0` — проверка d7
+снимает в каждом кадре адрес записи и `d7.w` после хода каждого объекта в
+обходе `AnimStep` (`WALK_TURN_END`): лопнувший жук ищет цели по `d7`, которого
+не ставит.
 
 Картинки: сценарий с `pictures` рисует кадры k из памяти VDP так, как их
 показывает приставка — то, что очередь DMA кадра k отправила в начале
@@ -505,13 +510,22 @@ _THROWS = [
       ("B", 1), ("", 30), ("A", 3), ("", 5), ("R", 2), ("B", 1), ("", 30), ("U", 2), ("UB", 1), ("U", 12), ("", 60)],
      "наборы 4 и 5 без целей: огненный серп вперёд, вверх, наискось и влево, вертушка вперёд и вверх — полёт "
      "прямо со своей скоростью, стена — искра, за окном — снятие"),
+    # Наборы 2 и 3 — запасы 1 и 2 по 20, выбран набор 2.
+    ("throw_lay_0", 0, None, [(0xFF1A1E, bytes([0x00, 0x02, 0x00, 0x01, 0x00, 0x20, 0x00, 0x20, 0x00, 0x00]))],
+     [("", 5), ("B", 1), ("", 50), ("U", 2), ("UB", 1), ("U", 12), ("", 50), ("URB", 12), ("", 50), ("A", 3), ("", 5),
+      ("B", 1), ("", 90)],
+     "наборы 2 и 3: божья коровка кладётся вперёд, вверх и наискось, садится и лопается (маска целей — d7 от "
+     "предыдущих объектов обхода), коровка набора 3 лопается пятью вихрями"),
 ]
-# Картинки: вспышка и жуки, вихри набора 1 и искра о стену, пшик; серп вперёд и наискось, вертушка.
+# Картинки: вспышка и жуки, вихри набора 1 и искра о стену, пшик; серп вперёд и наискось, вертушка; лопнувшая
+# коровка, пять вихрей набора 3.
 _THROW_PICTURES = {"throw_stand_0": [46, 58], "throw_sets_0": [62, 88], "throw_nogun_0": [12],
-                   "throw_homing_0": [20, 100, 190]}
+                   "throw_homing_0": [20, 100, 190], "throw_lay_0": [36, 223]}
+_THROW_D7 = {"throw_homing_0", "throw_lay_0"}
 for _name, _level, _at, _poke, _input, _what in _THROWS:
     SCENARIOS[_name] = {
-        "level": _level, "objects": PICKUP_CODES, "checks": ["camera", "player", "objects", "sounds", "throw"],
+        "level": _level, "objects": PICKUP_CODES,
+        "checks": ["camera", "player", "objects", "sounds", "throw"] + (["d7"] if _name in _THROW_D7 else []),
         "input": _input,
         "about": "уровень %d, бросок: %s — утка, снаряды, вспышки и искры в пуле, запасы и звуки по кадрам" % (_level, _what),
     }
@@ -562,14 +576,19 @@ _ENEMIES += [
       ("URB", 1), ("UR", 12), ("", 80)],
      "жуки (206) — цели самонаведения: огненный серп (набор 4) и вертушка (набор 5) выбирают ближайшего с битом 12, "
      "поворачивают к нему, попадают; погибшая цель — полёт дальше прямо"),
+    # Наборы 6 и 7 — все три запаса по 20, выбран набор 6.
+    ("enemies_lay_0", 0, (300, 250), [(0xFF1A1E, bytes([0x00, 0x06, 0x00, 0x01, 0x00, 0x20, 0x00, 0x20, 0x00, 0x20]))],
+     [206], [("", 30), ("B", 1), ("", 90), ("A", 3), ("", 5), ("B", 1), ("", 120)],
+     "жуки (206): коровка набора 6 лопается пятью самонаводящимися серпами, бомба набора 7 садится, ждёт, белит "
+     "экран на пять кадров и бьёт всех с битом 12"),
 ]
 _ENEMY_PICTURES = {"enemies_beetle_0": [150, 246], "enemies_token_0": [40], "enemies_critter_2": [185],
                    "enemies_wedge_0": [100], "enemies_mask_0": [96], "enemies_butler_2": [190, 260],
-                   "enemies_homing_0": [110, 200]}
+                   "enemies_homing_0": [110, 200], "enemies_lay_0": [62, 160, 165]}
 for _name, _level, _at, _poke, _codes, _input, _what in _ENEMIES:
     SCENARIOS[_name] = {
         "level": _level, "objects": PICKUP_CODES + _codes,
-        "checks": ["camera", "player", "objects", "sounds", "throw"] + (["carry"] if 208 in _codes else []),
+        "checks": ["camera", "player", "objects", "sounds", "throw"] + (["carry"] if 208 in _codes else []) + ["d7"],
         "input": _input,
         "about": "уровень %d, противники: %s — утка, противники и их выпуск в пуле, здоровье, жетон и звуки по кадрам"
                  % (_level, _what),
@@ -766,6 +785,9 @@ class MegaDrive:
                 return 0x3608 if size == 2 else 0x36
             self.status ^= 8
             return 0x3600 | self.status if size == 2 else 0x36
+        if offset < 4:
+            # Порт данных: VRAM, CRAM, VSRAM по команде чтения (PaletteFromCram $290BB8).
+            return self.vdp.read(offset, size)
         return 0
 
     def _vdp_write(self, uc, offset, size, value, user):
@@ -855,6 +877,12 @@ CARRY_LAYOUT = [
 ]
 
 
+# Проверка d7: регистр d7.w после хода каждого объекта в обходе AnimStep — на $297062 сходятся обновление, шаг скрипта
+# и пропуск записи без флагов. Лопнувший жук наборов 2, 3, 6 ищет цели по d7, которого не ставит (behavior.md 1.14):
+# это остаток от объектов обхода до него, а $2973D8 в начале обхода оставляет $FFFF.
+WALK_TURN_END = 0x297062
+
+
 def layout_of(sc):
     return (LAYOUT + (SPRITE_LAYOUT if "sprites" in sc["checks"] else [])
             + (OBJECT_LAYOUT if "objects" in sc["checks"] else [])
@@ -928,6 +956,7 @@ def run(name, sc, rom):
             state["entry"] = snapshot(md, layout, with_pool)
             sounds["start"].clear()
             sounds["stop"].clear()
+            turns.clear()
             if with_pool:
                 # Весь пул на входе: чего вход не пишет, то в записях осталось от прежних хозяев.
                 state["entry"]["pool_ram"] = md.read(PLAYER, POOL_RECORDS * PLAYER_LENGTH).hex().upper()
@@ -960,11 +989,23 @@ def run(name, sc, rom):
         sp = uc.reg_read(M.UC_M68K_REG_A7)
         sounds[kind].append(struct.unpack(">I", bytes(uc.mem_read(sp + 4, 4)))[0])
 
+    with_d7 = "d7" in sc["checks"]
+    turns = []
+
+    def on_turn(uc, address, size, user):
+        turns.append("%04X%04X" % (uc.reg_read(M.UC_M68K_REG_A0) & 0xFFFF, uc.reg_read(M.UC_M68K_REG_D7) & 0xFFFF))
+
     def heard():
         out = {"sounds": sounds["start"][:], "stopped": sounds["stop"][:]} if with_sounds else {}
         sounds["start"].clear()
         sounds["stop"].clear()
+        if with_d7:
+            out["d7"] = "".join(turns)
+        turns.clear()
         return out
+
+    if with_d7:
+        md.uc.hook_add(UC_HOOK_CODE, on_turn, None, WALK_TURN_END, WALK_TURN_END)
 
     if with_sounds:
         md.uc.hook_add(UC_HOOK_CODE, on_sound, "start", SOUND_START, SOUND_START)

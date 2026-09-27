@@ -3,8 +3,10 @@
 
 Модель без тактов: порты `$C00000` (данные) и `$C00004` (управление), 24 регистра,
 VRAM 64 КБ, CRAM (64 слова), VSRAM (40 слов), автоинкремент (регистр 15), DMA
-68000 → VDP (источник — ROM или ОЗУ через `read_word`), заливка и копирование VRAM.
-Чтения портов остаются за `romtrace.py` (от них зависит логика игры).
+68000 → VDP (источник — ROM или ОЗУ через `read_word`), заливка и копирование VRAM;
+чтение порта данных (`read`: VRAM, CRAM, VSRAM по команде чтения, с автоинкрементом —
+им пользуется `PaletteFromCram` `$290BB8`). Чтение статуса остаётся за `romtrace.py`
+(от него зависит логика игры).
 
 `picture()` рисует кадр H40 320×224 по правилам VDP: фон (регистр 7), плоскости B и A
 (размер — регистр 16; прокрутка по горизонтали целиком, по полосам 8 строк или по
@@ -20,6 +22,8 @@ VRAM 64 КБ, CRAM (64 слова), VSRAM (40 слов), автоинкреме�
 import struct
 
 VRAM, CRAM, VSRAM = 1, 3, 5
+# Коды команд чтения (биты CD3-CD0).
+READ_VRAM, READ_VSRAM, READ_CRAM = 0, 4, 8
 WIDTH, HEIGHT = 320, 224
 
 
@@ -51,6 +55,30 @@ class Vdp:
             self._data(value & 0xFFFF)
         elif port < 8:
             self._control(value & 0xFFFF)
+
+    def read(self, offset, size):
+        """Чтение порта данных `$C00000 + offset` размером 2 или 4 байта по команде чтения.
+
+        CRAM отдаёт цвет в его битах (`$0EEE`; прочие биты у приставки не определены, игра
+        их маскирует), VSRAM — 11 бит, VRAM — слово по чётному адресу. Адрес растёт на
+        регистр 15 после каждого слова; длинное слово — два чтения подряд.
+        """
+        if size == 4:
+            high = self.read(offset, 2)
+            return high << 16 | self.read(offset, 2)
+        self.pending = False
+        target = self.code & 0x0F
+        a = self.addr
+        if target == READ_CRAM:
+            w = self.cram[(a >> 1) & 63]
+        elif target == READ_VSRAM:
+            w = self.vsram[a >> 1] if (a >> 1) < 40 else 0
+        elif target == READ_VRAM:
+            w = self.word(a & 0xFFFE)
+        else:
+            w = 0
+        self.addr = (a + self.reg[15]) & 0xFFFF
+        return w if size == 2 else (w >> 8 if not offset & 1 else w & 0xFF)
 
     def _control(self, w):
         if not self.pending:
