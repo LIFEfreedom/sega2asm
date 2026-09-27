@@ -3,397 +3,494 @@
 
     make aiscripts       (нужен свежий `make split`: читает листинги)
 
-`AiLoop` `$025282` каждый кадр уменьшает такт `$21(a5)`, и когда тот
-дошёл до нуля, берёт номер этапа из байта `+$3` описания миссии и
-прыгает по самоотносительной таблице `AiScriptTable` `$0252EE` —
-64 записи. За ними 35 разных скриптов: часть этапов делит один на всех.
+`AiLoop` `$025282` зовётся раз в тик главного цикла. Раз в `$21+1`
+вызовов (такт; его ставит фаза, по умолчанию 1 — через тик) он берёт
+номер этапа из байта `+$3` описания миссии и прыгает по самоотносительной
+таблице `AiScriptTable` `$0252EE` — **256 записей**, как и у
+`table_stageframe`. За ними 82 разных скрипта: часть этапов делит один
+на всех, у поединка (181…210) и этапов 59…65 скрипт пуст (`rts`).
 
 Скрипт — это список правил по приоритету, той же формы, что и всё
 остальное поведение в игре: `bsr` правило, `bne` на общий выход. Правила
 почти все сложены по одному шаблону:
 
     bsr.w   TestPhaseMask           ; работает ли правило в этой фазе
-    jsr     (Player_024Fxx).l       ; можно ли её применить сейчас
-    jsr     (CountEnemyUnitsNear).l ; сколько чужих рядом подходит под a6
+    jsr     (CanAffordXxxP2).l      ; хватает ли денег игроку 2
+    jsr     (CountEnemyUnitsNear).l ; сколько чужих в окне подходит под a6
     cmp.b   d5,d7 / bcs мимо        ; меньше d5 — не стоит того
-    lea     (data_131).l,a6
-    jsr     (CountOwnUnitsNear).l   ; своих под удар не подставлять
+    lea     (loc_0167AA).l,a6       ; предикат «всегда да»
+    jsr     (CountOwnUnitsNear).l   ; своих в окне быть не должно
     tst.b   d7 / bne мимо
-    ...                             ; анимация и оплата
+    jsr     (AiSelectUnitInWindow).l; цель та же, что в прошлый раз?
+    ...                             ; эффект и оплата XxxP2
 
 Отсюда и смысл аргументов: `a6` — предикат «чем занят юнит», `d5` —
 сколько таких надо набрать, `d7` — **маска фаз**, в которых правило
 вообще работает (`TestPhaseMask` `$02AEB8` делает `btst` номера фазы
-`$FFE0B3` в этой маске). Окно счёта — 6x6 клеток от курсора ИИ.
+`$FFE0B3` в этой маске). Окно счёта — 6x6 клеток от угла
+`Player2State+$0/+$1`.
+
+Ремейк (dyna #208) исполняет этот код как есть: `tools/aiprogram.py`
+выгружает его инструкция в инструкцию. Здесь — разбор для чтения.
 """
-import bisect
 import collections
-import glob
 import io
 import os
 import re
-import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import OUT as out_path, rom_bytes
+import aiprogram as ap                                        # noqa: E402
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(HERE, "tools"))
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-ROM = rom_bytes()
-S16 = lambda o: struct.unpack_from(">h", ROM, o)[0]
+BAND = (0x0254EE, 0x0288B6)        # тела скриптов; за ними — библиотека
 
-TABLE = 0x0252EE           # AiScriptTable
-BAND = (0x025000, 0x0288B6)  # полоса скриптов: сюда bsr — это общее тело
-
-# Что делает правило. Адрес -> (имя, пояснение). Пустое пояснение значит
-# «зовётся, но не разобрано» — такие печатаются как есть.
-RULES = {
-    0x02AF46: "открыть панель d6",
-    0x0239B0: "ЯЙЦО у гнезда 1: тип из ростера миссии +$0E по d0",
-    0x02B720: "есть ли в окне 6x6 чужой юнит вида из маски d7 и в действии из a5",
-    0x02A194: "НАВЕДЕНИЕ: юнита из клетки (d2,d3) вести в (d0,d1), если он цел и подходит под a6",
-    0x02A922: "навести курсор ИИ на первое гнездо игрока 1",
-    0x02B8BC: "выбрать цепочку правил по соотношению сил (a6)",
-    0x009C48: "ЗАСУХА: экранная процедура погоды ﾋﾃﾞﾘ",
-    0x0239E8: "ЯЙЦО у гнезда 2: то же",
-    0x02AF56: "выполнить команду d0",
-    0x02AF70: "МОЛНИЯ по юниту: наборы действий d0/d1, вероятность d2",
-    0x02AFF0: "в фазе 5 открыть панель ｼｾﾞﾝ",
-    0x02A1FA: "фаза 1 -> 2, если рядом виден юнит нужного вида",
-    0x02A478: "БУРЯ, если рядом не меньше d5 чужих по предикату a6",
-    0x02A708: "ЗЕМЛЕТРЯСЕНИЕ, если рядом не меньше d5 чужих по a6",
-    0x02A772: "ЗЕМЛЕТРЯСЕНИЕ, вариант со своей проверкой применимости",
-    0x02A7E6: "ЗЕМЛЕТРЯСЕНИЕ, вариант с другой анимацией",
-    0x02A854: "ПЕРЕДЕЛКА юнита: вариант d5, фильтр d4",
-    0x02A8F2: "пауза: молчать, пока тик меньше $46(a5)",
-    0x02A94E: "РАСТЕНИЕ, если вокруг набралось клеток нужного типа",
-    0x02AA46: "загнать курсор ИИ обратно в карту",
-    0x02AA6C: "ЗАСУХА по маскам типов местности",
-    0x02AC12: "МЕТЕОРИТ",
-    0x02A4EE: "ЗАСУХА, если рядом не меньше d5 чужих по a6",
-    0x02B010: "РАСТЕНИЕ по типу клетки под курсором",
-    0x02B044: "МОЛНИЯ по клетке под курсором",
-    0x02B120: "вызвать процедуру из a0",
-    0x02B1D6: "МЕТЕОРИТ по чужим, предикат $01E4A6",
-    0x02B2C6: "раздать юнитам действие из набора $016854",
-    0x02B2E6: "пересчитать маску запрещённых команд $FFE0DD",
-    0x02B382: "снять запрет, когда денег больше порога",
+# Что делает процедура, которую скрипт зовёт сам. ЗАГЛАВНЫМИ — команда
+# игрока 2 (погода, яйцо, растение, наведение, приказ).
+DESC = {
+    # ход, фазы, курсор
+    "AiPhaseStep": u"пересчитать фазу по переписи и деньгам, запустить цепочку фазы из таблицы a0",
+    "AiPlanForPhase": u"a3 = подзапись плана для текущей фазы, без перехода",
+    "AiPhase1To2OnSight": u"фаза 1 -> 2, если в окне юнит игрока 1 видов 3, 4, 5, 6, 8, 9, 10",
+    "AiSweepMapCursor": u"пройти курсором столько шагов, сколько в бюджете фазы, только высматривая",
+    "AiAdvanceMapCursor": u"то же без высматривания",
+    "AiCursorToOwnNest": u"окно на своё гнездо",
+    "AiAimAtEnemyNest": u"окно на первое гнездо игрока 1",
+    "AiOnCooldown": u"пауза после пометки цели: «сработал», пока GameTick < $46",
+    "ClampMapCoords": u"клетка -> угол окна: x >= 35 даёт 33, иначе max(x-2, 1)",
+    "TestPhaseMask": u"фаза в маске d7?",
+    "Random": u"бросок",
+    "CountEnemyUnitsNear": u"сколько чужих в окне под предикатом a6 (в d7)",
+    "CensusTotalP1": u"d7 = сколько юнитов у игрока 1",
+    "ScanUnitsInRect": u"юниты в прямоугольнике",
+    "FindEnemyInWindow": u"чужой юнит вида из маски d7 в окне, в действии из набора a5",
+    "AiPickLine": u"строка реплики ИИ в a6 (косметика)",
+    "DebugTrapStub": u"заглушка",
+    # приказы
+    "AiSetOrder": u"ПРИКАЗ игрока 2 := d6",
+    "AiBrawlOnPhase5": u"в фазе 5 ПРИКАЗ := $C ﾗﾝﾄｳ",
+    "AiSetOrderAfterTick": u"с тика d0 ПРИКАЗ := d1",
+    "AiPickWatchedTarget": u"ближайший к своему гнезду юнит игрока 1 — цель, ПРИКАЗ := $B ﾄﾂｹﾞｷ",
+    # яйца
+    "AiLayEggSlot": u"ЯЙЦО слота d0 (если не под запретом); шаг не останавливает",
+    "AiEggUnlessBanned": u"ЯЙЦО слота d0, если фаза 0 или платные яйца не под запретом",
+    "AiHatchNest1": u"БЕСПЛАТНОЕ ЯЙЦО слота d0 у второго гнезда",
+    "AiHatchNest2": u"БЕСПЛАТНОЕ ЯЙЦО слота d0 у третьего гнезда",
+    "AiLayEggPreferBig": u"ЯЙЦА по нормам фазы 1 в порядке 3, 2, 1, 4, 5, 6",
+    "AiEggBare4": u"ЯЙЦО слота 4 без условий",
+    "AiEggBare5": u"ЯЙЦО слота 5 без условий",
+    "AiLayEggIfBehind3": u"ЯЙЦО слота 3, пока своих вида 3 не больше, чем у игрока 1",
+    "AiLayEggIfBehind4": u"ЯЙЦО слота 4, пока своих вида 4 не больше, чем у игрока 1",
+    "AiLayEggIfBehind5": u"ЯЙЦО слота 5, пока своих вида 5 не больше, чем у игрока 1",
+    "AiLayEgg3IfUnderD5": u"ЯЙЦО слота 3, пока своих вида 3 не больше d5",
+    "AiLayEgg4IfUnderD5": u"ЯЙЦО слота 4, пока своих вида 4 не больше d5",
+    "AiLayEgg5IfUnderD5": u"ЯЙЦО слота 5, пока своих вида 5 не больше d5",
+    "AiTimedEgg3": u"приказ 9; с тика 7200 приказ 6 и раз в $800 тиков ЯЙЦО слота 3",
+    "AiTimedEgg4": u"с тика 5400 приказ 8; раз в $800 тиков приказ 9 и ЯЙЦО слота 4",
+    "AiTimedEgg5": u"раз в $400 тиков приказ 9 и ЯЙЦО слота 5; с тика 7200 приказ $C",
+    "AiLatchPichanNear": u"защёлка $FFE0DE, если в окне ﾋﾟｰﾁｬﾝ игрока 1",
+    "AiUpdateEggBan": u"запрет всех платных яиц, пока ﾋﾟｰﾁｬﾝ игрока 1 в ±4 от гнезда",
+    "AiReserveMoneyEgg3": u"фаза 1: отложить на ход min(деньги игрока 1, 773, свои)",
+    "AiReserveMoneyEgg4": u"фаза 1: отложить на ход min(деньги игрока 1, 1236, свои)",
+    "AiUpgradeUnit": u"ПЕРЕДЕЛКА своего зреющего яйца вида из маски d4 в слот d5 (0 — УСИЛЕНИЕ)",
+    # погода
+    "AiHeavyRainWet": u"ЛИВЕНЬ: чужих под a6 >= d5, своих нет, зрелых трав и цветов (типы 3…7) >= 18",
+    "AiHeavyRainPair": u"ДВОЙНОЙ ЛИВЕНЬ: то же, клеток типов 8, 9 меньше двух; оплата x2",
+    "AiStormNearEnemies": u"БУРЯ: воды ($53) в окне 8x8 больше 23, чужих под a6 >= d5, своих нет",
+    "AiStormNoOwnNear": u"БУРЯ: своих нет, клеток типов 24…26 (деревья) >= d5",
+    "AiDroughtNearEnemies": u"ЗАСУХА: чужих под a6 >= d5, своих нет, клеток типов 1 и 5 >= 18",
+    "AiDroughtBare": u"ДВОЙНАЯ ЗАСУХА: чужих под a6 >= d5, своих нет, типов 0…7 >= 29; оплата x2",
+    "AiDroughtTypes": u"ЗАСУХА по колючкам (типы 21…23) против порога d5, без прицела",
+    "AiDroughtGrowth": u"ЗАСУХА: денег >= d5 (BCD), типов 1…7 >= 8, в окне гнездо игрока 1",
+    "AiDroughtType14": u"ЗАСУХА: своих под a6 >= d5, клеток типа 14 >= 18",
+    "AiDroughtType16Anyway": u"ЗАСУХА: клеток типа 16 >= 21",
+    "EffectDrought": u"ЗАСУХА по окну (только эффект)",
+    "DroughtP2": u"оплата засухи 824, если хватает",
+    "EffectStorm": u"БУРЯ по окну (только эффект)",
+    "AiQuakeNearEnemies": u"ЗЕМЛЕТРЯСЕНИЕ: чужих под a6 >= d5, своих нет",
+    "AiQuakeNearEnemies2": u"ЗЕМЛЕТРЯСЕНИЕ, если в окне больше 10 клеток жерла ($54)",
+    "AiQuakeNearEnemies3": u"ДВОЙНОЕ ЗЕМЛЕТРЯСЕНИЕ (трещины); оплата x2",
+    "AiLightningAtUnit": u"МОЛНИЯ по чужому вида d0 у своего зреющего яйца вида d1; Random <= d2 — в юнита",
+    "AiLightningInList": u"МОЛНИЯ в первую клетку списка a6 с типом из маски d5",
+    "AiFreeLightningInList": u"БЕСПЛАТНАЯ МОЛНИЯ в первую клетку списка a6 с типом из маски d5",
+    "AiMeteorNearEnemies": u"МЕТЕОРИТ по самому плотному скоплению игрока 1 в полосе обхода",
+    "AiMeteorOnEnemyUnits": u"раз за игру БЕСПЛАТНЫЙ МЕТЕОРИТ, если у ИИ <= 5 юнитов, а у игрока 1 >= 25",
+    "AiMeteorChain": u"раз за игру МЕТЕОРИТ по окну",
+    "AiRunChainAfterTick": u"с тика d7 раз за игру вызвать a0 (бесплатный эффект или правило)",
+    "AiCallIfPhase": u"по парам клеток a1: окно туда и вызвать a0, до первого «сработал»",
+    # растения, наведение
+    "AiPlantOnTerrain": u"РАСТЕНИЕ колючка у гнезда игрока 1, случайное направление",
+    "AiPlantInList": u"РАСТЕНИЕ d6 в первую клетку списка a6 с типом из маски d5",
+    "AiGuideUnitAt": u"НАВЕДЕНИЕ юнита клетки (d2,d3) под a6 в (d0,d1), если не ранен",
+    # общие тела
+    "AiScriptDefault": u"общее тело: фаза, запрет яиц, погодная лестница, бесплатные яйца",
+    "AiChainP1": u"цепочка фазы 1 напрямую",
+    "AiChainP3": u"цепочка фазы 3 напрямую",
+    "DemoRandomCommands": u"демо-бой: случайные бесплатные яйца обоим",
+    "CheckSpeciesGone": u"демо-бой: вид исчез — бесплатное яйцо",
 }
-COMMANDS = {
-    "ClampMapCoords": "загнать координаты в границы карты",
-    "TestIndexBitThenCall": "шлюз яиц: проверить запрет и положить вид d0",
-    "AiChainP1": "цепочка фазы 1 напрямую, мимо AiPhaseStep",
-    "Random": "бросок кубика",
-    "Player_0248CE": "оплатить ЗАСУХУ из кошелька второго",
-    "AiSetPanelAfterTick": "после тика d0 поставить панель d1",
-    "AiScriptDefault": "общее тело: фаза, курсор и вся погодная лестница",
-    "AiTimedEgg3": "раз в $800 тиков после $1C20 — яйцо вида 3",
-    "AiTimedEgg4": "раз в $800 тиков — яйцо вида 4",
-    "AiTimedEgg5": "раз в $400 тиков — яйцо вида 5",
-    "DemoRandomCommands": "демо: обоим игрокам случайная команда",
-    "AiHeavyRainWet": "ЛИВЕНЬ по сырым клеткам",
-    "AiHeavyRainPair": "ЛИВЕНЬ, две проверки подряд",
-    "AiHeavyRainP2": "ЛИВЕНЬ",
-    "AiDroughtBare": "ЗАСУХА по голой земле",
-    "AiDroughtGrowth": "ЗАСУХА по заросшим клеткам",
-    "AiPhaseStep": "выбрать фазу и запустить её цепочку",
-    "AiSweepMapCursor": "прогулка курсора по карте",
-    "AiAdvanceMapCursor": "сдвинуть курсор",
-    "AiPlanForPhase": "взять план текущей фазы",
-}
 
-
-def listing_index():
-    """Адрес -> текст команды и имя метки -> адрес, из всех листингов."""
-    code, lab, rlab = {}, {}, {}
-    for f in glob.glob(out_path("asm", "m68k", "*.asm")):
-        cur = None
-        for ln in open(f, encoding="utf-8", errors="replace"):
-            ln = ln.rstrip("\n")
-            m = re.match(r"^([A-Za-z_]\w*):\s+; \$([0-9A-F]{6})", ln)
-            if m:
-                a = int(m.group(2), 16)
-                lab[m.group(1)] = a
-                rlab[a] = m.group(1)
-                cur = a
-                continue
-            m = (re.match(r"^\s*org\s+\$([0-9A-F]{6})", ln)
-                 or re.match(r"^; \$([0-9A-F]{6})$", ln.strip()))
-            if m:
-                cur = int(m.group(1), 16)
-                continue
-            if ln.startswith("\t") and cur is not None:
-                code[cur] = ln.strip()
-                cur = None
-    return code, lab, rlab
-
-
-CODE, LAB, RLAB = listing_index()
-ADDRS = sorted(CODE)
-CALL = re.compile(r"(?:bsr\.[wsb]|jsr)\s+\(?([A-Za-z_$][\w$]*)")
-PHASED = {}
-
-
-def resolve(name):
-    if name in LAB:
-        return LAB[name]
-    m = re.match(r"^\$?([0-9A-F]{6})$", name.lstrip("$"))
-    return int(m.group(1), 16) if m else None
-
-
-def flow(a, seen=None, depth=0):
-    """Тело скрипта по потоку: через bra, с подстановкой общих тел."""
-    if seen is None:
-        seen = set()
-    out, cur = [], a
-    while len(out) < 400:
-        if cur in seen or cur not in CODE:
-            break
-        seen.add(cur)
-        t = CODE[cur]
-        m = CALL.match(t)
-        if m:
-            tgt = resolve(m.group(1))
-            if tgt is not None and BAND[0] <= tgt < BAND[1] and depth < 4:
-                out.append((cur, t, True))
-                out.extend(flow(tgt, seen, depth + 1))
-                # После общего тела скрипт обычно только `rts`.
-            else:
-                out.append((cur, t, False))
-        else:
-            out.append((cur, t, False))
-        if t in ("rts", "rte"):
-            break
-        m = re.match(r"bra\.[wsb]\s+(\S+)", t)
-        if m:
-            nxt = resolve(m.group(1))
-            if nxt is None:
-                break
-            cur = nxt
-            continue
-        i = bisect.bisect_right(ADDRS, cur)
-        if i >= len(ADDRS) or ADDRS[i] - cur > 12:
-            break
-        cur = ADDRS[i]
-    return out
-
-
-IMM = re.compile(r"(?:moveq|move\.[bwl])\s+#\$?(-?[0-9A-F]+),(d[0-7])")
-LEA = re.compile(r"lea\s+\(?([A-Za-z_$][\w$]*)[^,]*,a6$")
-TICK = re.compile(r"andi\.l\s+#\$([0-9A-F]+),d[0-7]")
-
-
-# Какие регистры правило читает. Ставятся они заранее и НЕ сбрасываются:
-# соседние правила часто пользуются одним и тем же `d7`, поэтому состояние
-# копится по всему скрипту, а печатается только то, что нужно этому шагу.
+# Какие регистры процедура читает (порядок печати — как в ARG_ORDER).
 ARGS = {
-    0x02AF46: ("d6", "d7"),
-    0x02AF56: ("d0", "d7"),
-    0x02AF70: ("d0", "d1", "d2", "d7"),
-    0x02A478: ("a", "d5", "d7"),
-    0x02A4EE: ("a", "d5", "d7"),
-    0x02A708: ("a", "d5", "d7"),
-    0x02A772: ("a", "d5", "d7"),
-    0x02A7E6: ("a", "d5", "d7"),
-    0x02A854: ("d4", "d5", "d7"),
-    0x02A94E: ("d7",),
-    0x02AA6C: ("d5", "d7"),
-    0x02AC12: ("d7",),
-    0x02B010: ("d7",),
-    0x02B044: ("d7",),
-    0x02B120: ("d7",),
-    0x02B1D6: ("d7",),
+    "AiPhaseStep": ("a0",), "AiSetOrder": ("d6", "d7"), "AiLayEggSlot": ("d0", "d7"),
+    "AiSetOrderAfterTick": ("d0", "d1"), "AiEggUnlessBanned": ("d0",),
+    "AiHatchNest1": ("d0",), "AiHatchNest2": ("d0",), "AiPickWatchedTarget": ("d7",),
+    "AiUpgradeUnit": ("d4", "d5", "d7"), "AiGuideUnitAt": ("a6", "d0", "d1", "d2", "d3", "d7"),
+    "AiLightningAtUnit": ("d0", "d1", "d2", "d7"), "AiPlantInList": ("a6", "d5", "d6", "d7"),
+    "AiLightningInList": ("a6", "d5", "d7"), "AiFreeLightningInList": ("a6", "d5", "d7"),
+    "AiCallIfPhase": ("a0", "a1", "d7"), "AiRunChainAfterTick": ("a0", "d7"),
+    "AiDroughtTypes": ("d5", "d7"), "AiDroughtGrowth": ("d5", "d7"),
+    "AiDroughtType14": ("a6", "d5", "d7"), "AiDroughtType16Anyway": ("d7",),
+    "AiStormNoOwnNear": ("d5", "d7"), "AiLayEgg3IfUnderD5": ("d5", "d7"),
+    "AiLayEgg4IfUnderD5": ("d5", "d7"), "AiLayEgg5IfUnderD5": ("d5", "d7"),
+    "FindEnemyInWindow": ("a5", "d7"), "CountEnemyUnitsNear": ("a6",),
+    "ClampMapCoords": ("d0", "d1"), "TestPhaseMask": ("d7",),
 }
-ARGS_BY_NAME = {
-    "AiHeavyRainWet": ("a", "d5", "d7"),
-    "AiHeavyRainPair": ("a", "d5", "d7"),
-    "AiHeavyRainP2": ("a", "d5", "d7"),
-    "AiDroughtBare": ("a", "d5", "d7"),
-    "AiDroughtGrowth": ("a", "d5", "d7"),
+for _n in ("AiHeavyRainWet", "AiHeavyRainPair", "AiStormNearEnemies", "AiDroughtNearEnemies",
+           "AiDroughtBare", "AiQuakeNearEnemies", "AiQuakeNearEnemies2", "AiQuakeNearEnemies3"):
+    ARGS[_n] = ("a6", "d5", "d7")
+for _n in ("AiPlantOnTerrain", "AiMeteorNearEnemies", "AiMeteorChain", "AiLayEggIfBehind3",
+           "AiLayEggIfBehind4", "AiLayEggIfBehind5"):
+    ARGS[_n] = ("d7",)
+PHASED = {n for n, a in ARGS.items() if "d7" in a} - {
+    "AiPickWatchedTarget", "AiRunChainAfterTick", "FindEnemyInWindow"}
+PHASED.add("AiPickWatchedTarget")
+ARG_ORDER = ("a0", "a1", "a5", "a6", "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7")
+# d5 у этих правил — маска типов местности, а не порог
+TYPE_MASK_D5 = {"AiPlantInList", "AiLightningInList", "AiFreeLightningInList"}
+# d0/d1/d4 у этих — маска видов (бит n — вид n)
+SPECIES_MASK = {("AiLightningAtUnit", "d0"), ("AiLightningAtUnit", "d1"),
+                ("AiUpgradeUnit", "d4"), ("FindEnemyInWindow", "d7")}
+
+# Что таблица шагов не передаёт: особые скрипты, разобранные по коду.
+SPECIAL = {
+    0x025F9E: u"Приказ 9 (ﾊﾝｼｮｸ) навсегда; ни яиц, ни погоды.",
+    0x0260AC: u"**Зеркальный противник.** Каждый ход деньги ИИ := 199999; приказ "
+              u"игрока 1 зеркалится ((d + 4) & 7, $B -> $C), точка сбора -> 39 − x, окно -> "
+              u"34 − x. Команда игрока 1 из `ActiveEffectCode` `$FFE0E3` (2…7 погода, 8…13 "
+              u"яйца, 14…17 растения) бесплатно повторяется в зеркальной клетке по таблице "
+              u"переходов `data_187b`; полив (код 1) не повторяется. Без команды — обычный "
+              u"`AiPhaseStep`.",
+    0x02583A: u"На тике 1 — засуха на своём гнезде (`DroughtP2` платит, только если "
+              u"хватает), дальше обычный скрипт.",
+    0x0262D0: u"Приказ 9, деньги 199999. Молния по первой клетке-дереву (типы 24…26) "
+              u"из `data_187d`; начало списка сдвигается на 2 x (ｱﾛ + ﾃｨﾗﾉ у ИИ). Ударила — "
+              u"трава (тип 1) на первую клетку типа 18 того же списка; `StageEventTimer` := 30.",
+    0x025C1C: u"Без фазовой машины: до тика 10800 цепочка фазы 1, потом фазы 3; нормы — "
+              u"из подзаписи текущей фазы.",
+    0x02652C: u"`$FFE11E` := Random & 1 — платные яйца идут к первому или второму гнезду.",
+    0x02832A: u"Демо-бой: `DemoRandomCommands` — бесплатные случайные яйца обоим игрокам.",
+    0x028330: u"Демо-бой: `CheckSpeciesGone` — вид исчез у игрока, бесплатное яйцо ему.",
 }
 
+# Числа в ОЗУ, которые скрипты сравнивают, — по-человечески.
+RAM = {0xFFE05C: u"GameTick", 0xFF9CDC: u"деньги ИИ", 0xFF9C86: u"деньги игрока 1",
+       0xFFE0D8: u"$FFE0D8"}
+for _i in range(6):
+    RAM[0xFFE086 + _i] = u"видов %d у игрока 1" % (_i + 1)
+    RAM[0xFFE096 + _i] = u"своих вида %d" % (_i + 1)
+NEG = {"bcs": u">=", "bcc": u"<", "bhi": u"<=", "bls": u">", "beq": u"!=", "bne": u"==",
+       "blt": u">=", "bge": u"<", "bgt": u"<=", "ble": u">"}
+POS = {"bcs": u"<", "bcc": u">=", "bhi": u">", "bls": u"<=", "beq": u"==", "bne": u"!=",
+       "blt": u"<", "bge": u">=", "bgt": u">", "ble": u"<="}
 
-def digest(ins):
-    """Шаги скрипта: вызов, пояснение, его аргументы из текущего состояния."""
-    steps, st, gate = [], {}, None
-    for _a, t, inlined in ins:
-        if inlined:
+
+def body(entry):
+    u"""Инструкции самого скрипта: по ветвлениям внутри полосы, без вызовов."""
+    seen, work = {}, [entry]
+    while work:
+        a = work.pop()
+        while a is not None and a not in seen:
+            x = ap.Ins(a)
+            seen[a] = x
+            for o in x.ops:
+                if o[0] == "to" and x.mn not in ("bsr", "jsr"):
+                    if BAND[0] <= o[1] < BAND[1] and not ap.is_native(o[1]):
+                        work.append(o[1])
+            if x.mn in ap.END:
+                break
+            a = ap.after(a)
+    return [seen[a] for a in sorted(seen)]
+
+
+def callee(x):
+    if x.mn in ("bsr", "jsr") and x.ops[0][0] == "to":
+        return ap.name_of(x.ops[0][1])
+    return None
+
+
+def value_name(o, src):
+    u"""Что сравнивается: имя ячейки ОЗУ, регистр с известным источником."""
+    if o[0] == "abs":
+        return RAM.get(o[1], u"$%06X" % o[1])
+    if o[0] == "#":
+        return u"%d" % o[1] if abs(o[1]) < 10 else u"$%X" % o[1]
+    if o[0] == "d":
+        return src.get(o[1], u"d%d" % o[1])
+    return None
+
+
+def guard_text(ins, i, src):
+    u"""Условие ветвления ins[i] (b<cc>) как «истина — переход»; None — не умею."""
+    br = ins[i]
+    j = i - 1
+    if j < 0:
+        return None
+    p = ins[j]
+    if p.mn in ("andi",) and p.ops[1][0] == "d":
+        what = src.get(p.ops[1][1], u"d%d" % p.ops[1][1])
+        rel = {"bne": u"!= 0", "beq": u"== 0"}.get(br.mn)
+        return rel and u"%s & $%X %s" % (what, p.ops[0][1], rel)
+    if p.mn in ("cmpi", "cmp") and br.mn in POS:
+        a, b = value_name(p.ops[1], src), value_name(p.ops[0], src)
+        if a and a.startswith(u"деньги") and p.ops[0][0] == "#":
+            b = u"%X" % p.ops[0][1]           # деньги — BCD: цифры как есть
+        return a and b and u"%s %s %s" % (a, POS[br.mn], b)
+    if p.mn == "btst" and p.ops[0][0] == "#":
+        what = value_name(p.ops[1], src) or u"?"
+        rel = {"bne": u"взведён", "beq": u"снят"}.get(br.mn)
+        return rel and u"бит %d %s %s" % (p.ops[0][1], what, rel)
+    if p.mn == "tst":
+        what = value_name(p.ops[0], src) or u"?"
+        rel = {"bne": u"!= 0", "beq": u"== 0"}.get(br.mn)
+        return rel and u"%s %s" % (what, rel)
+    return None
+
+
+def negate(t):
+    for a, b in ((u" != ", u" == "), (u" == ", u" != "), (u" >= ", u" < "), (u" <= ", u" > "),
+                 (u" < ", u" >= "), (u" > ", u" <= "), (u"взведён", u"снят"), (u"снят", u"взведён")):
+        if a in t:
+            return t.replace(a, b, 1)
+    return u"не (%s)" % t
+
+
+def digest(entry):
+    u"""Шаги скрипта: (вызов, условие, аргументы, в обходе ли)."""
+    ins = body(entry)
+    pos = {x.a: i for i, x in enumerate(ins)}
+    guards = collections.defaultdict(list)       # адрес -> условия
+    loops = []
+    src = {}                                     # dN -> что в нём лежит
+    for i, x in enumerate(ins):
+        if x.mn == "move" and x.ops[0][0] == "abs" and x.ops[1][0] == "d":
+            src[x.ops[1][1]] = RAM.get(x.ops[0][1], u"$%06X" % x.ops[0][1])
+        elif x.mn in ("moveq", "move") and x.ops[1][0] == "d":
+            src.pop(x.ops[1][1], None)
+        if x.mn == "dbf":
+            loops.append((x.ops[1][1], x.a))
             continue
-        m = TICK.match(t)
-        if m:
-            gate = int(m.group(1), 16)
+        if x.mn not in POS or x.ops[0][0] != "to":
             continue
-        m = IMM.match(t)
-        if m:
-            v = m.group(1)
-            st[m.group(2)] = int(v, 16) if "$" in t else int(v)
+        prev = ins[i - 1] if i else None
+        prev2 = ins[i - 2] if i > 1 else None
+        if prev is not None and (callee(prev) or prev.mn == "movem" and prev2 is not None
+                                 and callee(prev2)):
+            continue                              # «сработало — выход»
+        t = x.ops[0][1]
+        if t <= x.a:
             continue
-        m = LEA.match(t)
-        if m:
-            st["a"] = m.group(1)
+        cond = guard_text(ins, i, src)
+        if not cond:
+            p = ins[i - 1]
+            cond = u"`%s` / `%s`" % (p.text, x.mn)
+        for y in ins[i + 1:]:
+            if y.a >= t:
+                break
+            guards[y.a].append(negate(cond) if not cond.startswith(u"`") else u"не " + cond)
+        # «иначе»: перед целью стоит bra дальше — там условие истинно
+        k = pos.get(t)
+        if k and ins[k - 1].mn == "bra" and ins[k - 1].ops[0][1] > t:
+            for y in ins[k:]:
+                if y.a >= ins[k - 1].ops[0][1]:
+                    break
+                guards[y.a].append(cond)
+    steps, regs = [], {}
+    for x in ins:
+        if x.mn in ("moveq", "move") and x.ops[0][0] == "#" and x.ops[1][0] == "d":
+            regs["d%d" % x.ops[1][1]] = x.ops[0][1] & 0xFFFFFFFF
+        elif x.mn == "move" and x.ops[0][0] == "abs" and x.ops[1][0] == "d":
+            regs["d%d" % x.ops[1][1]] = RAM.get(x.ops[0][1], u"$%06X" % x.ops[0][1])
+        elif x.mn == "lea" and x.ops[1][0] == "a":
+            regs["a%d" % x.ops[1][1]] = ap.name_of(x.ops[0][1]) if x.ops[0][0] == "abs" else "?"
+        n = callee(x)
+        if n is None:
+            if x.mn == "move" and x.ops[1] in (["disp", 15, 4], ["abs", 0xFF9CE9]) \
+                    and x.ops[0][0] == "#":
+                steps.append((u"приказ := $%X" % x.ops[0][1], u"ПРИКАЗ игрока 2 прямо", {},
+                              guards.get(x.a, []), in_loop(x.a, loops)))
+            elif x.mn == "move" and x.ops[1] in (["disp", 2, 4], ["disp", 2, 1],
+                                                 ["abs", 0xFF9CDC]) and x.ops[0][0] == "#":
+                steps.append((u"деньги := %X" % x.ops[0][1], u"деньги ИИ прямо (BCD)", {},
+                              guards.get(x.a, []), in_loop(x.a, loops)))
             continue
-        m = CALL.match(t)
-        if not m:
-            continue
-        nm = m.group(1)
-        tgt = resolve(nm)
-        note = RULES.get(tgt) or COMMANDS.get(nm) or ""
-        keys = ARGS.get(tgt) or ARGS_BY_NAME.get(nm) or ()
-        args = {k: st[k] for k in keys if k in st}
-        steps.append((nm, note, args, gate, phase_gated(tgt)))
-        gate = None
+        args = {k: regs[k] for k in ARGS.get(n, ()) if k in regs}
+        steps.append((n, DESC.get(n, u""), args, guards.get(x.a, []), in_loop(x.a, loops)))
     return steps
 
 
-def phase_gated(tgt):
-    """Зовёт ли правило TestPhaseMask — тогда его d7 это маска фаз."""
-    if tgt in PHASED:
-        return PHASED[tgt]
-    PHASED[tgt] = False
-    cur, n = tgt, 0
-    while cur in CODE and n < 60:
-        m = CALL.match(CODE[cur])
-        if m and m.group(1) == "TestPhaseMask":
-            PHASED[tgt] = True
-            break
-        if CODE[cur] == "rts":
-            break
-        i = bisect.bisect_right(ADDRS, cur)
-        if i >= len(ADDRS) or ADDRS[i] - cur > 12:
-            break
-        cur, n = ADDRS[i], n + 1
-    return PHASED[tgt]
+def in_loop(a, loops):
+    return any(lo <= a < hi for lo, hi in loops)
 
 
-def fmt_args(args, phases):
+def fmt_args(name, args):
     out = []
-    for k in ("a", "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"):
+    for k in ARG_ORDER:
         if k not in args:
             continue
         v = args[k]
-        if k == "d7" and phases and isinstance(v, int):
-            ph = [str(b) for b in range(8) if v >> b & 1]
-            out.append(("фаза " if len(ph) == 1 else "фазы ")
-                       + (", ".join(ph) if ph else "никакие"))
+        if k == "d7" and name in PHASED and isinstance(v, int):
+            if v & 0x3F == 0x3F:
+                out.append(u"любая фаза")
+                continue
+            ph = [str(b) for b in range(6) if v >> b & 1]
+            out.append((u"фаза " if len(ph) == 1 else u"фазы ")
+                       + (u", ".join(ph) if ph else u"никакие"))
             continue
-        out.append("%s=%s" % ("a6" if k == "a" else k,
-                              v if isinstance(v, str) else "$%X" % v))
-    return ", ".join(out)
+        if isinstance(v, int) and k == "d5" and name in TYPE_MASK_D5:
+            out.append(u"типы " + u", ".join(str(b) for b in range(32) if v >> b & 1))
+            continue
+        if isinstance(v, int) and (name, k) in SPECIES_MASK:
+            out.append(u"%s: виды %s" % (k, u", ".join(str(b) for b in range(32) if v >> b & 1)))
+            continue
+        if isinstance(v, int):
+            v = u"$%X" % v if v > 9 else u"%d" % v
+        out.append(u"%s=%s" % (k, v))
+    return u", ".join(out)
 
 
 def main():
     import stagescript
     miss = stagescript.stage_to_missions()
-
-    stages = [(TABLE + S16(TABLE + 2 * i)) & 0xFFFFFF for i in range(64)]
     users = collections.defaultdict(list)
-    for i, a in enumerate(stages):
-        users[a].append(i)
+    for st in range(256):
+        users[ap.script_entry(st)].append(st)
 
     out = os.path.join(HERE, "docs", "game-ai-missions.md")
     f = io.open(out, "w", encoding="utf-8", newline="\n")
     p = f.write
-    p("# Скрипты ИИ миссий\n\n")
-    p("Собрано `tools/aiscript.py` (`make aiscripts`) по листингам.\n\n")
-    p("СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
-      "Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
-    p(__doc__[__doc__.index("`AiLoop`"):].strip() + "\n\n")
-    p("## Чем меряется «рядом»\n\n")
-    p("`CountEnemyUnitsNear` `$05DF6E` и `CountOwnUnitsNear` `$05E060` —\n"
-      "один и тот же обход окна **6x6 клеток** от курсора ИИ, различаются\n"
-      "только границей по номеру слота: первый считает слоты до 107\n"
-      "(`UnitSlotsP1Nest`…`UnitSlotsP1`), второй — от 148 (`UnitSlotsP2`).\n"
-      "То есть правило требует набрать рядом **чужих** и не задеть\n"
-      "**своих**.\n\n")
-    p("Раньше здесь стояло «12x6». Шесть на шесть **клеток**: внутренний\n"
-      "цикл делает шесть шагов по два байта (`addq.w #2,a1`), потому что в\n"
-      "карте юнитов два байта на клетку, а в конце ряда прибавляет `$44`,\n"
-      "что вместе с пройденными двенадцатью даёт ровно 80 — ширину ряда.\n"
-      "Это то же окно 6x6, каким команды и накрывают карту\n"
-      "(`WaterBlock6x6`).\n\n")
-    # ── Сводка: что и в каких фазах противник вообще делает ──────────────
+    p(u"# Скрипты ИИ миссий\n\n")
+    p(u"Собрано `tools/aiscript.py` (`make aiscripts`) по листингам.\n\n")
+    p(u"СГЕНЕРИРОВАНО — правки затираются, меняйте инструмент.\n"
+      u"Вывод, который надо сохранить, пишите в соседний, ручной файл.\n\n")
+    p(__doc__[__doc__.index("`AiLoop`"):].strip() + u"\n\n")
+    p(u"## Чем меряется «рядом»\n\n"
+      u"`CountEnemyUnitsNear` `$05DF6E` и `CountOwnUnitsNear` `$05E060` —\n"
+      u"один и тот же обход окна **6x6 клеток**, различаются только границей по\n"
+      u"номеру слота: первый считает слоты до 107 (`UnitSlotsP1Nest`…`UnitSlotsP1`),\n"
+      u"второй — от 148 (`UnitSlotsP2`). То есть правило требует набрать рядом\n"
+      u"**чужих** и не задеть **своих**. Шесть на шесть **клеток**: внутренний цикл\n"
+      u"делает шесть шагов по два байта, потому что в карте юнитов два байта на\n"
+      u"клетку, а в конце ряда прибавляет `$44`, что вместе с пройденными\n"
+      u"двенадцатью даёт ровно 80 — ширину ряда. Угол окна — `Player2State+$0/+$1`,\n"
+      u"его ставит `ClampMapCoords` `$006ABE`: x >= 35 даёт 33, иначе max(x-2, 1).\n\n")
+    p(u"## Поправки к прежнему разбору (dyna #208)\n\n"
+      u"- Таблиц **по 256 записей**, не по 64: `AiScriptTable` и `AiPlanTable`, как\n"
+      u"  `table_stageframe`. Разных скриптов 82, записей плана 69. Прежний разбор\n"
+      u"  покрывал только этапы 0…63 — сюжет и тренировку.\n"
+      u"- `$F(Player2State)` (`$FF9CE9`) — не «панель», а **приказ игрока 2**: его\n"
+      u"  читает поведение юнитов через `GetPlayerOrder` `$018CD6`. 0…7 — направление,\n"
+      u"  8 ｼﾝｹﾞｷ, 9 ﾊﾝｼｮｸ, $A ｼｭｳｺﾞｳ, $B ﾄﾂｹﾞｷ, $C ﾗﾝﾄｳ. Отсюда `AiSetOrder`\n"
+      u"  (было `AiOpenPanel`), `AiSetOrderAfterTick`, `AiBrawlOnPhase5` (в фазе 5 —\n"
+      u"  $C, а не «ｼｾﾞﾝ»).\n"
+      u"- `AiLayEggSlot` (было `AiRunCommand`) — яйцо слота ростера d0. Все правила\n"
+      u"  яиц возвращают Z: яйцо ход не занимает, скрипт идёт дальше.\n"
+      u"- `AiPickLine`/`AiCurrentLine` (были `AiPickChain`/`AiCurrentChain`) выбирают\n"
+      u"  **строку реплики** ИИ по соотношению сил, а не цепочку правил.\n"
+      u"- `AiHeavyRainPair` срабатывает, когда клеток типов 8, 9 **меньше** двух.\n"
+      u"- Бесплатные `AiHatchNest1/2` кладут у **второго и третьего** гнезда\n"
+      u"  (`Player2State+$12/+$14`); платные яйца — у первого (`+$10`).\n"
+      u"- `$FFE0DD` — флаг «все платные яйца под запретом», а не маска команд\n"
+      u"  (`AiUpdateEggBan`, было `AiUpdateBanMask`; `AiEggUnlessBanned`, было\n"
+      u"  `TestIndexBitThenCall`). Разрешённые команды миссии ИИ не смотрит.\n"
+      u"- `AiReserveMoneyEgg3/4` (были `AiSpendMatchingPlayer1`/`AiUnbanOnMoney`) в\n"
+      u"  фазе 1 откладывают на ход часть денег ИИ; `AiLoop` возвращает их в конце\n"
+      u"  кадра.\n"
+      u"- `AiLightningInList`, `AiFreeLightningInList`, `AiPlantInList` (были\n"
+      u"  `...AtCursor`) идут по списку клеток a6, а не бьют под курсор; вторая\n"
+      u"  молния не платит.\n"
+      u"- Стартовая фаза — 1 (`InitAiState` ставит `$2D`=1).\n\n")
+
     byname = collections.defaultdict(lambda: [0, set(), set()])
     for a in users:
-        for nm, note, args, _g, ph in digest(flow(a)):
-            r = byname[(nm, note)]
+        for n, note, args, _g, _l in digest(a):
+            r = byname[(n, note)]
             r[0] += 1
             r[1].add(a)
-            if ph and "d7" in args and isinstance(args["d7"], int):
+            if n in PHASED and isinstance(args.get("d7"), int):
                 r[2] |= {b for b in range(8) if args["d7"] >> b & 1}
-    p("## Что противник умеет, по всем скриптам сразу\n\n")
-    p("| шаг | вызовов | в скольких скриптах | фазы |\n|---|---|---|---|\n")
-    for (nm, note), (n, scr, ph) in sorted(
-            byname.items(), key=lambda kv: (-kv[1][0], kv[0][0])):
-        p("| `%s` — %s | %d | %d | %s |\n"
-          % (nm, note or "не разобрано", n, len(scr),
-             ", ".join(str(x) for x in sorted(ph)) or "любая"))
-    # ── Что из этого следует ────────────────────────────────────────────
+    p(u"## Что противник умеет, по всем скриптам сразу\n\n"
+      u"Считаются вызовы из самих скриптов; общее тело `AiScriptDefault` — один\n"
+      u"скрипт, хотя его зовут многие.\n\n")
+    p(u"| шаг | вызовов | в скольких скриптах | фазы |\n|---|---|---|---|\n")
+    for (n, note), (c, scr, ph) in sorted(byname.items(), key=lambda kv: (-kv[1][0], kv[0][0])):
+        p(u"| `%s` — %s | %d | %d | %s |\n"
+          % (n, note or u"не разобрано", c, len(scr),
+             u", ".join(str(x) for x in sorted(ph)) or u"любая"))
+
     byphase = collections.defaultdict(set)
-    thresh = collections.Counter()
     for a in users:
-        for nm, note, args, _g, ph in digest(flow(a)):
-            if not note or not note[0].isupper():
+        for n, note, args, _g, _l in digest(a):
+            head = note.split(u":")[0].split(u",")[0]
+            if not note or not any(ch.isupper() for ch in head[:6]):
                 continue
-            if isinstance(args.get("d5"), int) and args["d5"] < 0x100:
-                thresh[args["d5"]] += 1
-            if ph and "d7" in args and isinstance(args["d7"], int):
+            kind = re.sub(u"^(ДВОЙН\\w+ |БЕСПЛАТН\\w+ )", u"", head).split(u" ")[0]
+            if n in PHASED and isinstance(args.get("d7"), int):
                 for b in range(6):
                     if args["d7"] >> b & 1:
-                        byphase[b].add(note.split(",")[0].split(" по ")[0])
+                        byphase[b].add(kind)
             else:
-                byphase["любая"].add(note.split(",")[0].split(" по ")[0])
-    p("\n## Что противнику открыто в какой фазе\n\n")
-    p("| фаза | команды |\n|---|---|\n")
-    for k in list(range(6)) + ["любая"]:
+                byphase[u"любая"].add(kind)
+    p(u"\n## Что противнику открыто в какой фазе\n\n| фаза | команды |\n|---|---|\n")
+    for k in list(range(6)) + [u"любая"]:
         if k in byphase:
-            p("| %s | %s |\n" % (k, ", ".join(sorted(byphase[k]))))
-    p("\nПорог `d5` — сколько чужих надо насчитать рядом: %s.\n\n"
-      % ", ".join("%d раз%s при d5=%d"
-                  % (n, "" if n % 10 == 1 and n % 100 != 11 else "а"
-                     if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "",
-                     v)
-                  for v, n in sorted(thresh.items(), key=lambda kv: -kv[1])))
-    p("## Скрипты\n\n")
-    p("Этапы, которые делят один скрипт, перечислены вместе. Подписи\n"
-      "миссий — по байту `+$3` их описаний.\n\n")
+            p(u"| %s | %s |\n" % (k, u", ".join(sorted(byphase[k]))))
 
+    p(u"\n## Скрипты\n\n"
+      u"Этапы, которые делят один скрипт, перечислены вместе; подписи миссий — по\n"
+      u"байту `+$3` их описаний. «Условие» — ветвление в самом скрипте, под которым\n"
+      u"стоит шаг (без него шаг идёт всегда, пока выше ничего не сработало);\n"
+      u"«обход» — шаг внутри цикла `dbf` по клеткам карты.\n\n")
     for a in sorted(users, key=lambda x: (-len(users[x]), x)):
         st = users[a]
         names = []
         for s in st:
             names += miss.get(s, [])
-        steps = digest(flow(a))
-        p("### `$%06X` — этап%s %s\n\n"
-          % (a, "ы" if len(st) > 1 else "", ", ".join(str(x) for x in st)))
+        steps = digest(a)
+        stages = u", ".join(str(x) for x in st) if len(st) < 12 else \
+            u"%s … %s (%d)" % (u", ".join(str(x) for x in st[:6]), st[-1], len(st))
+        p(u"### `$%06X` — этап%s %s\n\n" % (a, u"ы" if len(st) > 1 else u"", stages))
         if names:
-            p("Миссии: %s.\n\n" % ", ".join(sorted(set(names))))
+            p(u"Миссии: %s.\n\n" % u", ".join(sorted(set(names))))
         else:
-            p("Ни одна миссия кампании на этих этапах не стоит.\n\n")
+            p(u"Ни одна миссия на этих этапах не стоит.\n\n")
         if not steps:
-            ins = [t for _a, t, _i in flow(a)]
-            if len(ins) <= 1:
-                p("Пусто: сразу `rts`, ИИ на этих этапах не делает ничего.\n\n")
+            if ap.CODE.get(a) == "rts":
+                p(u"Пусто: сразу `rts`, ИИ на этих этапах не делает ничего.\n\n")
             else:
-                p("Правил нет — скрипт ничего не вызывает, только правит\n"
-                  "состояние:\n\n```asm\n%s\n```\n\n"
-                  % "\n".join("\t" + t for t in ins[:14]))
+                p(u"Вызовов нет, только правка состояния:\n\n```asm\n%s\n```\n\n"
+                  % u"\n".join(u"\t" + x.text for x in body(a)[:14]))
+            if a in SPECIAL:
+                p(SPECIAL[a] + u"\n\n")
             continue
-        p("| шаг | что | аргументы |\n|---|---|---|\n")
-        for nm, note, args, gate, phases in steps:
-            g = " *(по маске тика $%X)*" % gate if gate else ""
-            p("| `%s` | %s%s | %s |\n"
-              % (nm, note or "—", g, fmt_args(args, phases) or "—"))
-        p("\n")
+        if a in SPECIAL:
+            p(SPECIAL[a] + u"\n\n")
+        p(u"| шаг | что | условие | аргументы |\n|---|---|---|---|\n")
+        for n, note, args, g, loop in steps:
+            cond = u"; ".join(g)
+            if loop:
+                cond = (cond + u"; " if cond else u"") + u"обход"
+            p(u"| `%s` | %s | %s | %s |\n" % (n, note or u"—", cond or u"—",
+                                             fmt_args(n, args) or u"—"))
+        p(u"\n")
     f.close()
-    print("записано: %s (%d скриптов на 64 этапа)"
-          % (os.path.relpath(out, HERE), len(users)))
+    print(u"записано: %s (%d скриптов на 256 этапов)" % (os.path.relpath(out, HERE), len(users)))
     return 0
 
 

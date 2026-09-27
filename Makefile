@@ -238,7 +238,7 @@ exportanim:
 
 # Миссии оригинала для ремейка Dyna (#204): 123 mission.json и campaign.json
 # в out/<имя>/export/campaigns/Original/.
-exportmissions:
+exportmissions: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/exportmissions.py
 
 # Словарь анимаций юнита: кто ставит каждый номер +$7 и что он показывает

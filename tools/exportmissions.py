@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 u"""Миссии оригинала в формате ремейка (dyna #204).
 
-    make exportmissions
+    make exportmissions   (нужен свежий `make split`: ИИ читается из листингов)
 
 Пишет `out/<имя>/export/campaigns/<кампания>/`: `campaign.json` и
 `maps/<N>/mission.json`, где N — номер миссии в главе, плюс общий
@@ -131,6 +131,19 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 Подкрепления переводятся в юнитов по тем же правилам, что расстановка
 карты. Что сценарии делают, по миссиям, и что из них отложено — в
 `report.md`.
+
+## ИИ противника (dyna #208)
+
+`map.ai` — `{"stage": N}`, байт `+$3` описания: по нему `AiLoop` берёт
+скрипт из `AiScriptTable` и запись плана из `AiPlanTable`. Сам код ИИ —
+общий на всю игру, `out/<имя>/export/ai/opponent.json`
+(`tools/aiprogram.py`, формат описан там). У этапов 181…210 (поединок) и
+59…65 скрипт пуст (`rts`), и `map.ai` не пишется: в оригинале второго
+игрока там ведёт человек.
+
+`players[].order` — начальный приказ игрока, `+$32`/`+$33` описания,
+код оригинала: 8 ｼﾝｹﾞｷ, 9 ﾊﾝｼｮｸ (других значений в миссиях нет).
+`$0164D2` кладёт его прямо в `+$F` состояния игрока.
 """
 import collections
 import io
@@ -152,6 +165,7 @@ import maptex as mt                                          # noqa: E402
 import missions as ms                                        # noqa: E402
 import dumptext as dt                                        # noqa: E402
 import stageevents as se                                     # noqa: E402
+import aiprogram as ai                                       # noqa: E402
 from unpack import unpack                                    # noqa: E402
 from paths import OUT as out_path                            # noqa: E402
 
@@ -532,7 +546,8 @@ def export_mission(c, m, r, recs, skipped):
                         "victory_conditions": win, "defeat_conditions": lose,
                         "available_units": avail, "available_weathers": wth,
                         "roster": list(roster[:ROSTER_SPECIES]),
-                        "starting_energy": money})
+                        "starting_energy": money,
+                        "order": r[0x31 + team]})
     start = nests[1][0] if nests[1] else {"x": W // 2, "y": H // 2}
     doc = collections.OrderedDict()
     doc["name"] = mission_name(c, m)
@@ -552,6 +567,8 @@ def export_mission(c, m, r, recs, skipped):
     ])
     if events:
         doc["map"]["events"] = events
+    if not ai.silent(st):
+        doc["map"]["ai"] = collections.OrderedDict([("stage", st)])
     doc["map"]["players"] = players
     return doc, len(units), len(nests[2]), later, events, events_later
 
@@ -626,6 +643,7 @@ def main():
     by_chapter = collections.defaultdict(list)
     for c, m, r in mt.missions():
         by_chapter[c].append((m, r))
+    lib = ai.write_library(out_path("export", "ai", "opponent.json"))
     rows, special, scripted, n = [], [], [], 0
     for order, (folder, title, c) in enumerate(CAMPAIGNS, 1):
         for m, r in by_chapter[c]:
@@ -637,8 +655,9 @@ def main():
                                  u"; ".join(events_later) or u"—"))
             write_json(os.path.join(root, folder, "maps", str(m), "mission.json"),
                        doc, separators=(",", ":"))
-            rows.append((folder, m, doc["name"], r[3], nunits, nests2,
-                         doc["map"]["starting_energy"]))
+            rows.append((folder, m, doc["name"], r[3],
+                         u"$%06X" % ai.script_entry(r[3]) if "ai" in doc["map"] else u"—",
+                         nunits, nests2, doc["map"]["starting_energy"]))
             p1 = doc["map"]["players"][0]
             goals_special = ([x["type"] for x in p1["victory_conditions"]] != [DESTROY_PLAYER]
                              or [x["type"] for x in p1["defeat_conditions"]] != [DESTROY_PLAYER])
@@ -672,12 +691,17 @@ def main():
           u"| кампания | № | этап | события | отложено |\n|---|---:|---:|---|---|\n")
         for row in scripted:
             p(u"| %s | %d | %d | %s | %s |\n" % row)
-        p(u"\n## Миссии\n\n| кампания | № | название | этап | юнитов | гнёзд у игрока 2 | деньги |\n"
-          u"|---|---:|---|---:|---:|---:|---:|\n")
+        p(u"\n## Миссии\n\nИИ — скрипт этапа из `AiScriptTable` (`tools/aiprogram.py`); "
+          u"прочерк — скрипт пуст (`rts`), и `map.ai` не пишется.\n\n"
+          u"| кампания | № | название | этап | ИИ | юнитов | гнёзд у игрока 2 | деньги |\n"
+          u"|---|---:|---|---:|---|---:|---:|---:|\n")
         for row in rows:
-            p(u"| %s | %d | %s | %d | %d | %d | %d |\n" % row)
+            p(u"| %s | %d | %s | %d | %s | %d | %d | %d |\n" % row)
     print(u"миссий: %d в %d кампаниях -> %s" % (n, len(CAMPAIGNS),
                                               os.path.relpath(root, HERE)))
+    print(u"ИИ: %d этапов, %d инструкций, %d нативных -> %s"
+          % (len(lib["scripts"]), len(lib["ops"]), len(lib["natives"]),
+             os.path.relpath(out_path("export", "ai", "opponent.json"), HERE)))
     for k, v in sorted(skipped.items()):
         print(u"  не выгружено: %s — %d" % (k, v))
     return 0
