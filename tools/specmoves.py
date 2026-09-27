@@ -1062,6 +1062,8 @@ ROWS = [
      '$1EB794'),
     ('throw.homing.tan_mask', ("at", 0x29562C, 'move.w #$01FF,d2'),
      '$01FF'),
+    ('throw.homing.tan', ("dws", 0x1EB794, 512),
+     'наклон курса × 256 по +$4C & $1FF, 512 слов; формулой не выходит (tan · 256 и $1EAD94 / $1EAF94 расходятся)'),
     ('throw.shot.remove_mark', ("at", 0x295208, 'cmpi.w #$0001,$6(a0)'),
      '1'),
     ('throw.shot.check_every_other', ("at", 0x295208, 'andi.w #$0001,d0'),
