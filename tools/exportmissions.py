@@ -80,6 +80,23 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 - Виды 16 и 18, части ﾒｶﾞｻﾞｳﾙｽ и виды 8/9 игроков не выгружаются — это
   отдельные задачи.
 
+Тип оригинала (dyna #213). Ремейк держит вид в `unit_type`, а номер типа
+расстановки — отдельно, в `rom_type`, у каждого юнита карты и подкрепления:
+по нему рисуется набор листов и берётся длительность покоя из дескриптора.
+Вид у игрока 2 один на несколько типов — ростеры `+$0E…+$17` подменяют
+разновидность, а расстановка ставит и типы вне ростера (в Story 34 при
+ростере 44…49 стоят 28 и 30). Поэтому же:
+
+- `players[].roster` — номера типов слотов 1…6 (`+$04…+$09` у игрока 1,
+  `+$0E…+$13` у игрока 2): из него ремейк берёт тип яйца по команде ﾀﾏｺﾞ
+  и по ｶｲｿﾞｳ, как `$008738` и `UpgradeCommandP1` `$0237DE`. Слоты 7…10
+  (взрослые формы) ремейк не ставит.
+- `players[].nests[].type` — 1 у гнезда игрока 1, 2…4 у трёх
+  разновидностей гнезда игрока 2 (купол, машина, тарелка).
+- `map.unit_palette` — `+$29`: номер палитры `data_99` для ряда CRAM 2,
+  которым нарисованы все типы игрока 2, нейтралы 50 и 51 и мясо. Ряд 1
+  (`+$28`) равен 1 у всех 123 миссий и не выгружается.
+
 Деньги — BCD `+$34` и `+$38`. Доступность — слова подкоманд с `+$3C`
 по номеру команды (`data_177` `$024B52`): погода — команда 2
 (`+$3E`: полив, ливень, буря, засуха, землетрясение, молния,
@@ -157,6 +174,7 @@ SPECIES20_MEAT = 75                # падаль вида 20
 # подвижный нейтральный вид оригинала -> UnitType ремейка (dyna #206)
 NEUTRAL = {11: 6, 12: 7, 13: 8, 20: 9}
 NEUTRAL_POSES = {4: "carcass", 8: "carcass"}
+ROSTER_SPECIES = 6                 # слоты ростера видов 1…6; 7…10 ремейк не ставит
 
 START_TABLE = 0x02CE90             # table_stagestart: вход на карту
 FRAME_TABLE = 0x02D0B8             # table_stageframe: каждый тик
@@ -411,8 +429,8 @@ def map_unit(x, y, d, typ, pose, skipped):
         if owner == 0 and not decor and sp in NEUTRAL:
             neutral = (NEUTRAL[sp], NEUTRAL_POSES.get(pose, "walk"))
     if neutral:
-        return {"team_id": 0, "unit_type": neutral[0], "x": x, "y": y,
-                "facing": d, "pose": neutral[1]}
+        return {"team_id": 0, "unit_type": neutral[0], "rom_type": typ,
+                "x": x, "y": y, "facing": d, "pose": neutral[1]}
     owner, sp, decor = unit_type(typ)
     if owner == 0:
         skipped[u"декор" if decor else u"нейтральный вид %d" % sp] += 1
@@ -420,8 +438,8 @@ def map_unit(x, y, d, typ, pose, skipped):
     if not 1 <= sp <= 6:
         skipped[u"вид %d игрока" % sp] += 1
         return None
-    return {"team_id": owner, "unit_type": sp - 1, "x": x, "y": y,
-            "facing": d, "pose": POSES.get(pose, "walk")}
+    return {"team_id": owner, "unit_type": sp - 1, "rom_type": typ,
+            "x": x, "y": y, "facing": d, "pose": POSES.get(pose, "walk")}
 
 
 def stage_events(st, skipped):
@@ -483,7 +501,7 @@ def export_mission(c, m, r, recs, skipped):
             skipped[u"клетка типов 22…30"] += 1
             continue
         if typ == 1 or typ in (2, 3, 4):
-            nests[1 if typ == 1 else 2].append({"x": x, "y": y})
+            nests[1 if typ == 1 else 2].append({"x": x, "y": y, "type": typ})
             continue
         u = map_unit(x, y, d, typ, pose, skipped)
         if u:
@@ -503,15 +521,17 @@ def export_mission(c, m, r, recs, skipped):
     win1, lose1, later = goals(st)
     events, events_later = stage_events(st, skipped)
     players = []
-    for team, money, avail, wth in ((1, bcd(r[0x34:0x38]), avail1, weathers1),
-                                    (2, bcd(r[0x38:0x3C]), avail2,
-                                     sorted(WEATHER_ITEMS))):
+    for team, money, avail, wth, roster in (
+            (1, bcd(r[0x34:0x38]), avail1, weathers1, roster1),
+            (2, bcd(r[0x38:0x3C]), avail2, sorted(WEATHER_ITEMS),
+             r[0x0E:0x18])):
         first = nests[team][0] if nests[team] else {"x": -1, "y": -1}
         win, lose = (win1, lose1) if team == 1 else (lose1, win1)
         players.append({"team_id": team, "start_x": first["x"],
                         "start_y": first["y"], "nests": nests[team],
                         "victory_conditions": win, "defeat_conditions": lose,
                         "available_units": avail, "available_weathers": wth,
+                        "roster": list(roster[:ROSTER_SPECIES]),
                         "starting_energy": money})
     start = nests[1][0] if nests[1] else {"x": W // 2, "y": H // 2}
     doc = collections.OrderedDict()
@@ -521,6 +541,7 @@ def export_mission(c, m, r, recs, skipped):
         ("start_x", start["x"]), ("start_y", start["y"]),
         ("tileset", str(r[0x2A])),
         ("palette", r[0x4C]),
+        ("unit_palette", r[0x29]),
         ("starting_energy", players[0]["starting_energy"]),
         ("playable_margin", 1),
         ("tilemap", []),
@@ -533,6 +554,21 @@ def export_mission(c, m, r, recs, skipped):
         doc["map"]["events"] = events
     doc["map"]["players"] = players
     return doc, len(units), len(nests[2]), later, events, events_later
+
+
+def mission_docs():
+    u"""(кампания, номер, mission.json) по всем миссиям, в порядке выгрузки.
+
+    Им пользуется и `exportanim.py`: какие наборы листов в каких палитрах
+    выводить, решает ровно то, что попало в миссии."""
+    recs = mt.gfx_records()
+    skipped = collections.Counter()
+    by_chapter = collections.defaultdict(list)
+    for c, m, r in mt.missions():
+        by_chapter[c].append((m, r))
+    for folder, _title, c in CAMPAIGNS:
+        for m, r in by_chapter[c]:
+            yield folder, m, export_mission(c, m, r, recs, skipped)[0]
 
 
 def events_summary(ev):

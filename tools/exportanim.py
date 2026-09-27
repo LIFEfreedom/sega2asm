@@ -1,15 +1,42 @@
 #!/usr/bin/env python3
-u"""Анимации шести видов и четырёх нейтралов в раскладке ремейка Dyna.
+u"""Анимации юнитов в раскладке ремейка Dyna.
 
-    python tools/exportanim.py          # шесть видов игрока 1 и нейтралы
-    python tools/exportanim.py --all    # все 45 различных наборов
+    python tools/exportanim.py          # наборы, которые ставят миссии, в их палитрах
+    python tools/exportanim.py --all    # все 45 различных наборов, для обзора
     python tools/exportanim.py --props  # яйца и гнёзда под имена ремейка
     python tools/exportanim.py --scale 2  # любое из них, увеличенное вдвое
 
 Пишет в `out/<имя>/export/` дерево, которое кладётся прямо в `Content`:
 
-    objects/units/<папка>/<анимация>.png   — одна анимация, все стороны
+    objects/units/<набор>/palette<P>/<анимация>.png   — одна анимация, все стороны
     animations.json   — раскладка листов и покадровые длительности
+
+## Какие наборы и в каких палитрах (dyna #213)
+
+Юнит ремейка рисуется по ТИПУ оригинала, а не по виду: у игрока 2 свои
+существа (слизень 15, шлемоголовый 16…), и какие — решает ростер миссии.
+Поэтому вывод по умолчанию идёт от миссий: `exportmissions.mission_docs()`
+даёт ростеры обоих игроков и типы всех юнитов расстановки и подкреплений,
+плюс умолчания ремейка (`DEFAULT_TYPES`). Каждый тип рисуется рядом CRAM из
+`UnitPaletteRow` `$015156`: ряд 1 — палитрой `data_99[+$28]` (1 у всех
+миссий), ряд 2 — `data_99[+$29]` своей миссии (3, у теней 2 и 4). Так
+набираются пары «тип, палитра».
+
+Типы с одинаковыми листами — одинаковыми до шага скрипта: банк кадров,
+кадры общего банка, длительности, петли (`sheet_key`, строже
+`unitgfx.signature`) — делят один НАБОР: тени 38…43, ﾌﾞﾗﾎﾞｰｽﾞ 44…49 и мясо
+69…74 — это наборы 5…10, 25 = 50, 26 = 51, 27 = 52 = 57, 58 = 75, 32 = 33.
+Набор выводится один раз на каждую палитру, в которой его рисуют, и
+называется по младшему типу, который ставят миссии: папка игрока 1 без
+суффикса, прочие `<вид>_r<тип>`. `animations.json` тогда — два словаря:
+`sets` (раскладка набора, от палитры не зависящая, и список `palettes`) и
+`types` (тип -> набор и ряд палитры). Типы, которых миссии не ставят, но
+листы у которых ровно те же, тоже попадают в `types`: так тип 57 рисуется
+листами 27 без единого нового файла.
+
+`data_99[4]` — шестнадцать нулей: тени Story 39 и 41 рисуются сплошь
+чёрными силуэтами. Перекрашивает ли их скрипт этапа по ходу — проверяется
+только эмулятором.
 
 ## Лист
 
@@ -143,13 +170,14 @@ u"""Анимации шести видов и четырёх нейтралов 
 | `hunter` | 4 ﾃｨﾗﾉ | 8 |
 | `scout` | 5 ﾌﾟﾃﾗ | 9 |
 | `egg_eater` | 6 ﾋﾟｰﾁｬﾝ | 10 |
-| `species11` | 11 ﾎﾟﾝﾎﾟﾝ, ничей | 50 |
-| `species12` | 12, ничей | 51 |
-| `species13` | 13, ничей | 52 |
 | `species20` | 20, ничей | 58 |
 
 Четыре подвижных нейтрала (dyna #206) выводятся вместе с шестью видами и
-под теми же именами анимаций: у ремейка они такие же юниты.
+под теми же именами анимаций: у ремейка они такие же юниты. Три из них
+делят листы с запасными ростерами врага и потому лежат в их наборах
+(dyna #213): 50 — в `defender_r25`, 51 — в `hunter_r26`, 52 — в
+`egg_eater_r27` (там в палитре 1, у 27 — в палитре 3). Своя папка — только
+у вида 20.
 
 ## Остальные наборы (`--all`)
 
@@ -186,8 +214,10 @@ u"""Анимации шести видов и четырёх нейтралов 
 ## Яйца и гнёзда (`--props`)
 
 Ремейк рисует их **одной картинкой на целую текстуру**, без сетки:
-`objects/eggs/<вид>.png` и `objects/spawner.png` / `spawner2.png`. Под эти
-же имена кладётся и вывод.
+`objects/eggs/<вид>/<стадия>.png` и `objects/spawner.png` / `spawner2.png`.
+Под эти же имена кладётся и вывод. Яйца игрока 2 (dyna #213) — в
+`objects/eggs/p2/palette<P>/<вид>/<стадия>.png`, по набору на каждую
+палитру ряда 2, которую берут миссии.
 
 **Яйцо у всех видов — общий банк кадров**, свои кадры не используются
 вовсе. Номера идут с шагом три, по кадру на стадию:
@@ -225,9 +255,13 @@ u"""Анимации шести видов и четырёх нейтралов 
 серые, с лампами и кольцом. Рядом кладётся `_spark` — та самая разовая
 искра анимации `$06`.
 
-Кроме одиночных картинок `--props` пишет `eggs/stages/` (три стадии по
-видам) и `eggs/shared/` (кладка, трещина, вылупление) — лентами, как
-`unitanim`.
+Яйцо ремейк рисует картинкой своей стадии (dyna #213):
+`objects/eggs/<вид>/{cocoon,rest,stir,ready}.png` у игрока 1 и
+`objects/eggs/p2/palette<P>/<вид>/...` у игрока 2 — первые кадры анимаций
+`$04` (кокон ｶｲｿﾞｳ), `$05`, `$06`, `$07`.
+
+Кроме одиночных картинок `--props` пишет `eggs/shared/` (кладка,
+трещина, вылупление) — лентами, как `unitanim`.
 
 ## Время
 
@@ -253,9 +287,9 @@ u"""Анимации шести видов и четырёх нейтралов 
   тоже 32x32 (`tools/maptex.py`), а у ремейка клетка 64. Для ремейка
   выгружать с `--scale 2`: ближайший сосед, пропорция «спрайт = клетка»
   сохраняется, а `cell` в `animations.json` становится 64.
-- **Палитра игрока.** Берётся ряд из `UnitPaletteRow`: у типов 5…10 это
-  ряд 1, то есть цвета игрока 1. У игрока 2 те же кадры в ряду 2 —
-  `--all` выводит и их.
+- **Палитры, которых миссии не берут.** Набор выводится только в тех
+  палитрах, которыми его рисуют миссии и умолчания ремейка; `--all`
+  выводит каждый набор в палитре его ряда по умолчанию (ряд 2 — `data_99[3]`).
 """
 import collections
 import io
@@ -311,11 +345,10 @@ PLAYABLE = {1: ("pacific", u"ｽﾃｺﾞ"), 2: ("fat", u"ﾄﾘｹﾗ"),
 # типы игрока 1: у них ряд палитры 1 и они дают папку без суффикса
 PLAYER1 = {1: 5, 2: 6, 3: 7, 4: 8, 5: 9, 6: 10}
 
-# Подвижные нейтралы (dyna #206): вид -> (папка, тип расстановки). Выводятся
-# вместе с шестью видами и под их именами анимаций — у ремейка это такие же
-# юниты. Тип берётся сам, а не представитель набора: у 50, 51 и 52 набор
-# общий с запасными ростерами 25, 26 и 27, но ряд палитры свой — у 52 это
-# ряд 1, у 27 ряд 2. Тип 57 (тот же вид 13 в ряду 2) не выводится.
+# Подвижные нейтралы (dyna #206): вид -> (папка, тип расстановки), под
+# именами анимаций шести видов — у ремейка это такие же юниты. Имя папки
+# нужно только виду 20: у 50, 51 и 52 листы общие с 25, 26 и 27, и набор
+# зовётся по ним (dyna #213); в `--all` — по своему типу.
 NEUTRAL = {11: ("species11", 50), 12: ("species12", 51),
            13: ("species13", 52), 20: ("species20", 58)}
 
@@ -358,12 +391,6 @@ def sets_all():
         out.append((folder, t, sp, name))
     return out
 
-
-def sets_six():
-    return ([(PLAYABLE[sp][0], PLAYER1[sp], sp, PLAYABLE[sp][1])
-             for sp in sorted(PLAYABLE)]
-            + [(NEUTRAL[sp][0], NEUTRAL[sp][1], sp, u"вид %d" % sp)
-               for sp in sorted(NEUTRAL)])
 
 # имя в ремейке -> номер анимации оригинала на чётной и нечётной стороне
 ANIMS = (("idle", 0x0A, 0x0B), ("walking", 0x18, 0x19),
@@ -416,7 +443,10 @@ def sheet(t, words, pal, path):
 
 
 EGG_SPECIES = 6                    # шесть видов, по три кадра на каждый
-EGG_STAGES = ((0x05, "rest"), (0x06, "stir"), (0x07, "ready"))
+# Стадии яйца ремейка -> анимация оригинала, по кадру на стадию (dyna #213):
+# кокон ｶｲｿﾞｳ ($04, действие $04), лежит ($05), шевелится ($06: кадр держится
+# 20…42 такта и лишь коротко мелькает покоем), вот-вот вылупится ($07).
+EGG_STAGES = ((0x04, "cocoon"), (0x05, "rest"), (0x06, "stir"), (0x07, "ready"))
 EMPTY_EGG, BONES = 68, 67             # вид 25 и вид 26 без сторон
 EGG_SHARED = ((0x04, "lay"), (0x08, "crack"), (0x03, "hatch"))
 NESTS = ((1, "spawner", u"гнездо игрока 1"),
@@ -468,45 +498,46 @@ def export_props():
     root = out_path("export")
     eggs = os.path.join(root, "objects", "eggs")
     objects = os.path.join(root, "objects")
-    stages = os.path.join(root, "eggs", "stages")
     shared = os.path.join(root, "eggs", "shared")
-    for d in (eggs, objects, stages, shared):
+    for d in (eggs, objects, shared):
         os.makedirs(d, exist_ok=True)
 
+    # Яйца (dyna #213): по картинке на стадию, `<вид>/<стадия>.png`. У игрока
+    # 1 — ряд 1, палитра 1. У игрока 2 яйцо своё — у всех типов ряда 2, тени
+    # 38…43 тоже, кадры 19 + (вид − 1) * 3 общего банка — и рисуется рядом 2,
+    # поэтому выводится в каждой палитре, которой миссии красят этот ряд:
+    # `p2/palette<P>/<вид>/<стадия>.png`.
+    row2 = sorted({p for t, p in mission_palettes()
+                   if unitgfx.palette_row(t) == 2})
     made, note = 0, {}
     for sp in sorted(PLAYABLE):
-        folder, name = PLAYABLE[sp]
-        for t, suffix in ((PLAYER1[sp], ""), (None, "_p2")):
-            if t is None:                      # тот же вид у игрока 2
-                t = p2_type(sp)
-                if t is None:
-                    continue
-            pal = unitgfx.row_palette(unitgfx.palette_row(t))
+        folder, _name = PLAYABLE[sp]
+        jobs = [(PLAYER1[sp], unitgfx.row_palette(1), os.path.join(eggs, folder))]
+        jobs += [(p2_type(sp), data99(p), os.path.join(eggs, "p2", "palette%d" % p, folder))
+                 for p in row2]
+        for t, pal, d in jobs:
+            os.makedirs(d, exist_ok=True)
             ent = unitanim.entry_map(t)
             for an, stage in EGG_STAGES:
                 seq, _l, ok, _n = unitanim.steps(
                     unitgfx.script_addr(t, an, 0), ent)
-                if not ok or not seq:
-                    continue
-                w = seq[0][0]
-                if stage == "rest" and not suffix:
-                    if single(t, w, pal, os.path.join(eggs, folder + ".png")):
-                        made += 1
-                        note[folder] = w & 0xFF
-                if single(t, w, pal, os.path.join(
-                        stages, "%s%s_%s.png" % (folder, suffix, stage))):
+                if ok and seq and single(t, seq[0][0], pal,
+                                         os.path.join(d, stage + ".png")):
                     made += 1
-            if suffix:
+                    if stage == "rest" and t == PLAYER1[sp]:
+                        note[folder] = seq[0][0] & 0xFF
+        if sp != 1:
+            continue
+        t = PLAYER1[sp]
+        ent = unitanim.entry_map(t)
+        for an, nm in EGG_SHARED:
+            seq, _l, ok, _n = unitanim.steps(
+                unitgfx.script_addr(t, an, 0), ent)
+            if not ok or not seq:
                 continue
-            for an, nm in EGG_SHARED:
-                seq, _l, ok, _n = unitanim.steps(
-                    unitgfx.script_addr(t, an, 0), ent)
-                if not ok or not seq or sp != 1:
-                    continue
-                path = os.path.join(shared, nm + ".png")
-                words = [w for w, _d in seq]
-                cols, rows = sheet(t, words, pal, path)
-                made += 1
+            sheet(t, [w for w, _d in seq], unitgfx.row_palette(1),
+                  os.path.join(shared, nm + ".png"))
+            made += 1
 
     for t, fname, human in NESTS:
         pal = unitgfx.row_palette(unitgfx.palette_row(t))
@@ -641,89 +672,177 @@ def rows_sheet(t, rows, pal, path):
     return cols
 
 
-def main():
-    if "--props" in sys.argv[1:]:
-        return export_props()
-    both = "--all" in sys.argv[1:]
-    root = os.path.join(out_path("export"), "objects", "units")
-    manifest, made, missing = {}, 0, []
-    rights = collections.Counter()
-    own = []
+# Умолчания ремейка (dyna #213): чем рисуется карта без ростеров и без
+# типов у юнитов — Tiled и тесты. Их листы нужны, даже если ни одна миссия
+# оригинала их так не ставит.
+ROW1_PALETTE = 1                  # +$28: 1 у всех 123 миссий
+DEFAULT_ROW2 = 3                  # +$29 у 119 миссий из 123
+DEFAULT_TYPES = (5, 6, 7, 8, 9, 10,             # ростер игрока 1
+                 15, 16, 25, 26, 19, 27,         # ростер игрока 2, как у Duel 1
+                 50, 51, 52, 58,                 # подвижные нейтралы
+                 69, 70, 71, 72, 73, 74, 75)     # мясо: ничья падаль
+SKIP_POSES = ("bones", "empty_egg")   # у ремейка свои картинки, не листы
 
-    for key, t, sp, name in (sets_all() if both else sets_six()):
-        pal = unitgfx.row_palette(unitgfx.palette_row(t))
-        entries = unitanim.entry_map(t)
-        manifest[key] = {"species": sp, "name": name, "type": t,
-                         "palette_row": unitgfx.palette_row(t),
-                         "cell": FRAME * SCALE,
-                         "directions": [n for _s, n in FACINGS],
-                         "anims": {}}
-        playable = sp in PLAYABLE or (sp in NEUTRAL and t == NEUTRAL[sp][1])
-        if playable:
-            manifest[key]["select"] = selection(t)
-        written = set()
-        for anim, an, odd in (ANIMS if playable else OTHER_ANIMS):
-            # Имена ремейка осмысленны только у шести видов. У гнезда
-            # или яйца ячейка $0A это не «покой», а просто ячейка
-            # $0A, поэтому файл называется по номеру.
-            anim = anim if playable else "anim_%02X" % an
-            rows, info = [], []
-            for side, dname in FACINGS:
-                # как показывает игра: номер по чётности стороны, а
-                # ячейка сторона & ~1 (это делает script_addr)
-                num = odd if side & 1 else an
-                place = {"direction": dname, "row": len(info),
-                         "rom_facing": side, "rom_anim": "$%02X" % num,
-                         "rom_slot": side & ~1}
-                got = facing_steps(t, num, side, entries)
-                if got is None:
-                    missing.append((key, anim, dname))
-                    rows.append([])
-                    place["frame_count"] = 0
-                    info.append(place)
-                    continue
-                seq, loop, nxt = got
-                words = [w for w, _d in seq]
-                rows.append(words)
-                place.update({
-                    "loop": loop,
-                    "next": ("$%02X" % nxt[0]) if nxt else None,
-                    "frame_count": len(words),
-                    "frames": [{"frame": w & 0xFF,
-                                "common": bool(w & 0x100),
-                                "hflip": bool(w & 0x800),
-                                "dur": d} for w, d in seq],
-                })
+
+TYPE_RECORDS = 91                 # UnitTypeTable $01FAEE: записи типов 0…90
+PARAM_BLOCKS = range(0x022000, 0x023400)   # блоки параметров видов и гнёзд
+
+
+def is_unit_type(t):
+    u"""Настоящий ли t тип: запись в `UnitTypeTable` и дескриптор, чей блок
+    параметров — один из блоков видов. Графика есть и у типа 91, и у мёртвых
+    типов с дескриптором `$0784`, но записи типа у первого нет, а у вторых
+    `+$0` указывает в никуда ($818283): длительности там мусор, и ремейк
+    упал бы на таком типе посреди боя, а не при загрузке."""
+    return t < TYPE_RECORDS and param_block(t) in PARAM_BLOCKS
+
+
+def data99(p):
+    u"""Палитра `data_99[p]` — то, что `BuildStagePalettes` кладёт в ряд."""
+    return gfx.read_palette(gfx.PAL_ARRAY + 32 * p)
+
+
+def palette_of(t, row2):
+    u"""Номер палитры `data_99`, которой миссия рисует тип t: ряд 1 — `+$28`,
+    ряд 2 — `+$29`. Рядов 0 и 3 у юнитов игроков и нейтралов не бывает."""
+    row = unitgfx.palette_row(t)
+    return {1: ROW1_PALETTE, 2: row2}.get(row)
+
+
+def mission_units(node):
+    u"""Все записи юнитов миссии: карта и подкрепления сценария, где угодно."""
+    if isinstance(node, dict):
+        if "rom_type" in node:
+            yield node
+        for v in node.values():
+            for u in mission_units(v):
+                yield u
+    elif isinstance(node, list):
+        for v in node:
+            for u in mission_units(v):
+                yield u
+
+
+def mission_palettes():
+    u"""{(тип, палитра)} по всем миссиям плюс умолчания ремейка.
+
+    Всё, что может появиться на карте: ростеры обоих игроков (яйца по
+    команде и ｶｲｿﾞｳ), типы расстановки и подкреплений (размножение
+    копирует тип родителя) — в палитре своей миссии."""
+    import exportmissions as em
+    pairs = {(t, palette_of(t, DEFAULT_ROW2)) for t in DEFAULT_TYPES}
+    for _folder, _m, doc in em.mission_docs():
+        mp = doc["map"]
+        types = set()
+        for p in mp["players"]:
+            types.update(p["roster"])
+        types.update(u["rom_type"] for u in mission_units(mp)
+                     if u.get("pose") not in SKIP_POSES)
+        pairs.update((t, palette_of(t, mp["unit_palette"])) for t in types)
+    missing = sorted(k for k in pairs if k[1] is None)
+    assert not missing, missing
+    return pairs
+
+
+def sheet_key(t):
+    u"""Чем листы типа t отличимы от чужих: банк кадров и все шаги скриптов.
+
+    Строже `unitgfx.signature`: сравнивает и кадры общего банка, и
+    длительности, и петли — всё, что попадает в листы и в манифест."""
+    ent = unitanim.entry_map(t)
+    parts = [unitgfx.frame_table(t)]
+    for _anim, an, odd in ANIMS:
+        for side, _n in FACINGS:
+            got = facing_steps(t, odd if side & 1 else an, side, ent)
+            parts.append(None if got is None
+                         else (tuple(got[0]), got[1], got[2]))
+    return tuple(parts)
+
+
+def set_name(rep):
+    u"""Папка набора по младшему типу группы."""
+    sp = species_of(rep)
+    if sp in PLAYABLE:
+        folder = PLAYABLE[sp][0]
+        return folder if rep == PLAYER1[sp] else "%s_r%d" % (folder, rep)
+    if sp in NEUTRAL:
+        return NEUTRAL[sp][0]
+    return "type%03d" % rep
+
+
+def describe_set(t, playable):
+    u"""Раскладка листов набора, от палитры не зависящая.
+
+    [(анимация, строки слов по сторонам, запись манифеста)], пропущенные
+    стороны и то, как правая сторона соотносится с левой."""
+    entries = unitanim.entry_map(t)
+    out, missing, rights = [], [], []
+    for anim, an, odd in (ANIMS if playable else OTHER_ANIMS):
+        # Имена ремейка осмысленны только у шести видов. У гнезда
+        # или яйца ячейка $0A это не «покой», а просто ячейка
+        # $0A, поэтому файл называется по номеру.
+        anim = anim if playable else "anim_%02X" % an
+        rows, info = [], []
+        for side, dname in FACINGS:
+            # как показывает игра: номер по чётности стороны, а
+            # ячейка сторона & ~1 (это делает script_addr)
+            num = odd if side & 1 else an
+            place = {"direction": dname, "row": len(info),
+                     "rom_facing": side, "rom_anim": "$%02X" % num,
+                     "rom_slot": side & ~1}
+            got = facing_steps(t, num, side, entries)
+            if got is None:
+                missing.append(anim + "/" + dname)
+                rows.append([])
+                place["frame_count"] = 0
                 info.append(place)
-            if not any(rows):
                 continue
-            rel = right_relation(facing_steps(t, an, LEFT, entries),
-                                 facing_steps(t, an, RIGHT, entries))
-            rights[rel] += 1
-            if rel == "own":
-                own.append((key, anim))
-            d = os.path.join(root, key)
-            os.makedirs(d, exist_ok=True)
-            stale = os.path.join(d, anim)          # прежний каталог сторон
-            if os.path.isdir(stale):
-                shutil.rmtree(stale)
-            cols = rows_sheet(t, rows, pal, os.path.join(d, anim + ".png"))
-            made += 1
-            written.add(anim + ".png")
-            manifest[key]["anims"][anim] = {
-                "rom_anim": "$%02X" % an,
-                "rom_anim_diagonal": "$%02X" % odd,
-                "columns": cols, "rows": len(FACINGS),
-                "right": rel,
-                "directions": info,
-            }
+            seq, loop, nxt = got
+            words = [w for w, _d in seq]
+            rows.append(words)
+            place.update({
+                "loop": loop,
+                "next": ("$%02X" % nxt[0]) if nxt else None,
+                "frame_count": len(words),
+                "frames": [{"frame": w & 0xFF,
+                            "common": bool(w & 0x100),
+                            "hflip": bool(w & 0x800),
+                            "dur": d} for w, d in seq],
+            })
+            info.append(place)
+        if not any(rows):
+            continue
+        rel = right_relation(facing_steps(t, an, LEFT, entries),
+                             facing_steps(t, an, RIGHT, entries))
+        rights.append((anim, rel))
+        out.append((anim, rows, {
+            "rom_anim": "$%02X" % an,
+            "rom_anim_diagonal": "$%02X" % odd,
+            "columns": max(len(r) for r in rows), "rows": len(FACINGS),
+            "right": rel,
+            "directions": info,
+        }))
+    return out, missing, rights
 
-        d = os.path.join(root, key)
-        if written and os.path.isdir(d):      # листы прежних раскладок
-            for name in os.listdir(d):
-                if name.endswith(".png") and name not in written:
-                    os.remove(os.path.join(d, name))
 
+def set_entry(t, sp, name, playable, layout):
+    entry = {"species": sp, "name": name, "type": t,
+             "cell": FRAME * SCALE,
+             "directions": [n for _s, n in FACINGS]}
+    if playable:
+        entry["select"] = selection(t)
+    entry["anims"] = collections.OrderedDict((a, e) for a, _r, e in layout)
+    return entry
+
+
+def write_set(t, layout, pal, d):
+    os.makedirs(d, exist_ok=True)
+    for anim, rows, _e in layout:
+        rows_sheet(t, rows, pal, os.path.join(d, anim + ".png"))
+    return len(layout)
+
+
+def write_manifest(manifest):
     io.open(os.path.join(out_path("export"), "animations.json"), "w",
             encoding="utf-8", newline="\n").write(
         json.dumps(manifest, ensure_ascii=False, indent=1))
@@ -731,8 +850,10 @@ def main():
     if os.path.exists(old):
         os.remove(old)
 
+
+def report(sets, made, root, missing, rights):
     print(u"наборов: %d, листов: %d -> %s"
-          % (len(manifest), made, os.path.relpath(root, HERE)))
+          % (sets, made, os.path.relpath(root, HERE)))
     print(u"строки листа: %s"
           % ", ".join("%d %s (сторона %d)" % (i, n, s)
                       for i, (s, n) in enumerate(FACINGS)))
@@ -742,12 +863,102 @@ def main():
               % (len(missing),
                  ", ".join("%s (%d)" % kv for kv in byset.most_common(5))))
     print(u"правая сторона: %s"
-          % ", ".join("%s %d" % kv for kv in sorted(rights.items())))
-    six = [k for k in own if k[0] in {v[0] for v in PLAYABLE.values()}]
+          % ", ".join("%s %d" % kv for kv in sorted(
+              collections.Counter(r for _k, _a, r in rights).items())))
+    six = [(k, a) for k, a, r in rights
+           if r == "own" and k in {v[0] for v in PLAYABLE.values()}]
     if six:
         print(u"своя правая сторона у шести видов: %s"
               % ", ".join("%s/%s" % k for k in six))
+
+
+def export_remake():
+    u"""Выгрузка для ремейка (dyna #213): наборы, которые встречаются в
+    миссиях, в палитрах этих миссий, по папке на палитру."""
+    root = os.path.join(out_path("export"), "objects", "units")
+    if os.path.isdir(root):
+        shutil.rmtree(root)            # всё здесь пишет только этот скрипт
+    pairs = mission_palettes()
+    groups = collections.OrderedDict()           # ключ листов -> типы
+    for t in sorted({t for t, _p in pairs}):
+        groups.setdefault(sheet_key(t), []).append(t)
+    # Представитель и имя набора — младший тип, который миссии ставят: у
+    # ﾄﾘｹﾗ игрока 2 (16) младший в группе — неиспользуемый вид 7 (тип 11).
+    reps = {k: v[0] for k, v in groups.items()}
+    # Типы, которых в миссиях нет, но листы у них ровно те же: ремейку
+    # незачем их выгружать, а нарисовать ими такой тип можно (так 57 — это
+    # 52 в ряду 2, а 38…49 и мясо 69…74 — это 5…10). Только ряды 1 и 2:
+    # других у юнитов не бывает, и только настоящие типы (`is_unit_type`).
+    for t in range(1, unitgfx.N_TYPES + 1):
+        if unitgfx.palette_row(t) not in (1, 2) or not is_unit_type(t):
+            continue
+        try:
+            k = sheet_key(t)
+        except Exception:
+            continue
+        if k in groups and t not in groups[k]:
+            groups[k].append(t)
+
+    manifest = collections.OrderedDict([
+        ("sets", collections.OrderedDict()),
+        ("types", collections.OrderedDict())])
+    made, missing, rights = 0, [], []
+    for key, types in groups.items():
+        types.sort()
+        rep = reps[key]
+        sp, name = species_of(rep), set_name(rep)
+        palettes = sorted({p for t, p in pairs if t in types})
+        layout, miss, rel = describe_set(rep, True)
+        missing += [(name, m) for m in miss]
+        rights += [(name, a, r) for a, r in rel]
+        entry = set_entry(rep, sp,
+                          PLAYABLE.get(sp, (None, u"вид %d" % sp))[1],
+                          True, layout)
+        entry["types"] = types
+        entry["palettes"] = palettes
+        manifest["sets"][name] = entry
+        for t in types:
+            manifest["types"][str(t)] = {"set": name,
+                                         "row": unitgfx.palette_row(t)}
+        for p in palettes:
+            made += write_set(rep, layout, data99(p),
+                              os.path.join(root, name, "palette%d" % p))
+    manifest["types"] = collections.OrderedDict(
+        sorted(manifest["types"].items(), key=lambda kv: int(kv[0])))
+    write_manifest(manifest)
+    report(len(manifest["sets"]), made, root, missing, rights)
+    print(u"пар «набор, палитра»: %d" % sum(
+        len(e["palettes"]) for e in manifest["sets"].values()))
     return 0
+
+
+def export_all():
+    u"""Все 45 наборов, каждый в палитре своего ряда, плоско: для обзора."""
+    root = os.path.join(out_path("export"), "objects", "units")
+    if os.path.isdir(root):
+        shutil.rmtree(root)
+    manifest, made, missing, rights = {}, 0, [], []
+    for key, t, sp, name in sets_all():
+        playable = sp in PLAYABLE or (sp in NEUTRAL and t == NEUTRAL[sp][1])
+        layout, miss, rel = describe_set(t, playable)
+        missing += [(key, m) for m in miss]
+        rights += [(key, a, r) for a, r in rel]
+        manifest[key] = set_entry(t, sp, name, playable, layout)
+        manifest[key]["palette_row"] = unitgfx.palette_row(t)
+        made += write_set(t, layout,
+                          unitgfx.row_palette(unitgfx.palette_row(t)),
+                          os.path.join(root, key))
+    write_manifest(manifest)
+    report(len(manifest), made, root, missing, rights)
+    return 0
+
+
+def main():
+    if "--props" in sys.argv[1:]:
+        return export_props()
+    if "--all" in sys.argv[1:]:
+        return export_all()
+    return export_remake()
 
 
 if __name__ == "__main__":
