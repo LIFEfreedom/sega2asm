@@ -767,7 +767,7 @@ _ENEMY_PICTURES = {"enemies_beetle_0": [150, 246], "enemies_token_0": [40], "ene
                    "enemies_boomerang_8": [150], "enemies_load_8": [165],
                    "enemies_flyer_8": [120], "enemies_flyer_12": [90], "enemies_larva_8": [60],
                    "enemies_wedge_swallow_7": [60],
-                   "enemies_fish_14": [170, 190], "enemies_darkfish_14": [420], "enemies_fish_15": [150, 300],
+                   "enemies_fish_14": [170, 190, 230], "enemies_darkfish_14": [250, 330, 420, 480], "enemies_fish_15": [150, 300],
                    "enemies_native_14": [65, 190], "enemies_native_16": [100, 185], "enemies_dead_16": [60, 150],
                    "enemies_dead_walk_16": [200], "enemies_dead_token_16": [140],
                    "enemies_spirit_10": [150, 560], "enemies_spirit_pair_10": [350], "enemies_spirit_hit_11": [60, 520],
