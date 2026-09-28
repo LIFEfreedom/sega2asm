@@ -836,6 +836,44 @@ for _name, _level, _at, _poke, _codes, _input, _what in _SMALL:
     if _poke is _SMALL_FORM:
         SCENARIOS[_name]["set"] = [(0x22, 0x001D), (0x24, 0x7C4A)]
 
+# Тарзанка (M6c, mauimallard #27; behavior.md 1.9): шнуры уровня 12 (124, 125) — захват, сила, состояние 7,
+# отцепление, урон; полки и уровень 13 — части 2 и 3. Лоза-катапульта (122) и летающие полки (140/144/145) — M9, их нет.
+_BUNGEE = [
+    ("bungee_grab_12", 12, (264, 1500), None, [124], [("", 400)],
+     "шнур 124 в (264, 1488): утка падает мимо, касание ($2A06E6) — звук $7D, утка на высоте крепления, шнур и шесть "
+     "звеньев за ним, растянутый рисунок по длине; прыжки: сила (растяжение >> 1) ниже линии покоя, в нижней точке "
+     "рывок $1D6F14 со звуком $89 (384 и глубже), в верхней — $1D6F46"),
+    ("bungee_steer_12", 12, (264, 1500), None, [124], [("", 30), ("L", 300), ("", 20), ("R", 300)],
+     "раскачка на шнуре влево в стену и вправо: шипы снизу ($29498A) отпускают шнур (звук $7E, код 124 обратно в "
+     "клетку) и ранят; дальше обычное падение на шипы"),
+]
+# Ниндзя на входе: таблицы $FF1332/$FF1336 ниндзя, форма 1, полуширина $20, топливо 999, скрипт стойки $1D7804.
+_NINJA_FORM = [(0xFF1332, bytes([0x00, 0x1F, 0xCD, 0x98, 0x00, 0x1F, 0xCC, 0x90, 0x00, 0x01, 0x00, 0x20, 0x09, 0x99]))]
+_BUNGEE += [
+    ("bungee_throw_12", 12, (264, 1500), _GUN, [124],
+     [("", 40), ("B", 1), ("", 60), ("B", 1), ("", 100), ("B", 1), ("", 80)],
+     "бросок со шнура (C в состоянии 7 — 13, $1D73B2) на спуске и на подъёме; падение снова на шнур ($292792)"),
+    ("bungee_ninja_12", 12, (264, 1500), _NINJA_FORM, [124], [("", 300), ("L", 100), ("", 100)],
+     "ниндзя с входа (подмена формы) цепляется за шнур — захват облик не проверяет; его падение (4, $293CB6) в "
+     "состояние 7 не переходит, шнур тянет его так же"),
+]
+_BUNGEE_PICTURES = {"bungee_grab_12": [60], "bungee_steer_12": [374], "bungee_throw_12": [46]}
+for _name, _level, _at, _poke, _codes, _input, _what in _BUNGEE:
+    SCENARIOS[_name] = {
+        "level": _level, "objects": PICKUP_CODES + _codes,
+        "checks": ["camera", "player", "objects", "sounds", "throw", "d7", "bungee"],
+        "input": _input,
+        "about": "уровень %d, тарзанка: %s — игрок, шнур и его звенья в пуле, линии, звуки по кадрам" % (_level, _what),
+    }
+    if _name in _BUNGEE_PICTURES:
+        SCENARIOS[_name]["pictures"] = _BUNGEE_PICTURES[_name]
+    if _at:
+        SCENARIOS[_name]["at"] = _at
+    if _poke:
+        SCENARIOS[_name]["poke"] = _poke
+    if _poke is _NINJA_FORM:
+        SCENARIOS[_name]["set"] = [(0x22, 0x001D), (0x24, 0x7804)]
+
 for _level in range(19):          # 19-22 — бонус, утка с входа на моноцикле
     SCENARIOS["enter_%02d" % _level] = {
         "level": _level, "objects": False, "checks": ["entry"], "pictures": [20],
@@ -1118,12 +1156,21 @@ CARRY_LAYOUT = [
 # это остаток от объектов обхода до него, а $2973D8 в начале обхода оставляет $FFFF.
 WALK_TURN_END = 0x297062
 
+# Тарзанка (M6c): адрес шнура $FF136C, X шнура $FF137E, крепление, линия покоя, коридор, линия отцепления, предел
+# полки $FF1380-$FF138A и поверхность полки $FF2148.
+BUNGEE_LAYOUT = [
+    (0xFF136C, 2, "шнур $FF136C"),
+    (0xFF137E, 14, "X шнура, крепление, линия покоя, коридор, отцепление, предел полки $FF137E-$FF138A"),
+    (0xFF2148, 2, "поверхность полки $FF2148"),
+]
+
 
 def layout_of(sc):
     return (LAYOUT + (SPRITE_LAYOUT if "sprites" in sc["checks"] else [])
             + (OBJECT_LAYOUT if "objects" in sc["checks"] else [])
             + (THROW_LAYOUT if "throw" in sc["checks"] else [])
-            + (CARRY_LAYOUT if "carry" in sc["checks"] else []))
+            + (CARRY_LAYOUT if "carry" in sc["checks"] else [])
+            + (BUNGEE_LAYOUT if "bungee" in sc["checks"] else []))
 
 
 POOL_WINDOW = 0xFFFFE130       # окно порождения: столбец, ряд, их пределы
