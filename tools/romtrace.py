@@ -125,7 +125,12 @@ CRC-32 CRAM, таблиц имён плоскостей A и B, таблицы �
 `screen: true`). Сценарии: `boot_idle` (пульт не трогают: заставки, титульный
 и меню до срока, демо), `boot_skip` (Start на Disney, presents, въезде логотипа
 и START в меню), `boot_held` (Start держат с presents: титульный не пропущен,
-пока его не отпустят).
+пока его не отпустят); меню (M8c часть 2, путь до меню — как у `boot_skip`):
+`boot_options` (настройки: все списки, SOUND TEST играет, выход EXIT и Start на
+списке, START с HARD и раскладкой 3), `boot_password` (неверный пароль, ININJA —
+уровень 3), `boot_debug` (IMCARY и MAUIMM, меню DEBUG, START — уровень 5),
+`boot_cheat_broken` (IMCARY, неверный, MAUIMM — DEBUG закрыт; нажатия в меню
+до срока и демо).
 
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
@@ -1166,6 +1171,80 @@ BOOT_SCENARIOS = {
         "about": "Start держат с presents 500 кадров: presents пропущен, титульный — нет, пока Start не отпустят и не нажмут снова ($295E48: нажато — только новое)",
     },
 }
+
+# Меню (M8c часть 2, screens.md 3): до главного меню — путь boot_skip (Start на Disney, presents и въезде логотипа;
+# первое ожидание меню — кадр 873), дальше нажатия. Кнопки — сырые биты пульта: раскладка 0 ($1FD7AC, в меню не
+# меняется до новой игры $2984A4) переставляет B и C, так что сырая B — это C меню (SOUND TEST играет, $2974B6), а
+# сырая C — B меню (вперёд по списку, $2974E0).
+BOOT_TO_MENU = [("", 400), ("S", 2), ("", 198), ("S", 2), ("", 198), ("S", 2), ("", 80)]
+
+
+def presses(keys, hold=2, gap=4):
+    """'D D S _30 R' -> нажатие каждой кнопки на hold кадров и gap кадров без кнопок; _N — N кадров без кнопок."""
+    out = []
+    for key in keys.split():
+        if key.startswith("_"):
+            out.append(("", int(key[1:])))
+        else:
+            out += [(key, hold), ("", gap)]
+    return out
+
+
+def password_keys(have, want):
+    """Нажатия экрана пароля $29098C от буфера have до want: курсор влево и вправо по кругу (L из 0 — на 5, R из 5 —
+    на 0), буквы по кратчайшему пути, вперёд попеременно D и сырая C (B меню), назад U и A ($2909EA-$290A2C), курсор
+    в конце возвращается на 0."""
+    keys = ["L", "R"]
+    for i, (a, b) in enumerate(zip(have, want)):
+        if i:
+            keys.append("R")
+        step = (ord(b) - ord(a)) % 26
+        if step <= 13:
+            keys += ["D" if j % 2 == 0 else "C" for j in range(step)]
+        else:
+            keys += ["U" if j % 2 == 0 else "A" for j in range(26 - step)]
+    keys.append("R")
+    return presses(" ".join(keys))
+
+
+BOOT_SCENARIOS.update({
+    "boot_options": {
+        "input": BOOT_TO_MENU + presses(
+            # OPTIONS; DIFFICULTY R R A C L -> 1 2 1 2 1 (HARD); SOUND TEST: L (0 -> 168), R (0), R R R, B — сыграть 3
+            # ($298462: $FF2150, «остановить всё», $10 3); CONTROLS R R -> 2; EXIT Start -> $16 и музыка 0 ($290940)
+            "D S _10 R R A C L D L R R R R B _20 D R R _10 D S _20 "
+            # OPTIONS снова: U с DIFFICULTY — на EXIT (по кругу), U — CONTROLS, R -> 3, Start на списке — выход без
+            # звука ($FF2150 = 0); главное меню: START — новая игра с HARD и раскладкой 3
+            "D S _10 U U R _10 S _10 S"),
+        "record": 2400, "until": SETUP_STOP, "pictures": [944, 1015, 1040],
+        "about": "настройки: DIFFICULTY, SOUND TEST (по кругу, сыграть 3), CONTROLS, EXIT; снова — выход Start на "
+                 "списке; START — новая игра с HARD и раскладкой 3",
+    },
+    "boot_password": {
+        "input": BOOT_TO_MENU + presses("U S _10 S _10 D D S _10") + password_keys("AAAAAA", "ININJA")
+        + presses("_10 S"),
+        "record": 2400, "until": SETUP_STOP, "pictures": [890, 1150],
+        "about": "пароль: AAAAAA — неверный, снова главное меню; ININJA — звук $31, 60 кадров, уровень 3",
+    },
+    "boot_debug": {
+        "input": BOOT_TO_MENU + presses("U S _10") + password_keys("AAAAAA", "IMCARY") + presses("_10 S _10 U S _10")
+        + password_keys("IMCARY", "MAUIMM") + presses(
+            # $33, главное меню с DEBUG; DEBUG: ENEMY COLL R -> OFF; GAME FLOW B (C меню — мимо списка), C -> OFF,
+            # A -> ON; MAP MODE R -> ON; LEVEL L (0 -> 22), R (0), R x5; EXIT, START — уровень 5
+            "_10 S _30 D D S _10 R D B C A D R D L R R R R R R _20 D S _20 S"),
+        "record": 3000, "until": SETUP_STOP, "pictures": [1580, 1700],
+        "about": "IMCARY, затем MAUIMM: DEBUG открыт, звук $33; меню DEBUG: ENEMY COLL OFF, MAP MODE ON, LEVEL 5; "
+                 "START — уровень 5",
+    },
+    "boot_cheat_broken": {
+        "input": BOOT_TO_MENU + presses("U S _10") + password_keys("AAAAAA", "IMCARY")
+        + presses("_10 S _10 U S S _10 U S _10") + password_keys("IMCARY", "MAUIMM")
+        + presses("_10 S _20 D U D L R A C B _100 U D"),
+        "record": 3600, "until": SETUP_STOP, "pictures": [1770],
+        "about": "IMCARY, неверный пароль (IMCARY ещё раз: $FF0010 гасится), MAUIMM — DEBUG не открыт; нажатия в "
+                 "главном меню срока не продлевают: демо 0",
+    },
+})
 for _name, _sc in BOOT_SCENARIOS.items():
     SCENARIOS[_name] = dict(_sc, boot=True)
 
