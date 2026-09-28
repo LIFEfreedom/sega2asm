@@ -10,10 +10,11 @@
 * `programs/programs.bin` — окно данных от первой программы до конца последней таблицы
   состояний: программы и таблицы лежат в нём по своим адресам, так что номер состояния за
   концом среза читает, как и ROM, соседний срез;
-* `programs/programs.json` — где окно лежит, все найденные входы программ (адрес и
+* `programs/code.bin` — второе окно: таблицы и цепочки, что лежат в банке кода (таблица
+  `$2AB140` и цепочка `$2AB150` мертвецов уровня 16), тоже по своим адресам;
+* `programs/programs.json` — где лежат оба окна, все найденные входы программ (адрес и
   откуда взят), таблицы состояний (адрес, откуда, поле-номер, обработчики) и цепочки
-  (адрес, откуда, пары «условие, действие» — цепочка `$2AB150` лежит в банке кода, вне
-  окна, поэтому ремейк берёт пары отсюда), итог проверки;
+  (адрес, откуда, пары «условие, действие»), итог проверки;
 * `programs/programs.txt` — разбор всех программ для чтения.
 
 Толкователь (`engine.md`, «Программы поведения `+$48`»): байт `$80`-`$8D` — команда из
@@ -185,7 +186,7 @@ def scan():
                 # movea.l (0,An,Dn.w),Am: 0x2070 | Am << 9 | An, расширение Dn.w без сдвига
                 if w & 0xF1FF == 0x2070 | reg and U16(b + 2) & 0x8FFF == 0x0000:
                     to = (w >> 9) & 7
-                    if U16(b + 4) == 0x4E90 | to and in_data(target) and field is not None:
+                    if U16(b + 4) == 0x4E90 | to and (in_data(target) or code_pointer(target)) and field is not None:
                         tables.setdefault(target, ("lea at $%06X" % a, field))
                     break
                 if calls_walker(b):
@@ -265,11 +266,19 @@ def main():
             errors.append(str(e))
 
     ends = [a + step(a)[0] for a in seen]
-    ends += [at + 4 * len(h) for at, h in table_rows]
-    starts = sorted(seen) + [at for at, _ in table_rows]
+    ends += [at + 4 * len(h) for at, h in table_rows if in_data(at)]
+    starts = sorted(seen) + [at for at, _ in table_rows if in_data(at)]
     base, end = min(starts), max(ends)
-    print(u"программ: %d, шагов: %d, таблиц: %d, цепочек: %d, окно $%06X-$%06X (%d байт), ошибок: %d"
-          % (len(programs), len(seen), len(table_rows), len(chain_rows), base, end, end - base, len(errors)))
+    # Таблицы и цепочки в банке кода (у мертвецов уровня 16 — таблица $2AB140 и цепочка $2AB150 сразу за ней):
+    # второе окно, code.bin, от первой такой до конца последней.
+    code = [(at, at + 4 * len(h)) for at, h in table_rows if not in_data(at)]
+    code += [(at, at + 2 + 8 * len(r)) for at, r in chain_rows if not in_data(at)]
+    code_base = min(a for a, _ in code) if code else None
+    code_end = max(e for _, e in code) if code else None
+    print(u"программ: %d, шагов: %d, таблиц: %d, цепочек: %d, окно $%06X-$%06X (%d байт), окно в банке кода %s, "
+          u"ошибок: %d"
+          % (len(programs), len(seen), len(table_rows), len(chain_rows), base, end, end - base,
+             "$%06X-$%06X" % (code_base, code_end) if code else "нет", len(errors)))
     for e in errors:
         print(u"ошибка: %s" % e)
     if errors:
@@ -282,6 +291,9 @@ def main():
         os.makedirs(out)
     with open(os.path.join(out, "programs.bin"), "wb") as f:
         f.write(ROM[base:end])
+    if code:
+        with open(os.path.join(out, "code.bin"), "wb") as f:
+            f.write(ROM[code_base:code_end])
     doc = {
         "meta": {
             "game": "Maui Mallard in Cold Shadow (Mega Drive)",
@@ -291,6 +303,7 @@ def main():
                            "chains $2AB380 (word count, then pairs of condition and action)",
         },
         "image": {"file": "programs.bin", "base": "$%06X" % base, "length": end - base},
+        "code": {"file": "code.bin", "base": "$%06X" % code_base, "length": code_end - code_base} if code else None,
         "checked": {"programs": len(programs), "steps": len(seen), "tables": len(table_rows),
                     "chains": len(chain_rows)},
         "programs": [{"at": "$%06X" % a, "from": programs[a]} for a in sorted(programs)],
