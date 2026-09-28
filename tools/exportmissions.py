@@ -132,6 +132,11 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 карты. Что сценарии делают, по миссиям, и что из них отложено — в
 `report.md`.
 
+`map.start_tick_mask` — вход на карту этапа 255 (Extra 5 и 9) ставит
+`GameTick` в `Random & 7` (dyna #208): тики миссии идут со случайного
+0…7. Ремейк бросает при постройке мира. Пишется, только если вход так
+делает.
+
 ## ИИ противника (dyna #208)
 
 `map.ai` — `{"stage": N}`, байт `+$3` описания: по нему `AiLoop` берёт
@@ -193,6 +198,8 @@ ROSTER_SPECIES = 6                 # слоты ростера видов 1…6;
 START_TABLE = 0x02CE90             # table_stagestart: вход на карту
 FRAME_TABLE = 0x02D0B8             # table_stageframe: каждый тик
 ENABLE_WIPEOUT, DISABLE_WIPEOUT = 0x01673C, 0x016754
+RANDOM = 0x016570
+GAME_TICK = 0xFFE05C
 LOAD_PLACEMENT = 0x01EA12
 GOAL_BODIES = {0x02EAF6: "herbivores",       # WinIfHerbivoresReach
                0x02EB50: "allow_if_gone",    # AllowWinIfNeutralTypeGone
@@ -311,15 +318,17 @@ def s16(a):
 
 
 def start_hook(st):
-    u"""(победа по переписи разрешена, адреса расстановок) — обработчик
-    входа на карту этапа st.
+    u"""(победа по переписи разрешена, адреса расстановок, маска
+    стартового тика или None) — обработчик входа на карту этапа st.
 
     Тела короткие и прямые (game-events.md, «Что делается при входе на
     карту»), так что хватает разобрать их коды подряд до `rts`. Незнакомый
     код — остановка: значит, тело устроено иначе, чем разобрано. В `bsr.w`
-    не заходим, это местность и ﾒｶﾞｻﾞｳﾙｽ."""
+    не заходим, это местность и ﾒｶﾞｻﾞｳﾙｽ. Маска — из `jsr Random`,
+    `andi.l #маска,d0`, `move.l d0,GameTick` (этап 255)."""
     a = START_TABLE + u16(ROM, START_TABLE + 2 * st)
     allowed, placements, a6 = None, [], None
+    rolled, mask, tick_mask = False, None, None
     while u16(ROM, a) != 0x4E75:                     # rts
         op = u16(ROM, a)
         if op == 0x4EB9:                             # jsr (xxx).l
@@ -328,18 +337,26 @@ def start_hook(st):
                 allowed = t == ENABLE_WIPEOUT
             elif t == LOAD_PLACEMENT:
                 placements.append(a6)
+            elif t == RANDOM:
+                rolled = True
             a += 6
         elif op == 0x4DFA:                           # lea (d16,pc),a6
             a6 = a + 2 + s16(a + 2)
             a += 4
         elif op == 0x6100:                           # bsr.w
             a += 4
-        elif op in (0x0280, 0x23C0):                 # andi.l #,d0 / move.l d0,(xxx).l
+        elif op == 0x0280:                           # andi.l #маска,d0
+            assert rolled, (st, hex(a))
+            mask = mt.U32(a + 2)
+            a += 6
+        elif op == 0x23C0:                           # move.l d0,(xxx).l
+            assert mt.U32(a + 2) == GAME_TICK and mask is not None, (st, hex(a))
+            tick_mask = mask
             a += 6
         else:
             raise AssertionError(u"этап %d: код $%04X по $%06X" % (st, op, a))
     assert allowed is not None, st
-    return allowed, placements
+    return allowed, placements, tick_mask
 
 
 def frame_goals(st):
@@ -384,7 +401,7 @@ def goals(st):
     навязанный исход, перепись игрока 1 пуста — поражение, перепись
     игрока 2 пуста — победа, если её не запретил вход на карту.
     У игрока 2 списки те же, только наоборот."""
-    allowed, _ = start_hook(st)
+    allowed, _, _ = start_hook(st)
     frame = frame_goals(st)
     win, lose, later = [], [cond(DESTROY_PLAYER, 1)], []
     for body, d7 in frame:
@@ -503,7 +520,7 @@ def export_mission(c, m, r, recs, skipped):
 
     # Сначала расстановка карты, затем то, что грузит вход на карту: так
     # идёт и сам StartMatch — LoadPlacement, потом RunStageStartHook.
-    _allowed, extra = start_hook(st)
+    _allowed, extra, tick_mask = start_hook(st)
     records = mt.placement(pl)
     for a in extra:
         records += mt.placement(a, lo=0)
@@ -565,6 +582,8 @@ def export_mission(c, m, r, recs, skipped):
         ("vegetation", veg),
         ("units", units),
     ])
+    if tick_mask is not None:
+        doc["map"]["start_tick_mask"] = tick_mask
     if events:
         doc["map"]["events"] = events
     if not ai.silent(st):
@@ -638,6 +657,9 @@ def main():
     # таблица входа скажет иное, разбор устарел.
     closed = [st for st in range(256) if not start_hook(st)[0]]
     assert closed == [20, 51, 222], closed
+    # Тик со случайного начала ставит один вход, этапа 255 (dyna #208).
+    ticked = [st for st in range(256) if start_hook(st)[2] is not None]
+    assert ticked == [255], ticked
     recs = mt.gfx_records()
     skipped = collections.Counter()
     by_chapter = collections.defaultdict(list)
