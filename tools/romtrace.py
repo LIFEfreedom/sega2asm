@@ -133,7 +133,7 @@ except Exception:
 
 try:
     from unicorn import (Uc, UcError, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN, UC_PROT_ALL,
-                         UC_PROT_READ, UC_PROT_EXEC, UC_HOOK_INTR, UC_HOOK_CODE,
+                         UC_PROT_READ, UC_PROT_EXEC, UC_HOOK_INTR, UC_HOOK_CODE, UC_HOOK_MEM_WRITE_PROT,
                          UC_HOOK_MEM_UNMAPPED, __version__ as UC_VERSION)
     import unicorn.m68k_const as M
 except ImportError:
@@ -735,6 +735,29 @@ _ENEMIES += [
     ("enemies_ember_limit_10", 10, (2700, 100), [], [180, 200], [("", 700)],
      "генератор 180 рядом с двумя огненными духами: бойцов двое — только капли"),
 ]
+# M5d часть 4 (mauimallard #28; behavior.md 3.1, objects.md «Уровень 17 целиком»): идол (120) всплывает, выше нижнего
+# предела камеры без $B0 — дрожь ($2995D0), гул $9B и поджим дна ($2A5BA6); зелёные духи (160) каждые 8 кадров целятся
+# в гнездо у идола ($2A7C4E), хватают ($83) и уносят; за экраном — проигрыш ($FF1A6C = -1). Победа — с подставленной
+# высотой идола (запись $E4BE при подбираемом и кодах сценария): до верха ему ~10 000 кадров.
+_IDOL = 0xFFE4BE
+_ENEMIES += [
+    ("enemies_idol_carry_17", 17, None, [], [120, 160], [("", 366)],
+     "уровень 17: духи целятся в идола, один хватает ($83), уносит его; переключатель (гул, дрожь, поджим дна), "
+     "дух с идолом за экраном — проигрыш"),
+    ("enemies_idol_shot_17", 17, None, _GUN, [120, 160], [("", 170), ("UB", 120), ("", 330)],
+     "уровень 17: утка сбивает духа с идолом ($78) и ещё двоих; идол, отпущенный до переключателя, всплывает дальше, "
+     "после него идёт домой (состояние 2) и снова свободен; второй дух хватает его"),
+    ("enemies_idol_win_17", 17, None, [], [120], [("", 140)], "уровень 17: идол на высоте 144 (подставлено): "
+     "переключатель сразу, наверху и дома — победа ($10, дрожь и гул сняты), через 91 кадр $FF1A6C = 1"),
+    ("enemies_idol_home_17", 17, None, [], [120], [("", 100)], "уровень 17: идол на высоте 132, на 5 правее дома, "
+     "в состоянии 2 (подставлено): идёт домой и побеждает на ходу — a0 испорчен адресом $2995D0, шаг домой пишет в "
+     "ROM (шина пропускает), идол остаётся в состоянии 2 на 2 правее дома"),
+]
+_IDOL_POKES = {
+    "enemies_idol_win_17": [(_IDOL + 0x14, bytes([0x00, 0x90]))],
+    "enemies_idol_home_17": [(_IDOL + 0x04, bytes([0x02])), (_IDOL + 0x12, bytes([0x01, 0x2D])),
+                             (_IDOL + 0x14, bytes([0x00, 0x84]))],
+}
 _ENEMY_PICTURES = {"enemies_beetle_0": [150, 246], "enemies_token_0": [40], "enemies_critter_2": [185],
                    "enemies_wedge_0": [100], "enemies_mask_0": [96], "enemies_butler_2": [190, 260],
                    "enemies_homing_0": [110, 200], "enemies_lay_0": [62, 160, 165],
@@ -748,7 +771,8 @@ _ENEMY_PICTURES = {"enemies_beetle_0": [150, 246], "enemies_token_0": [40], "ene
                    "enemies_native_14": [65, 190], "enemies_native_16": [100, 185], "enemies_dead_16": [60, 150],
                    "enemies_dead_walk_16": [200], "enemies_dead_token_16": [140],
                    "enemies_spirit_10": [150, 560], "enemies_spirit_pair_10": [350], "enemies_spirit_hit_11": [60, 520],
-                   "enemies_ember_10": [430, 600]}
+                   "enemies_ember_10": [430, 600],
+                   "enemies_idol_carry_17": [170, 320], "enemies_idol_shot_17": [230], "enemies_idol_win_17": [50]}
 for _name, _level, _at, _poke, _codes, _input, _what in _ENEMIES:
     SCENARIOS[_name] = {
         "level": _level, "objects": PICKUP_CODES + _codes,
@@ -764,6 +788,12 @@ for _name, _level, _at, _poke, _codes, _input, _what in _ENEMIES:
         SCENARIOS[_name]["at"] = _at
     if _poke:
         SCENARIOS[_name]["poke"] = _poke
+    if _name in _IDOL_POKES:
+        SCENARIOS[_name]["poke"] = SCENARIOS[_name].get("poke", []) + _IDOL_POKES[_name]
+    if _name.startswith("enemies_idol_"):
+        # Нижний предел и дрожь двигает объект (идол, $2A5BA6, $2995D0), не задача игрока: проверка camera ведёт камеру
+        # одну по утке трассы, проверка player — во всей симуляции.
+        SCENARIOS[_name]["checks"].remove("camera")
 
 # Ниндзя (M6a, mauimallard #23; behavior.md 1.7): топливо $FF133E подменено (999 BCD, если не сказано иное),
 # превращение настоящее — A 50 кадров стоя или сидя. B в раскладке 0 — удар, C — прыжок. _FUEL — выше, у M5b.
@@ -1098,6 +1128,10 @@ class MegaDrive:
         self.vdp = Vdp(self._bus_word, list(self.rom[VDP_INIT:VDP_INIT + 24]))
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._unmapped)
         uc.hook_add(UC_HOOK_INTR, self._intr)
+        # Запись в картридж шина пропускает: ROM её не видит, команда выполняется дальше (уровень 17: победа идола
+        # портит a0 адресом $2995D0, и шаг домой пишет в ROM, $2A2DFE).
+        self.rom_writes = 0
+        uc.hook_add(UC_HOOK_MEM_WRITE_PROT, self._rom_write, None, 0, 0x3FFFFF)
 
         # Заглушки: прочитать SR процессором; войти в прерывание кадра.
         vint = struct.unpack_from(">I", self.rom, VINT_VECTOR)[0]
@@ -1195,6 +1229,10 @@ class MegaDrive:
             return struct.unpack_from(">H", self.ram.raw, a & 0xFFFF)[0]
         return 0
 
+    def _rom_write(self, uc, access, address, size, value, user):
+        self.rom_writes += 1
+        return True
+
     def _unmapped(self, uc, access, address, size, value, user):
         self.fault = "обращение к $%08X (вид %d) из $%08X" % (address, access, uc.reg_read(M.UC_M68K_REG_PC))
         return False
@@ -1250,6 +1288,9 @@ OBJECT_LAYOUT = [
     (0xFFFFFD8A, 2, "номер последней точки возврата"),
     (0xFF1164, 6, "$FF1104 кодов 48-50: точка возврата отмечена"),
 ]
+
+# Вызов строителя фона уровня ($FF1A7A) в задаче объектов: нижний предел на этот миг — в снимок кадра (bottom).
+BUILDER_CALL = 0x298E34
 
 # Проверка sounds: звуки, которые кадр начал и остановил (SoundStart, SoundStop; номер — длинное слово на стеке).
 SOUND_START = 0x2F8DCC
@@ -1331,7 +1372,7 @@ def run(name, sc, rom):
     pads = []
     for buttons, n in sc["input"]:
         pads += [pad_byte(buttons)] * n
-    state = {"setup": False, "entry": None, "frame": 0, "done": 0}
+    state = {"setup": False, "entry": None, "frame": 0, "done": 0, "builder_bottom": None, "entry_bottom": None}
     layout = layout_of(sc)
     frames = []
     pictures = {}
@@ -1356,6 +1397,7 @@ def run(name, sc, rom):
             if sc.get("fly"):
                 md.write(DEBUG_FLIGHT, b"\x01")
             state["entry"] = snapshot(md, layout, with_pool)
+            state["entry_bottom"] = md.word(0xFF1A92)
             sounds["start"].clear()
             sounds["stop"].clear()
             turns.clear()
@@ -1374,6 +1416,9 @@ def run(name, sc, rom):
                 "cram": "".join("%04X" % c for c in md.vdp.cram),
                 "vsram": "".join("%04X" % c for c in md.vdp.vsram[:2]),
             }
+            if state["builder_bottom"] not in (None, state["entry_bottom"]):
+                # Нижний предел, который видел строитель фона кадра k (уровень 17 его поджимает, $2A5BA6).
+                pictures[k]["bottom"] = state["builder_bottom"]
             why = md.vdp.check()
             if why:
                 pictures[k]["skipped"] = why
@@ -1381,7 +1426,11 @@ def run(name, sc, rom):
                 pictures[k]["full"] = md.vdp.picture(skip_tiles=state["skip"])
                 pictures[k]["planes"] = md.vdp.picture(sprites=False)
 
+    def on_builder(uc, address, size, user):
+        state["builder_bottom"] = md.word(0xFF1A92)
+
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
+    md.uc.hook_add(UC_HOOK_CODE, on_builder, None, BUILDER_CALL, BUILDER_CALL)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
     md.uc.hook_add(UC_HOOK_CODE, on_position, None, PLAYER_POSITION, PLAYER_POSITION)
     with_sounds = "sounds" in sc["checks"]
@@ -1519,6 +1568,8 @@ def write_pictures(name, level, pictures):
     for k, pic in sorted(pictures.items()):
         entry = {"scenario": name, "level": level, "frame": k, "camera": pic["camera"], "t": pic["t"],
                  "cram": pic["cram"], "vsram": pic["vsram"]}
+        if "bottom" in pic:
+            entry["bottom"] = pic["bottom"]
         if "skipped" in pic:
             entry["skipped"] = pic["skipped"]
         else:
