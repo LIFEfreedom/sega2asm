@@ -11,7 +11,12 @@
 по кадру уровня — запись игрока `$FFFFE1CA` (`$54` байта) и участки ОЗУ из
 `LAYOUT` (переменные шага игрока, пульт, камера, счётчик кадров, ГСЧ, пауза и
 состояние HUD) и контрольная сумма CRC-32 пяти кадров HUD в ОЗУ `$FF1496`-`$FF19EF`
-(поле `hud`; на входе — сами байты, `hud_ram`).
+(поле `hud`; на входе — сами байты, `hud_ram`), а во всех сценариях — проверка
+`ring`: байты, которые кадр положил в кольцо команд драйвера `$A01B40`, по
+порядку (поле `ring`; индекс записи `$A00036` после кадра — индекс до него плюс
+их число по модулю 64); на входе — индекс в `LevelSetup` (`ring_from`), всё
+положенное до задачи игрока (`ring`: «остановить всё» и музыка уровня по
+заявке `$FF1394`) и индекс (`ring_index`).
 Ремейк проигрывает ту же запись пульта и сверяет каждый кадр.
 
 Машина. Картинки, звука и тактов нет, только то, от чего зависит логика:
@@ -1160,6 +1165,8 @@ class MegaDrive:
         uc.mem_map_ptr(0x00FF0000, 0x10000, UC_PROT_ALL, self.ram)
         uc.mem_map_ptr(0xFFFF0000, 0x10000, UC_PROT_ALL, self.ram)
         self.z80 = bytearray(0x2000)
+        # Проверка ring: байты, которые 68000 кладёт в кольцо команд драйвера $A01B40, по порядку (None — не пишем).
+        self.ring = None
         self.th = 1
         self.pad = 0
         self.status = 0
@@ -1238,12 +1245,18 @@ class MegaDrive:
         a = 0xA00000 + offset
         if a < 0xA04000:
             if size == 2:
-                self.z80[offset & 0x1FFF] = (value >> 8) & 0xFF
-                self.z80[(offset + 1) & 0x1FFF] = value & 0xFF
+                self._z80_write(offset, (value >> 8) & 0xFF)
+                self._z80_write(offset + 1, value & 0xFF)
             else:
-                self.z80[offset & 0x1FFF] = value & 0xFF
+                self._z80_write(offset, value & 0xFF)
         elif a in (0xA10002, 0xA10003):
             self.th = (value >> 6) & 1
+
+    def _z80_write(self, offset, value):
+        a = offset & 0x1FFF
+        self.z80[a] = value
+        if self.ring is not None and RING <= a < RING + RING_LENGTH:
+            self.ring.append(value)
 
     def _vdp_read(self, uc, offset, size, user):
         if 4 <= offset < 8:
@@ -1340,6 +1353,12 @@ BUILDER_CALL = 0x298E34
 SOUND_START = 0x2F8DCC
 SOUND_STOP = 0x2F8DEA
 
+# Проверка ring (во всех сценариях): кольцо команд драйвера в ОЗУ Z80 ($A01B40, 64 байта) и индекс записи $A00036,
+# который ведёт 68000 ($2F8CDE-$2F8D3E; sound.md). Z80 здесь не исполняется, так что кольцо никто не читает.
+RING = 0x1B40
+RING_LENGTH = 0x40
+RING_INDEX = 0x0036
+
 
 # Проверка throw: счётчики машинки броска $291C5A и чётность снарядов набора 1 ($294ED4).
 THROW_LAYOUT = [
@@ -1428,6 +1447,10 @@ def run(name, sc, rom):
             state["setup"] = True
             state["setup_frame"] = boot_frame[0]
             md.write(LEVEL_NUMBER, struct.pack(">H", sc["level"]))
+            # Всё, что главный цикл положит в кольцо от LevelSetup до задачи игрока (остановить всё и музыка
+            # уровня по заявке $FF1394, заставка мира), уходит во вход.
+            state["ring_from"] = md.z80[RING_INDEX]
+            md.ring = []
 
     def on_position(uc, address, size, user):
         if "at" in sc:
@@ -1444,6 +1467,10 @@ def run(name, sc, rom):
             state["entry"] = snapshot(md, layout, with_pool)
             state["entry"]["hud_ram"] = md.read(HUD_RAM, HUD_RAM_LENGTH).hex().upper()
             state["entry_bottom"] = md.word(0xFF1A92)
+            state["entry"]["ring_from"] = state["ring_from"]
+            state["entry"]["ring"] = bytes(md.ring).hex().upper()
+            state["entry"]["ring_index"] = md.z80[RING_INDEX]
+            md.ring.clear()
             sounds["start"].clear()
             sounds["stop"].clear()
             turns.clear()
@@ -1495,6 +1522,8 @@ def run(name, sc, rom):
         out = {"sounds": sounds["start"][:], "stopped": sounds["stop"][:]} if with_sounds else {}
         sounds["start"].clear()
         sounds["stop"].clear()
+        out["ring"] = bytes(md.ring).hex().upper()
+        md.ring.clear()
         if with_d7:
             out["d7"] = "".join(turns)
         turns.clear()
@@ -1562,7 +1591,7 @@ def run(name, sc, rom):
             "about": sc["about"],
             "level": sc["level"],
             "objects": sc["objects"],
-            "checks": sc["checks"],
+            "checks": sc["checks"] + ["ring"],
             "at": list(sc["at"]) if "at" in sc else None,
             "fly": bool(sc.get("fly")),
             "set": ["+$%02X = $%04X" % (o, v & 0xFFFF) for o, v in sc.get("set", ())],

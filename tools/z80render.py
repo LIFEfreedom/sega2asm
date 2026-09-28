@@ -6,6 +6,7 @@
     make z80render RENDERARGS="12 34"    только эти номера
     make z80render RENDERARGS="--seconds 90 --all"
     make z80render RENDERARGS="--seconds 120 --gain 5900 7 9 22"
+    make z80render RENDERARGS=--reference   эталон для ремейка (export/sound)
 
 Разбор данных сказал, ЧТО драйвер сыграет ([z80.md]). Здесь он играет:
 код Z80 исполняется как есть, звук берётся из того, что этот код пишет в
@@ -20,7 +21,17 @@ YM2612 и PSG, а сэмплы драйвер сам достаёт из кар�
 Уровень выставляется в два прохода: сперва всё считается с единичным
 усилением, потом берётся ОДИН общий множитель на всю выгрузку, чтобы
 самая громкая мелодия не доходила до предела, а тихие не стали громкими.
+
+`--reference` пишет эталон, по которому ремейк (mauimallard #33) сверяет
+свою эмуляцию: все 169 номеров в двух режимах — `$FF $10 n`, как здесь, и
+«остановить всё» `$296D16` (десять `$FF $1B i 0` и `$FF $16`) перед ним; на
+каждый кадр от включения два CRC-32 из `render.c --log` (записи драйвера в
+YM2612, PSG и банк; смесь до фильтра). Длина — как у выгрузки: однодорожечные
+до тишины, остальные `--seconds`. Файлы — `export/sound/reference.bin` и
+`reference.json` (где чей кусок и как он снят).
 """
+import io
+import json
 import os
 import re
 import struct
@@ -102,19 +113,101 @@ def init_hex(tables):
     return b.hex().upper()
 
 
-def render(exe, img, out_wav, sound, frames, gain, init, stop):
+# «Остановить всё» $296D16: $296CFA кладёт `$FF $1B i 0` для i = 0-9, потом
+# $2F8E30 — `$FF $16` (sound.md; числа — sounds.json driver.stop_all).
+STOP_ALL = "".join("FF1B%02X00" % i for i in range(10)) + "FF16"
+
+
+def render(exe, img, out_wav, sound, frames, gain, init, stop, play=None,
+           log=None):
     args = [exe, rom_path(), img, out_wav, "0", str(frames), "-1", "-1",
             "1" if stop else "0", str(gain),
             "--ring", "%X,%X" % (RING, RING_IX),
             "--init", init,
-            "--play", "FF10%02X" % sound,
+            "--play", play or "FF10%02X" % sound,
             "--busy", "%X,%X,%X,%X,%X" % SLOTS]
+    if log:
+        args += ["--log", log]
     r = subprocess.run(args, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode:
         raise SystemExit("render.exe: %s" % (r.stderr or r.stdout).strip())
     m = re.search(r"пик (\d+)", r.stdout)
     return int(m.group(1)) if m else 0
+
+
+def _commit(path):
+    r = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def reference(exe, img, lo, hi, tables, init, seconds):
+    """Эталон для ремейка: 169 номеров x 2 режима, CRC по кадрам."""
+    frames = int(seconds * FPS)
+    out = out_path("export", "sound")
+    os.makedirs(out, exist_ok=True)
+    tmp_wav = os.path.join(build_dir(), "_reference.wav")
+    tmp_log = os.path.join(build_dir(), "_reference.log")
+    blob = bytearray()
+    runs = []
+    for n in range(z80seq.sound_count()):
+        cnt = z80seq.tracks(n)[1]
+        for mode, play in (("start", "FF10%02X" % n),
+                           ("stop_all", STOP_ALL + "FF10%02X" % n)):
+            render(exe, img, tmp_wav, n, frames, 256, init, cnt == 1,
+                   play=play, log=tmp_log)
+            with open(tmp_log, "rb") as f:
+                data = f.read()
+            runs.append({"sound": n, "mode": mode, "tracks": cnt,
+                         "play": play, "offset": len(blob),
+                         "frames": len(data) // 8})
+            blob += data
+        print("  %3d: дорожек %2d, кадров %d" % (n, cnt, runs[-1]["frames"]))
+    for p in (tmp_wav, tmp_log):
+        if os.path.exists(p):
+            os.remove(p)
+    with open(os.path.join(out, "reference.bin"), "wb") as f:
+        f.write(blob)
+    doc = {
+        "meta": {
+            "generator": "tools/z80render.py --reference "
+                         "(tools/render/render.c --log)",
+            "spec": "docs/mauimallard/z80.md",
+            "cores": {
+                "clownz80": _commit(os.path.join(HERE, "third_party",
+                                                 "clownz80")),
+                "nuked_opn2": _commit(os.path.join(HERE, "third_party",
+                                                   "Nuked-OPN2")),
+                "nuked_mode": "ym3438_mode_ym2612",
+            },
+            "clock": {"master": 53693175, "z80": 15, "opn2_step": 42,
+                      "psg_tick": 240, "sample": 1008,
+                      "frame_z80_cycles": 3420 * 262 // 15},
+            "image": {"base": "$%06X" % lo, "end": "$%06X" % hi,
+                      "ram": 0x2000},
+            "tables": ["$%06X" % t for t in tables],
+            "ring": {"base": RING, "index": RING_IX, "mask": 0x3F},
+            "run": u"ОЗУ Z80: образ, остальное нули; сброс; кадр: команды "
+                   u"ящика в кольцо (init на кадре 2, play на кадре 4), "
+                   u"прерывание (защёлка, снимается приёмом), команды Z80 "
+                   u"до frame_z80_cycles тактов (перебор не переносится), "
+                   u"после каждой — её такты в YM и PSG; однодорожечные — "
+                   u"до тишины, остальные — %d с" % seconds,
+            "frame": u"reference.bin: на кадр 8 байт — CRC-32 записей "
+                     u"(вид 0-3 порт YM a&3, 4 PSG $7F11, 5 банк $6000; "
+                     u"значение; такт Z80 команды от начала кадра, 16 бит "
+                     u"LE) и CRC-32 смеси (отсчёт: левый, правый int32 LE, "
+                     u"FM за 24 шага + средний PSG, до фильтра), оба LE",
+        },
+        "init": init,
+        "runs": runs,
+    }
+    with io.open(os.path.join(out, "reference.json"), "w", encoding="utf-8",
+                 newline="\n") as f:
+        f.write(json.dumps(doc, ensure_ascii=False, indent=1))
+        f.write(u"\n")
+    print("эталон: %d прогонов, %d байт" % (len(runs), len(blob)))
 
 
 def main():
@@ -130,6 +223,7 @@ def main():
         fixed_gain = int(args[i + 1])
         del args[i:i + 2]
     every = "--all" in args
+    ref = "--reference" in args
     args = [a for a in args if not a.startswith("--")]
 
     if args:
@@ -147,6 +241,9 @@ def main():
     init = init_hex(tables)
     print("драйвер $%06X-$%06X, таблицы %s"
           % (lo, hi, " ".join("$%06X" % t for t in tables)))
+    if ref:
+        reference(exe, img, lo, hi, tables, init, seconds)
+        return 0
 
     frames = int(seconds * FPS)
     groups = {"music": [n for n in want if z80seq.tracks(n)[1] > 1],

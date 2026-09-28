@@ -12,6 +12,12 @@
  *   --play БАЙТЫ           что положить на пятом кадре (hex)
  *   --busy АДР,N,ШАГ,СМЕЩ,МАСКА   как понять, что звук ещё играет
  *   --dump АДР,ДЛИНА       вывалить кусок ОЗУ Z80 в конце (для разбора)
+ *   --log ФАЙЛ             эталон для ремейка: на каждый кадр два CRC-32
+ *                          (записи драйвера в YM2612, PSG и банк; смесь до
+ *                          фильтра), см. log_frame
+ *   --trace ФАЙЛ,КАДРЫ     разбор расхождений: после каждого шага clownz80
+ *                          первых КАДРОВ кадров — адрес шага, такты и
+ *                          регистры (см. trace_step)
  *
  * Здесь нет ни одной догадки о том, что играет: код Z80 исполняется как
  * есть, а звук берётся из того, что он сам пишет в YM2612 и PSG. Из
@@ -140,6 +146,68 @@ static int psg_out(const Psg *p)
 	return s;
 }
 
+/* ─── эталон по кадрам (--log) ─────────────────────────────────────────
+ * Ремейк (mauimallard #33) исполняет тот же образ на своей эмуляции и
+ * сверяется с этим файлом кадр за кадром. На кадр — два CRC-32 (как у
+ * zlib), младшим байтом вперёд:
+ *
+ *   1) записи драйвера в порядке исполнения, по четыре байта: вид (0-3 —
+ *      порт YM2612 a&3, 4 — PSG, 5 — регистр банка), значение, такт Z80
+ *      от начала кадра до команды, которая писала (16 бит, младшим вперёд);
+ *   2) смесь до фильтра: на каждый отсчёт левый и правый как int32 —
+ *      сумма FM за 24 шага Nuked плюс усреднённый PSG.
+ *
+ * Фильтр 10 Гц и усиление считаются в double и в эталон не входят.
+ */
+static unsigned long crc_table[256];
+
+static void crc_init(void)
+{
+	unsigned long c;
+	int n, k;
+	for (n = 0; n < 256; n++) {
+		c = (unsigned long)n;
+		for (k = 0; k < 8; k++)
+			c = (c & 1) ? 0xEDB88320UL ^ (c >> 1) : c >> 1;
+		crc_table[n] = c;
+	}
+}
+
+static unsigned long crc_add(unsigned long crc, const unsigned char *b, int n)
+{
+	int i;
+	crc ^= 0xFFFFFFFFUL;
+	for (i = 0; i < n; i++)
+		crc = crc_table[(crc ^ b[i]) & 0xFF] ^ (crc >> 8);
+	return (crc ^ 0xFFFFFFFFUL) & 0xFFFFFFFFUL;
+}
+
+/* Шаг интерпретатора для --trace, 20 байт младшим вперёд: pc до шага,
+ * такты шага (с приёмом прерывания), pc, sp, af, bc, de, hl, ix, iy после.
+ * Префикс DD/FD у clownz80 — отдельный шаг. */
+static void trace_step(FILE *f, unsigned pc, unsigned cycles,
+                       const ClownZ80_State *c)
+{
+	unsigned w[10];
+	unsigned char e[20];
+	int k;
+	w[0] = pc;
+	w[1] = cycles;
+	w[2] = c->program_counter;
+	w[3] = c->stack_pointer;
+	w[4] = (unsigned)c->a << 8 | c->f;
+	w[5] = (unsigned)c->b << 8 | c->c;
+	w[6] = (unsigned)c->d << 8 | c->e;
+	w[7] = (unsigned)c->h << 8 | c->l;
+	w[8] = (unsigned)c->ixh << 8 | c->ixl;
+	w[9] = (unsigned)c->iyh << 8 | c->iyl;
+	for (k = 0; k < 10; k++) {
+		e[2 * k] = (unsigned char)(w[k] & 0xFF);
+		e[2 * k + 1] = (unsigned char)((w[k] >> 8) & 0xFF);
+	}
+	fwrite(e, 1, 20, f);
+}
+
 /* ─── шина Z80 ─────────────────────────────────────────────────────── */
 typedef struct {
 	unsigned char ram[0x2000];
@@ -153,10 +221,23 @@ typedef struct {
 	 * завышает, потому что кадровое прерывание ворует такты. */
 	unsigned last_addr, last_addr1;   /* у каждого порта YM свой */
 	int solo;    /* -1 всё, 0..5 канал FM, 6 только PSG */
+	/* --log: CRC записей кадра и такт команды, которая сейчас исполняется. */
+	unsigned long crc_writes;
+	unsigned at_cycle;
 	long dac_writes;
 	long dac_first, dac_last;
 	const long *now;
 } Bus;
+
+static void log_write(Bus *b, unsigned kind, unsigned v)
+{
+	unsigned char e[4];
+	e[0] = (unsigned char)kind;
+	e[1] = (unsigned char)v;
+	e[2] = (unsigned char)(b->at_cycle & 0xFF);
+	e[3] = (unsigned char)((b->at_cycle >> 8) & 0xFF);
+	b->crc_writes = crc_add(b->crc_writes, e, 4);
+}
 
 static cc_u16f bus_read(void *ud, cc_u16f a)
 {
@@ -182,6 +263,7 @@ static void bus_write(void *ud, cc_u16f a, cc_u16f v)
 	if (a < 0x4000) {
 		b->ram[a & 0x1FFF] = (unsigned char)v;
 	} else if (a < 0x6000) {
+		log_write(b, a & 3, v);
 		if ((a & 3) == 2)
 			b->last_addr1 = v;
 		if (b->solo >= 0 && (a & 3) & 1) {
@@ -209,10 +291,14 @@ static void bus_write(void *ud, cc_u16f a, cc_u16f v)
 		}
 		OPN2_Write(b->ym, a & 3, (Bit8u)v);
 	} else if (a < 0x6100) {
+		log_write(b, 5, v);
 		b->bank = ((b->bank >> 1) | ((v & 1) << 8)) & 0x1FF;
 	} else if (a >= 0x7F00 && a < 0x8000) {
-		if ((a & 0xFF) == 0x11 && (b->solo < 0 || b->solo == 6))
-			psg_write(b->psg, v);
+		if ((a & 0xFF) == 0x11) {
+			log_write(b, 4, v);
+			if (b->solo < 0 || b->solo == 6)
+				psg_write(b->psg, v);
+		}
 	}
 }
 
@@ -332,6 +418,10 @@ int main(int argc, char **argv)
 	int use_ring = 0, ring_at = 0, ring_ix = 0;
 	unsigned busy_at = 0, busy_n = 0, busy_stride = 0, busy_off = 0, busy_mask = 0;
 	unsigned dump_at = 0, dump_len = 0;
+	FILE *log = NULL;
+	FILE *trace = NULL;
+	int trace_frames = 0;
+	unsigned long crc_mix = 0;
 	unsigned char init_bytes[64], play_bytes[64];
 	int init_len = 0, play_len = 0;
 	double hp_xl = 0.0, hp_yl = 0.0, hp_xr = 0.0, hp_yr = 0.0;
@@ -354,6 +444,19 @@ int main(int argc, char **argv)
 			init_len = unhex(argv[++i], init_bytes, sizeof init_bytes);
 		} else if (!strcmp(argv[i], "--play") && i + 1 < argc) {
 			play_len = unhex(argv[++i], play_bytes, sizeof play_bytes);
+		} else if (!strcmp(argv[i], "--log") && i + 1 < argc) {
+			log = fopen(argv[++i], "wb");
+			if (!log) { fprintf(stderr, "не создать %s\n", argv[i]); return 1; }
+		} else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
+			char name[1024];
+			const char *comma = strrchr(argv[++i], ',');
+			size_t n = comma ? (size_t)(comma - argv[i]) : strlen(argv[i]);
+			if (n >= sizeof name) n = sizeof name - 1;
+			memcpy(name, argv[i], n);
+			name[n] = 0;
+			trace_frames = comma ? atoi(comma + 1) : 1;
+			trace = fopen(name, "wb");
+			if (!trace) { fprintf(stderr, "не создать %s\n", name); return 1; }
 		} else if (!strcmp(argv[i], "--dump") && i + 1 < argc) {
 			sscanf(argv[++i], "%x,%x", &dump_at, &dump_len);
 		} else if (!strcmp(argv[i], "--busy") && i + 1 < argc) {
@@ -393,6 +496,9 @@ int main(int argc, char **argv)
 	bus.now = &samples;
 	bus.last_addr1 = 0;
 	bus.solo = npos > 9 ? atoi(pos[9]) : -1;
+	bus.crc_writes = 0;
+	bus.at_cycle = 0;
+	crc_init();
 
 	OPN2_SetChipType(ym3438_mode_ym2612);
 	OPN2_Reset(&ym);
@@ -403,6 +509,9 @@ int main(int argc, char **argv)
 	cb.log = bus_log;
 	cb.user_data = &bus;
 
+	/* Регистры до первой записи — нули, а не мусор стека: эталон должен
+	 * повторяться (драйвер сам ставит всё, что читает). */
+	memset(&cpu, 0, sizeof cpu);
 	ClownZ80_Constant_Initialise();
 	ClownZ80_State_Initialise(&cpu);
 	ClownZ80_Reset(&cpu);
@@ -432,10 +541,17 @@ int main(int argc, char **argv)
 			recording = 1;
 
 		ClownZ80_Interrupt(&cpu, cc_true);
+		bus.crc_writes = 0;
+		crc_mix = 0;
 
 		while (budget < (long long)FRAME_CYC * PER_Z80) {
-			unsigned cycles = ClownZ80_DoInstruction(&cpu, &cb);
-			long long step = (long long)cycles * PER_Z80;
+			unsigned cycles, pc = cpu.program_counter;
+			long long step;
+			bus.at_cycle = (unsigned)(budget / PER_Z80);
+			cycles = ClownZ80_DoInstruction(&cpu, &cb);
+			if (trace && frame < trace_frames)
+				trace_step(trace, pc, cycles, &cpu);
+			step = (long long)cycles * PER_Z80;
 			budget += step;
 
 			acc_psg += step;
@@ -466,6 +582,15 @@ int main(int argc, char **argv)
 					p = psg_n ? psg_sum / psg_n : 0;
 					l = fm_l + p;
 					r = fm_r + p;
+					if (log) {
+						unsigned char e[8];
+						int k;
+						for (k = 0; k < 4; k++) {
+							e[k] = (unsigned char)(((unsigned long)l >> (8 * k)) & 0xFF);
+							e[4 + k] = (unsigned char)(((unsigned long)r >> (8 * k)) & 0xFF);
+						}
+						crc_mix = crc_add(crc_mix, e, 8);
+					}
 					/* У YM2612 на выходе есть постоянная составляющая;
 					 * на плате её снимает разделительный конденсатор,
 					 * здесь — однополюсный фильтр на 10 Гц, свой на
@@ -496,6 +621,15 @@ int main(int argc, char **argv)
 			}
 		}
 
+		if (log) {
+			unsigned char e[8];
+			int k;
+			for (k = 0; k < 4; k++) {
+				e[k] = (unsigned char)((bus.crc_writes >> (8 * k)) & 0xFF);
+				e[4 + k] = (unsigned char)((crc_mix >> (8 * k)) & 0xFF);
+			}
+			fwrite(e, 1, 8, log);
+		}
 		if (frame_peak > run_peak)
 			run_peak = frame_peak;
 		/* Первые кадры идут до команды: там слышен только собственный
@@ -532,6 +666,10 @@ int main(int argc, char **argv)
 			        bus.ram[(dump_at + k) & 0x1FFF]);
 		fprintf(stderr, "\n");
 	}
+	if (log)
+		fclose(log);
+	if (trace)
+		fclose(trace);
 	fseek(out, 0, SEEK_SET);
 	wav_header(out, MASTER / PER_SAMPLE, (unsigned)samples);
 	fclose(out);

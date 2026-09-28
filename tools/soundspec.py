@@ -930,9 +930,74 @@ def rules():
     ])
 
 
+# Окно ROM, которое уходит ремейку как есть (sound/driver.bin): образ
+# драйвера, четыре таблицы и сэмплы ($2ABADA-$2F8BF2), дополненные до границ
+# банков Z80 по 32 КБ — чтение через окно $8000 не выходит за файл, что бы
+# драйвер ни читал (решение 7b, mauimallard #33).
+DRIVER_WINDOW = (0x2A8000, 0x300000)
+LOADER, INIT, INIT_CALL, RING_OPEN = 0x2F8C6C, 0x2F8D7C, 0x297F62, 0x2F8CDE
+STOP_PARAMS = 0x296CFA
+
+
+def _pea_l(a):
+    """`pea ($xxxxxx).l` по адресу -> V адреса."""
+    m = re.match(r"^pea \(\$([0-9A-F]+)\)\.l$", E.BY.get(a, ""))
+    if not m:
+        return SJ._fail("%s: ждали pea (...).l, лежит %s" % (
+            hexa(a), E.BY.get(a)))
+    return V("$%06X" % int(m.group(1), 16), "%s: %s" % (hexa(a), E.BY[a]))
+
+
+def driver():
+    """Интерфейс 68000 со звуковым драйвером: что грузится и что шлётся.
+
+    Всё из кода `$2F8BF2-$2F8F9E` и мест вызова; спецификация — sound.md и
+    z80.md. Порядок таблиц — порядок аргументов `$2F8D7C` ($8(a6) первым):
+    их кладут `pea` от последнего к первому.
+    """
+    lo, hi = at(LOADER, "lea ($2ABADA).l,a0", addr=True), \
+        at(LOADER, "lea ($2AD33B).l,a1", addr=True)
+    base, end = int(lo.v[1:], 16), int(hi.v[1:], 16)
+    tables = [_pea_l(INIT_CALL + 6 * i) for i in (3, 2, 1, 0)]
+    return OrderedDict([
+        ("window", OrderedDict([("file", "sound/driver.bin"),
+                                ("base", "$%06X" % DRIVER_WINDOW[0]),
+                                ("length", DRIVER_WINDOW[1] -
+                                 DRIVER_WINDOW[0])])),
+        ("image", OrderedDict([
+            ("base", lo), ("end", hi),
+            # d0 = конец - начало, subq #1, dbf: ровно конец - начало байт.
+            ("length", at(LOADER, "subq.w #1,d0", value=end - base)),
+            ("ram", at(LOADER, "cmpa.l #$00A02000,a1", value=0x2000))])),
+        ("tables", tables),
+        ("ring", OrderedDict([
+            ("base", at(RING_OPEN, "lea ($A01B40).l,a1",
+                        value=0x1B40)),
+            ("index", at(RING_OPEN, "lea ($A00036).l,a0", value=0x0036)),
+            ("mask", at(0x2F8D26, "andi.b #$3F,d1", nth=0)),
+            ("head", at(0x2F8D26, "move.b #$FF,($0,a1,d1.w)",
+                        value=0xFF))])),
+        ("init", [at(INIT, "moveq #-1,d0", value=0xFF),
+                  at(INIT, "moveq #11,d0")]),
+        ("commands", OrderedDict([
+            ("start", at(START, "moveq #16,d0")),
+            ("stop", at(STOP, "moveq #18,d0")),
+            ("stop_all", at(0x2F8E30, "moveq #22,d0")),
+            ("param", at(0x2F8F60, "moveq #27,d0"))])),
+        ("stop_all", OrderedDict([
+            # moveq #9,d2 + dbf: параметры 0-9, значение d1 = 0.
+            ("params", at(STOP_PARAMS, "moveq #9,d2", value=10)),
+            ("value", at(STOP_PARAMS, "moveq #0,d1")),
+            ("then", at(0x296D16, "jsr (loc_2F8E30).l", value=0x16))])),
+        ("level_music", at(0x29806C, "move.w ($FF1B46).l,d0",
+                           value="$FF1B46")),
+    ])
+
+
 def build():
     events, sites = census()
     return OrderedDict([
+        ("driver", driver()),
         ("rules", rules()),
         ("music", [OrderedDict([("name", n), ("sounds", c), ("where", w)])
                    for n, c, w in MUSIC]),
@@ -998,6 +1063,13 @@ def main():
             f.write(json.dumps(data, ensure_ascii=False, indent=1))
             f.write(u"\n")
         print(p)
+    snd = os.path.join(out, "sound")
+    if not os.path.isdir(snd):
+        os.makedirs(snd)
+    p = os.path.join(snd, "driver.bin")
+    with open(p, "wb") as f:
+        f.write(ROM[DRIVER_WINDOW[0]:DRIVER_WINDOW[1]])
+    print(p)
     print(u"мест: %d, чисел: %d" % (len(sites), SJ.count(tree)))
     return 0
 
