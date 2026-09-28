@@ -22,7 +22,7 @@ from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import specjson as SJ                                        # noqa: E402
-from specjson import D, at, dw, hexa                         # noqa: E402
+from specjson import D, at, dl, dw, hexa                     # noqa: E402
 from paths import OUT                                        # noqa: E402
 
 try:
@@ -445,17 +445,53 @@ def demo():
 
 def pause():
     return OrderedDict([
-        ("key", u"Start в уровне переключает паузу ($298C50)"),
+        ("key", u"Start в уровне переключает паузу ($298C50): $FF132C = 1 "
+                u"или 0; при снятии $FF19FE = 0, $FF1A00 = $FFFF, "
+                u"$FF21F6 = $FF21F7 = 0 — лицо HUD перерисуется"),
         ("not_during", u"землетрясения уровня 3 ($FF217C)"),
-        ("frozen", u"объекты и анимация стоят, спрайты рисуются; музыка "
+        ("frozen", u"задача объектов $298E06 при $FF132C = 1 только строит "
+                   u"список спрайтов ($298E4E): обработчики, скрипты, "
+                   u"построитель фона (с ним анимация палитры), уборка и "
+                   u"HUD стоят; задача игрока — ветка паузы $298D24 (при "
+                   u"$FF1330 — ничего); обработчик кадра уровня $2A52E6 "
+                   u"вычитает единицу из счётчика кадров $FFFFE196 (он "
+                   u"стоит), не пишет очередь цветов и прокрутку; вспышка "
+                   u"уровней 3-5 пропускает шаг ($2A5908); музыка "
                    u"не глушится"),
-        ("hud", u"лицо в HUD перебирает три кадра $1EF65E + $240"),
+        ("hud", u"лицо в HUD перебирает три кадра $1EF65E + $240 "
+                u"($298BEE): передача прямо из ROM в VRAM записи лица, "
+                u"$90 слов"),
         ("hud_every_f", D(12, u"move.b #$0B: перезарядка 11",
                           at(0x298BEE, "move.b #$0B,($FF21F6).l"))),
-        ("debug_only", u"при открытом DEBUG: Start + C — запасы 1 и 3 по "
-                       u"999; Start + A — гибель; Start + B — уровень "
-                       u"пройден и жетон бонуса"),
+        ("debug_only", u"при открытом DEBUG ($FF2180): Start + C — запасы "
+                       u"1 и 3 по 999 ($298BB0); Start + A — гибель; "
+                       u"Start + B — уровень пройден и жетон бонуса"),
+        ("dead", u"прокрутка карты и шаг по кадру в паузе ($298D3A-$298D98, "
+                 u"$FF132C = 2 и $2A5296) — только при $FF2181, а его "
+                 u"никто не ставит"),
     ])
+
+
+# Окно ROM со шрифтом и глифами HUD, как есть: шрифт $1EC49E ($298932, $2000
+# байт), за ним 44 тайла $1EE49E, малые цифры, инь-ян, значки, лица утки и
+# ниндзя и три лица паузы; дальше лежат тайлы логотипа ($1EFBFE).
+GLYPHS = (0x1EC49E, 0x1EFBFE)
+FACE = 0x120                       # кадр лица 24 x 24: девять тайлов
+HUD_RAM = (0xFF1496, 0xFF19F0)     # пять кадров HUD в ОЗУ подряд
+
+
+def hud_table():
+    """$298FBA: пять указателей на записи по 18 байт, их разбирает $299030."""
+    rows = []
+    for k in range(5):
+        p = U32(0x298FBA + 4 * k)
+        rows.append(OrderedDict([
+            ("x", dw(p)), ("y", dw(p + 2)),
+            ("vram", dw(p + 4, signed=False)),
+            ("frame", dl(p + 6, addr=True)),
+            ("palette", dw(p + 10)), ("shape", dw(p + 12)),
+            ("slot", dl(p + 14, addr=True))]))
+    return rows
 
 
 def hud():
@@ -463,6 +499,66 @@ def hud():
         ("how", u"пять спрайтов-объектов с кадром в ОЗУ, созданы $299028 "
                 u"по таблице $298FBA; перерисовываются только при "
                 u"изменении значения ($299306)"),
+        ("table", hud_table()),
+        ("table_note", u"x, y — точка объекта на экране; vram — своё место "
+                       u"($298EFA); frame — кадр в ОЗУ: запись из шаблона "
+                       u"$1E9260 ($298F26), источник тайлов сразу за ней, "
+                       u"$298F9A ставит ряд палитры (биты 13-14 имени) и "
+                       u"форму куска; slot — где $299028 держит адрес "
+                       u"записи объекта"),
+        ("frame_template", OrderedDict([
+            ("at", "$1E9260"),
+            ("words", [dw(0x1E9260 + 2 * i, signed=False)
+                       for i in range(9)]),
+            ("note", u"один кусок в (-16, -16), общая коробка -16..15 по "
+                     u"обеим осям; последнее длинное — адрес тайлов / 2")])),
+        ("ram", OrderedDict([("at", "$%06X" % HUD_RAM[0]),
+                             ("length", HUD_RAM[1] - HUD_RAM[0])])),
+        ("image", OrderedDict([("file", "screens/glyphs.bin"),
+                               ("base", "$%06X" % GLYPHS[0]),
+                               ("length", GLYPHS[1] - GLYPHS[0])])),
+        ("glyphs", OrderedDict([
+            ("font", at(0x298932, "lea ($1EC49E).l,a0", addr=True)),
+            ("lives", at(0x299306, "lea ($1ECC9E).l,a2", addr=True)),
+            ("faces", at(0x299306, "lea ($1EF65E).l,a2", addr=True)),
+            ("small_digits", at(0x299306, "lea ($1EE99E).l,a6",
+                                addr=True)),
+            ("bugs", at(0x299120, "lea ($1EF3DE).l,a5", addr=True)),
+            ("yinyang", at(0x299236, "movea.l #$001EEBDE,a2", addr=True)),
+            ("pause_faces", D("$%06X" % (0x1EF65E + 2 * FACE),
+                              u"лица паузы — за двумя лицами HUD",
+                              at(0x298BEE, "addi.l #$001EF65E,d1",
+                                 addr=True),
+                              at(0x298BEE, "addi.l #$00000240,d1"))),
+        ])),
+        ("hud_tiles", OrderedDict([
+            ("at", at(0x29877C, "lea ($1EE49E).l,a0", addr=True, span=8)),
+            ("length", at(0x29877C, "move.w #$0580,d0", signed=False,
+                          span=8)),
+            ("note", u"уходят в VRAM на входе в уровень ($296B48), место — "
+                     u"после тайлов уровня")])),
+        ("caches_at_entry", OrderedDict([
+            ("fuel", at(0x2985BE, "move.w #$FFFE,($FF1358).l",
+                        signed=False)),
+            ("lives", at(0x2985BE, "move.w #$FFFF,($FF135A).l",
+                         signed=False)),
+            ("health", at(0x2985BE, "move.w #$FFFF,($FF135C).l",
+                          signed=False)),
+            ("set", at(0x299028, "move.w #$FFFE,($FF19FC).l",
+                       signed=False)),
+            ("face", at(0x299028, "move.w #$FFFF,($FF1A00).l",
+                        signed=False)),
+            ("note", u"$2985BE — кэши топлива, жизней и здоровья; $299028 — "
+                     u"кэш набора, лицо, счётчики $FF19FA = 3, $FF19FB = 0, "
+                     u"$FF19FE = 0: первая перерисовка пишет всё")])),
+        ("skip_flag", u"$FF135E: писатели столбцов и строк плоскости "
+                      u"($2912FA, $291336, $291520, $291560) ставят 1, когда "
+                      u"окно сдвинулось; в этом кадре $299306 ничего не "
+                      u"перерисовывает и гасит флаг"),
+        ("redraw", u"после каждой перезаписи кадра — бит 9 флагов записи; "
+                   u"короткая команда 1 скрипта $1D6D78 в следующем кадре "
+                   u"гасит его и показывает кадр +$3A заново: передача "
+                   u"тайлов из ОЗУ уходит в гашение после этого кадра"),
         ("elements", [
             OrderedDict([("what", u"жизни: одна большая цифра"),
                          ("x", 28), ("y", 30), ("w", 16), ("h", 16),
@@ -474,8 +570,16 @@ def hud():
                          ("blink_f", at(0x299306, "move.w #$005A,"
                                                   "($FF19FE).l",
                                         span=0x100)),
+                         ("blink_period_f", D(91, u"перезарядка 90, счёт "
+                                                  u"subq.w / bpl: смена, "
+                                                  u"когда счётчик ушёл "
+                                                  u"ниже нуля",
+                                              at(0x299306,
+                                                 "move.w #$005A,"
+                                                 "($FF19FE).l",
+                                                 span=0x100))),
                          ("rule", u"ниндзя — 1; утка без топлива — 0; "
-                                  u"утка с топливом — раз в 90 кадров "
+                                  u"утка с топливом — раз в 91 кадр "
                                   u"меняет 0 и 1: можно превратиться")]),
             OrderedDict([("what", u"здоровье: три малые цифры, ведущие "
                                   u"нули пустые"),
@@ -505,10 +609,14 @@ def hud():
                          ("fuel_max", at(0x299236, "cmpi.w #$0999,d0",
                                          span=0xD0)),
                          ("free_set", u"у набора 0 и «нет оружия» число "
-                                      u"не пишется")]),
+                                      u"не пишется"),
+                         ("ninja", u"у ниндзя кадр пуст, а три цифры "
+                                   u"топлива ($299236, шаг 96 байт) "
+                                   u"пишутся в нижний ряд кадра значков "
+                                   u"(его кадр в ОЗУ + $E0)")]),
         ]),
         ("coords", u"координаты — точки объектов-спрайтов в экранных "
-                   u"точках; где у кадра начало, в выгрузке не сведено"),
+                   u"точках; кадр в (-16, -16) от точки (шаблон $1E9260)"),
         ("unused", u"шкала топлива из $1EACF0 (восемь тайлов, $296A20) "
                    u"в игре не вызывается"),
     ])
@@ -588,6 +696,13 @@ def main():
             f.write(json.dumps(data, ensure_ascii=False, indent=1))
             f.write(u"\n")
         print(p)
+    glyphs = os.path.join(out, "screens")
+    if not os.path.isdir(glyphs):
+        os.makedirs(glyphs)
+    p = os.path.join(glyphs, "glyphs.bin")
+    with open(p, "wb") as f:
+        f.write(ROM[GLYPHS[0]:GLYPHS[1]])
+    print(p)
     print(u"чисел: %d" % SJ.count(tree))
     return 0
 

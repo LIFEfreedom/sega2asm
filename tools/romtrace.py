@@ -9,7 +9,9 @@
 Нужен `unicorn` 2.1.4 (`pip install unicorn==2.1.4`, ядро QEMU под GPLv2 —
 только для этого инструмента). Пишет `out/mauimallard/export/traces/<имя>.json`:
 по кадру уровня — запись игрока `$FFFFE1CA` (`$54` байта) и участки ОЗУ из
-`LAYOUT` (переменные шага игрока, пульт, камера, счётчик кадров, ГСЧ).
+`LAYOUT` (переменные шага игрока, пульт, камера, счётчик кадров, ГСЧ, пауза и
+состояние HUD) и контрольная сумма CRC-32 пяти кадров HUD в ОЗУ `$FF1496`-`$FF19EF`
+(поле `hud`; на входе — сами байты, `hud_ram`).
 Ремейк проигрывает ту же запись пульта и сверяет каждый кадр.
 
 Машина. Картинки, звука и тактов нет, только то, от чего зависит логика:
@@ -88,15 +90,17 @@
 `enemies_flyer_*` (188), личинки `enemies_larva_*` (192), жёлтые клинья `enemies_wedge_*_7` (194);
 эффекты уровня (M1b, scrolling.md 3), утка стоит: вспышка уровня 3 `flash_3` (оба прохода),
 пульс цвета 31 уровня 6 `palette_6` (его сверяет только CRAM картинки), анимация тайлов
-уровней 9, 13, 16 `tiles_*` — утка поставлена так, чтобы анимированные клетки были в кадре.
+уровней 9, 13, 16 `tiles_*` — утка поставлена так, чтобы анимированные клетки были в кадре;
+пауза и читы `pause_*` (M8a, screens.md 9): пауза на уровне 0 у жуков — объекты, счётчик кадров
+и HUD стоят, лицо перебирает три кадра, и три чита при подменённом `$FF2180` (запасы, выход с
+жетоном, гибель).
 
 Картинки: сценарий с `pictures` рисует кадры k из памяти VDP так, как их
 показывает приставка — то, что очередь DMA кадра k отправила в начале
 прерывания кадра k + 1, на входе в задачу игрока `$298C44` (после записанных
 кадров игра идёт дальше с отпущенным пультом). В `export/pictures/`:
-`<сценарий>_<k>.png` — без спрайтов с тайлами VRAM, занятой при входе после
-тайлов уровня под HUD (его кадры строятся в ОЗУ, у ремейка HUD пока нет;
-объекты процедуры уровня, взявшие место после HUD, рисуются),
+`<сценарий>_<k>.png` — со всеми спрайтами, HUD и 44 тайлами `$1EE49E` тоже (M8a;
+до неё их тайлы картинка пропускала),
 `<сценарий>_<k>_planes.png` — без спрайтов вовсе, и `pictures.json` —
 уровень, кадр, камера, счётчик кадров, CRAM. Кадр в режиме тени и подсветки
 (уровень 1) не рисуется: в индексе остаётся причина.
@@ -121,6 +125,7 @@ import json
 import os
 import struct
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import OUT, rom_bytes  # noqa: E402
@@ -182,7 +187,18 @@ LAYOUT = [
     (0xFFFFE1C6, 4, "пульт: сырой байт (активный ноль), держат, нажали"),
     (0xFFFFFD7A, 8, "раскладка пульта, сложность, отладка: уровень старта, столкновения"),
     (0xFFFFFD84, 6, "отладочный полёт, точка возрождения"),
+    (0xFF132C, 2, "пауза: 1 — стоит ($298C50)"),
+    (0xFF1358, 8, "HUD: кэши топлива, жизней и здоровья, пропуск перерисовки $FF135E"),
+    (0xFF19F0, 0x10, "HUD: ячейки пяти записей, счётчик и кадр инь-ян, кэш набора, счётчик лица"),
+    (0xFF217C, 2, "землетрясение уровня 3: пауза запрещена"),
+    (0xFF2180, 2, "DEBUG открыт, прокрутка в паузе $FF2181"),
+    (0xFF21F6, 2, "лицо в паузе: счётчик, кадр ($298BEE)"),
 ]
+
+# Пять кадров HUD в ОЗУ ($298F26: запись из шаблона $1E9260 и тайлы за ней) — после каждого кадра их
+# контрольная сумма CRC-32 (поле hud), на входе — сами байты (hud_ram: чего вход не пишет, то осталось).
+HUD_RAM = 0xFF1496
+HUD_RAM_LENGTH = 0x55A
 
 # Сценарии с проверкой sprites снимают ещё таблицу спрайтов и распределитель VRAM.
 SAT_ENTRIES = 20           # записей $FF050C: утка с объектом сноса и HUD — до 11 на пробах
@@ -1023,6 +1039,34 @@ for _name, _level, _at, _frames, _pictures, _what in _EFFECTS:
     if _at:
         SCENARIOS[_name]["at"] = _at
 
+# M8a (mauimallard #32; screens.md 9, 10): пауза. Start ставит и снимает $FF132C ($298C50); в паузе стоят объекты
+# (ворота $298E06), счётчик кадров ($2A52E6) и HUD, лицо перебирает три кадра раз в 12 ($298BEE) — прямой передачей
+# из ROM. При открытом DEBUG ($FF2180 подменён) Start с кнопкой — читы, паузы нет. Раскладка 0 меняет B и C местами:
+# сырой B — это C игры, сырой C — B. Проверки camera нет: в паузе шаг камеры не идёт.
+_DEBUG = [(0xFF2180, bytes([0x01]))]
+_PAUSES = [
+    ("pause_0", 0, (300, 250), _GUN, [206],
+     [("", 30), ("S", 1), ("", 100), ("S", 1), ("", 40), ("B", 1), ("", 40)], [32, 44, 56, 140],
+     "уровень 0 у жуков (206): пауза на сотню кадров — жуки, утка и счётчик кадров стоят, лицо HUD перебирает три "
+     "кадра по 12; Start снимает паузу, лицо HUD перерисовывается, бросок"),
+    ("pause_cheat_stocks_0", 0, (300, 250), _GUN + _DEBUG, [206],
+     [("", 20), ("BS", 1), ("", 30), ("A", 3), ("", 30)], [60],
+     "DEBUG открыт: Start + C (сырой B) — запасы 1 и 3 по 999 ($298BB0), паузы нет; A — смена набора, запас в HUD"),
+    ("pause_cheat_exit_0", 0, (300, 250), _GUN + _DEBUG, [206],
+     [("", 20), ("CS", 1), ("", 10)], [],
+     "DEBUG открыт: Start + B (сырой C) — уровень пройден ($FF1A6C = 1) и жетон бонуса $FF1350"),
+    ("pause_cheat_death_0", 0, (300, 250), _GUN + _DEBUG, [206],
+     [("", 20), ("AS", 1), ("", 10)], [],
+     "DEBUG открыт: Start + A — гибель ($FF1A6C = -1), пауза и $FF1330 сняты"),
+]
+for _name, _level, _at, _poke, _codes, _input, _pictures, _what in _PAUSES:
+    SCENARIOS[_name] = {
+        "level": _level, "objects": PICKUP_CODES + _codes, "checks": ["player", "objects", "sounds"],
+        "at": _at, "poke": _poke, "input": _input, "about": _what,
+    }
+    if _pictures:
+        SCENARIOS[_name]["pictures"] = _pictures
+
 for _level in range(19):          # 19-22 — бонус, утка с входа на моноцикле
     SCENARIOS["enter_%02d" % _level] = {
         "level": _level, "objects": False, "checks": ["entry"], "pictures": [20],
@@ -1357,6 +1401,7 @@ def snapshot(md, layout=LAYOUT, objects=False):
     shot = {
         "player": md.read(PLAYER, PLAYER_LENGTH).hex().upper(),
         "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in layout),
+        "hud": "%08X" % zlib.crc32(md.read(HUD_RAM, HUD_RAM_LENGTH)),
     }
     if objects:
         shot["pool"] = pool(md)
@@ -1397,6 +1442,7 @@ def run(name, sc, rom):
             if sc.get("fly"):
                 md.write(DEBUG_FLIGHT, b"\x01")
             state["entry"] = snapshot(md, layout, with_pool)
+            state["entry"]["hud_ram"] = md.read(HUD_RAM, HUD_RAM_LENGTH).hex().upper()
             state["entry_bottom"] = md.word(0xFF1A92)
             sounds["start"].clear()
             sounds["stop"].clear()
@@ -1405,7 +1451,6 @@ def run(name, sc, rom):
                 # Весь пул на входе: чего вход не пишет, то в записях осталось от прежних хозяев.
                 state["entry"]["pool_ram"] = md.read(PLAYER, POOL_RECORDS * PLAYER_LENGTH).hex().upper()
             md.pad = pads[0]
-            state["skip"] = hidden_tiles(md)
         elif state["done"] - 1 in wanted and state["done"] - 1 not in pictures:
             # Кадр k показывает то, что очередь DMA кадра k отправила в начале прерывания кадра
             # k + 1: к задаче игрока кадра k + 1 оно уже в VRAM.
@@ -1423,7 +1468,7 @@ def run(name, sc, rom):
             if why:
                 pictures[k]["skipped"] = why
             else:
-                pictures[k]["full"] = md.vdp.picture(skip_tiles=state["skip"])
+                pictures[k]["full"] = md.vdp.picture()
                 pictures[k]["planes"] = md.vdp.picture(sprites=False)
 
     def on_builder(uc, address, size, user):
@@ -1537,22 +1582,6 @@ def run(name, sc, rom):
         "frames": frames,
         "_pictures": pictures,
     }
-
-
-HUD_RECORDS = 0xFF19F0         # $299028: адреса пяти записей HUD (слово каждой, таблица $298FBA)
-
-
-def hidden_tiles(md):
-    """Тайлы VRAM, которые на входе в уровень заняли после тайлов уровня под HUD: 44 тайла
-    `$1EE49E` и пять объектов HUD (graphics.md). Их кадры строятся в ОЗУ (`+$3A`), ремейк их пока
-    не рисует — их спрайты картинка пропускает. Объекты процедуры уровня (поплавки уровней 0-1,
-    маска левого края 10-13) берут место после HUD и рисуются: они у ремейка есть."""
-    size, address = struct.unpack(">HH", md.read(0xFFFFE138, 4))
-    end = address + size
-    for k in range(5):
-        room, at = struct.unpack(">HH", md.read(0xFFFF0000 | (md.word(HUD_RECORDS + 2 * k) + 0x34), 4))
-        end = max(end, at + room)
-    return range((address + size) >> 5, end >> 5)
 
 
 def write_pictures(name, level, pictures):
