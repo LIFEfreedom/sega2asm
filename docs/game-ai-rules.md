@@ -158,7 +158,7 @@ FindTargetWithFilter:
 
 | адрес | имя | действия |
 |---|---|---|
-| `$0167F4` | `ActionSetEngageable` | `$00`–`$18`, `$26`–`$2B`, `$31` |
+| `$0167F4` | `ActionSetEngageable` | `$00`–`$09`, `$10`–`$18`, `$26`–`$2B`, `$31` — без `$0A`–`$0F` |
 | `$016804` | `ActionSetCombat` | `$10`–`$18` |
 | `$016814` | `ActionSetStepping` | `$04`–`$07` |
 | `$01682C` | `ActionSetMoving` | `$01`–`$09` |
