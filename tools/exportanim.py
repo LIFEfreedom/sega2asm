@@ -97,10 +97,10 @@ u"""Анимации юнитов в раскладке ремейка Dyna.
 
 ## Какие анимации
 
-`LevelScene` грузит пять анимаций на вид. В оригинале их 33, и там, где
-игра выбирает между несколькими, выводятся все, а правило выбора пишет
-`animations.json` в поле `select` (см. «Как игра выбирает»). Соответствие
-выведено из того, КТО ставит номер в `+$7` записи юнита:
+Ремейк (`UnitAnimationSet`) грузит все листы ниже. В оригинале анимаций
+33, и там, где игра выбирает между несколькими, выводятся все, а правило
+выбора пишет `animations.json` в поле `select` (см. «Как игра выбирает»).
+Соответствие выведено из того, КТО ставит номер в `+$7` записи юнита:
 
 | файл | оригинал | ставит |
 |---|---|---|
@@ -110,11 +110,13 @@ u"""Анимации юнитов в раскладке ремейка Dyna.
 | `kicking_2` | `$14` | `ResolveCombat`, исход 2 |
 | `kicking_3` | `$15` | `ResolveCombat`, исход 3 |
 | `kicking_4` | `$16` | `ResolveCombat`, редкий исход |
-| `dying` | `$1A` | `UnitDie` |
+| `dying_sink` | `$1A` | `UnitDie`: уходит под воду — клетка воды или жерла |
 | `dying_flame` | `$01` | `UnitDieFlame`: лава и огонь, бедствия |
 | `dying_splash` | `$02` | `UnitDieSplash`; `UnitDie` у яйца и падали |
 | `dying_pop` | `$03` | `UnitDiePop`: клетка с битом 5 плитки |
 | `eat` | `$0D` | `EnterAction1E`, `GrazeHeal300` |
+| `carcass` | `$20` | `MakeCarcass`: туша — обычная смерть на суше |
+| `carcass_end` | `$0C` | `CarcassExpire`, `CarcassNutrition`: туша истлела или съедена |
 
 `dying_flame`, `dying_splash` и `dying_pop` — из общего банка: кадры у
 всех видов одни, отличается только палитра.
@@ -136,14 +138,31 @@ u"""Анимации юнитов в раскладке ремейка Dyna.
 у ﾌﾟﾃﾗ совпадают 1 и 2. Листы всё равно выводятся все четыре, чтобы
 правило выбора работало одинаково для любого вида.
 
-**Смерть.** Сначала местность: `CheckLethalTerrain` `$019DF4` смотрит
-клетку под ногами в таком порядке — бит 5 плитки даёт `dying_pop`,
-лава или огонь — `dying_flame`, плитки `$53`/`$54` — `dying_splash`, а
-плитка `$0D` — `UnitVanish`: юнит пропадает вовсе без анимации. Иначе
-смерть идёт через `UnitDie` `$01A8AE`: `dying`, но юнит в действиях
-`$02`…`$09` (яйцо) и `$26`, `$27`, `$29`, `$31` (падаль) исчезает
-всплеском `dying_splash`. Этот список лежит в ROM по `$016894` и
-выводится в `select.dying.splash_actions`.
+**Смерть.** Обычную смерть — в бою (`CombatVictimTick` `$01AD76`) и от
+нуля здоровья (`DieNowIfHpZero` `$01D2E2`) — ведёт `UnitDieOnCell`
+`$01A758`, и решает клетка под юнитом. Бит 6 байта местности
+(`TerrainHasBit6` `$021A58`; по таблице тип → байт `$0203DE` он есть
+только у воды 19 и жерла 20) — это `UnitDie` `$01A8AE` и `dying_sink`:
+вспышка, круги на воде, голова над водой. Иначе виды из маски
+`select.dying.flame_species` (7…10) сгорают `dying_flame`, а прочие
+ложатся тушей — `MakeCarcass` `$01A79E`, `carcass`: один кадр лежащего
+тела, действие `$31`, падаль. Туша уходит листом `carcass_end` — тело,
+кости, пусто — когда истёк её срок (`CarcassTick` `$01A1D0` →
+`CarcassExpire` `$01A812`) или когда её съели (`CarcassNutrition`
+`$01ABA0`). Виды из `select.dying.no_death_species` в `UnitDieOnCell`
+не умирают вовсе.
+
+`UnitDie` зовут ещё жерло (`DieIfActionAllows` `$01BDA0`) и вода, которой
+сценарий заливает клетку под юнитом в действии `$1A` (`TerrainType19Effect`
+`$01BCAA`). Юнит в действиях `$02`…`$09` (яйцо) и `$26`, `$27`, `$29`,
+`$31` (падаль) исчезает в `UnitDie` всплеском `dying_splash`; этот список
+лежит в ROM по `$016894` и выводится в `select.dying.splash_actions`.
+Всплеск и хлопок от местности (`CheckLethalTerrain` `$019DF4`) достаются
+только яйцу и кокону (dyna #202).
+
+ИСПРАВЛЕНО (dyna #224): здесь стояло, что `UnitDie` — обычная смерть и
+что её лист — `dying`. Обычная смерть — туша, а `$1A` — смерть на воде и
+жерле; лист переименован в `dying_sink`.
 
 Жертва удара тоже получает свою анимацию (`$0F`…`$11`, по таблице
 вида нападающего), но анимации «получил удар» у ремейка нет, и здесь
@@ -266,14 +285,15 @@ u"""Анимации юнитов в раскладке ремейка Dyna.
 ## Время
 
 Ячейка листа — один шаг скрипта оригинала, без повторов. Длительность
-у каждого кадра своя — у покоя ｱﾛ это 6, 16, 6, 16 тактов, — и лежит в
-`animations.json`: `frames[i].dur` в тактах по 1/60 с. Ремейк держит
-задержку на кадр, поэтому размножать кадры под одну общую задержку, как
-делала прежняя версия, больше незачем.
+у каждого кадра своя — у покоя ｱﾛ это 6, 16, 6, 16 тиков, — и лежит в
+`animations.json`: `frames[i].dur` в тиках игрового цикла оригинала,
+а тик — два кадра развёртки, около 30 в секунду (dyna #223). Ремейк
+держит задержку на кадр, поэтому размножать кадры под одну общую
+задержку, как делала прежняя версия, больше незачем.
 
 Что делать после последнего кадра, пишут два поля строки. `loop` —
-номер кадра, с которого скрипт идёт по кругу (у покоя 0, у смерти
-последний, то есть «застыть»). `next` — номер анимации, в которую
+номер кадра, с которого скрипт идёт по кругу (у покоя 0, у туши — её
+единственный кадр, то есть «застыть»). `next` — номер анимации, в которую
 скрипт перетекает, дойдя до её входа: так `dying_pop` (`$03`) уходит в
 пустой кадр `$00`. Если нет ни того, ни другого, строка кончается
 предохранителем обходчика.
@@ -396,9 +416,10 @@ def sets_all():
 ANIMS = (("idle", 0x0A, 0x0B), ("walking", 0x18, 0x19),
          ("kicking_1", 0x13, 0x13), ("kicking_2", 0x14, 0x14),
          ("kicking_3", 0x15, 0x15), ("kicking_4", 0x16, 0x16),
-         ("dying", 0x1A, 0x1A), ("dying_flame", 0x01, 0x01),
+         ("dying_sink", 0x1A, 0x1A), ("dying_flame", 0x01, 0x01),
          ("dying_splash", 0x02, 0x02), ("dying_pop", 0x03, 0x03),
-         ("eat", 0x0D, 0x0D))
+         ("eat", 0x0D, 0x0D), ("carcass", 0x20, 0x20),
+         ("carcass_end", 0x0C, 0x0C))
 # неигровым наборам — свои ячейки набора, без общего банка, плюс поза
 # покоя декораций (EnterIdleFacing)
 OTHER_ANIMS = tuple(a for a in ANIMS if a[1] > 0x03) + (("rest", 0x05, 0x05),)
@@ -406,6 +427,12 @@ OTHER_ANIMS = tuple(a for a in ANIMS if a[1] > 0x03) + (("rest", 0x05, 0x05),)
 DESC_OFFSET = 0x01FAEE       # +$2 записи типа: смещение дескриптора
 DESCRIPTORS = 0x01FC5A       # +$0 дескриптора: указатель на блок параметров
 SPLASH_ACTIONS = 0x016894    # UnitDie: при этих действиях смерть — всплеск
+TYPE_BYTES = 0x0203DE        # тип местности -> байт TerrainMap (32 записи)
+SINK_BIT = 0x40              # бит 6 байта: TerrainHasBit6 $021A58 -> UnitDie
+# UnitDieOnCell $01A758 держит маски видов прямо в коде, `move.l #маска,d0`
+# перед SpeciesNotInMask; здесь адреса самих масок.
+NO_DEATH_MASK = 0x01A762     # эти виды в UnitDieOnCell не умирают
+FLAME_MASK = 0x01A78A        # эти виды на суше сгорают (UnitDieFlame)
 
 # строки листа: сторона оригинала и имя, по кругу от верхней против
 # часовой стрелки
@@ -413,8 +440,6 @@ FACINGS = ((0, "top"), (7, "top_left"), (6, "left"), (5, "bottom_left"),
            (4, "bottom"), (3, "bottom_right"), (2, "right"),
            (1, "top_right"))
 LEFT, RIGHT = 6, 2            # сверяются: зеркало ли правая левой
-
-TICK_HZ = 60                           # такт оригинала: кадр развёртки NTSC
 
 
 def grid(n):
@@ -594,6 +619,17 @@ def action_set(addr):
             if ((hi if a >= 0x20 else lo) >> (a & 31)) & 1]
 
 
+def species_mask(addr):
+    u"""Номера видов, чьи биты стоят в длинном слове по addr (`btst` вида)."""
+    m = struct.unpack_from(">I", gfx.rom, addr)[0]
+    return [sp for sp in range(32) if (m >> sp) & 1]
+
+
+def sink_types():
+    u"""Типы местности, у чьего байта взведён бит 6: там смерть — `UnitDie`."""
+    return [ty for ty in range(32) if gfx.rom[TYPE_BYTES + ty] & SINK_BIT]
+
+
 def selection(t):
     u"""Правило, по которому оригинал выбирает удар и смерть, для типа t."""
     b = param_block(t)
@@ -609,15 +645,18 @@ def selection(t):
                           {"anim": "kicking_3", "roll_to": 0xFF}],
         },
         "dying": {
-            "source": "CheckLethalTerrain $019DF4, UnitDie $01A8AE",
-            "terrain_first": [
-                {"cell": "tile bit 5", "anim": "dying_pop"},
-                {"cell": "lava or fire (types 11, 12)",
-                 "anim": "dying_flame"},
-                {"cell": "tile $53 or $54", "anim": "dying_splash"},
-                {"cell": "tile $0D", "anim": None},
-            ],
-            "default": "dying",
+            "source": "UnitDieOnCell $01A758",
+            "sink": {"anim": "dying_sink", "via": "UnitDie $01A8AE",
+                     "cell": "terrain byte bit 6, TerrainHasBit6 $021A58",
+                     "terrain_types": sink_types()},
+            "flame_species": {"anim": "dying_flame",
+                              "via": "UnitDieFlame $01AAE4",
+                              "species": species_mask(FLAME_MASK)},
+            "no_death_species": species_mask(NO_DEATH_MASK),
+            "default": {"anim": "carcass", "via": "MakeCarcass $01A79E"},
+            "carcass_end": {"anim": "carcass_end",
+                            "via": ["CarcassExpire $01A812",
+                                    "CarcassNutrition $01ABA0"]},
             "splash_actions": ["$%02X" % a
                                for a in action_set(SPLASH_ACTIONS)],
         },
