@@ -12,6 +12,11 @@
 Что внутри: порядок экранов (от включения до конца игры), каждый экран —
 слои, палитра, музыка, сколько длится и чем пропускается; меню и их пункты;
 пароли; сюжетные страницы и надписи крупными буквами; демо; пауза; HUD.
+Узел `vdp` (M8c) — сами слои для показа как у VDP: тайлы девяти слоёв после
+LZSS `$29766A` листами индексами (`screens/tiles_XXXXXX.png`), карты — имена без
+базы тайлов, палитры — 64 слова CRAM; окна ROM как есть — `screens/text.bin`
+(ширины шрифта, волна воды, надпись PASSWORD, читы) и `screens/tables.bin`
+(потоки демо, пароли, описатели меню, раскладки, демо, сложность).
 """
 import io
 import json
@@ -169,8 +174,8 @@ def menus():
             ("timeout_f_pal", at(0x2908FA, "move.w #$01F4,d0")),
             ("timeout_rule", u"счёт идёт с входа в меню и нажатиями не "
                              u"сбрасывается; вышел — демо"),
-            ("background", layer(0x1F813A, 0x1F927A, u"задник без "
-                                                     u"изгороди")),
+            ("background", layer(0x1F8A8E, 0x1F927A, u"задник с "
+                                                     u"изгородью ($28FE40)")),
         ])),
         ("options", OrderedDict([
             ("descriptor", "$1FD4AA"),
@@ -645,6 +650,101 @@ def flow():
     ])
 
 
+# ------------------------------------------------------------ слои для ремейка
+
+# Слои экранов (open-questions.md 26: карты и тайлы, упакованные LZSS $29766A; карта — слова w, h и w * h имён).
+# Ремейк рисует экраны как VDP: тайлы — лист индексами (как levelNN_tiles.png), карты и палитры — числа.
+SCREEN_TILES = [
+    (0x1F0692, u"presents ($290084)"),
+    (0x1EFBFE, u"логотип MAUI MALLARD ($28FB3A)"),
+    (0x1F927A, u"задник с лучами, лианами и изгородью: титульный, меню, заставка мира, титры"),
+    (0x1F0FB0, u"пальмы со звёздами, ночное небо с берегом (концовка)"),
+    (0x1F6B10, u"силуэты острова (заставка мира, итоги)"),
+    (0x1F58B8, u"свиток титров"),
+]
+SCREEN_MAPS = [
+    (0x1F0D58, u"presents DONALD Starring In ($2900AE, плоскость B)"),
+    (0x1F0194, u"логотип MAUI MALLARD ($28FB2E, плоскость A; 56 строк — $28D622 дописывает их по вертикали)"),
+    (0x1F8A8E, u"задник с изгородью: титульный ($28FB34) и меню ($28FE40), плоскость B"),
+    (0x1F813A, u"задник без изгороди (заставка мира, итоги)"),
+    (0x1F2CEC, u"пальмы со звёздами"),
+    (0x1F3270, u"ночное небо с берегом"),
+    (0x1F6548, u"силуэт острова"),
+    (0x1F6850, u"силуэт острова (заставка мира)"),
+    (0x1F3B4A, u"свиток титров 40 x 404"),
+]
+SCREEN_PALETTES = [
+    (0x1F0F30, u"presents ($2900BA PaletteFadeTo)"),
+    (0x1F0612, u"титульный ($28FB78 PaletteFadeTo)"),
+    (0x1FB0D8, u"меню ($28FE74 PaletteFadeTo)"),
+    (0x1F3A4A, u"концовка"),
+    (0x1F5BF8, u"титры"),
+    (0x1F6ED8, u"заставка мира"),
+]
+# Окна ROM как есть: движок описателей меню, пароли, потоки демо, таблицы ширин шрифта и волны воды читают байты.
+SCREEN_WINDOWS = [
+    ("text", 0x1EA5FE, 0x1EAA35, u"ширины шрифта $1EA5FE и $1EA852, волна воды титульного $1EA892 (256 байт), "
+                                 u"надпись PASSWORD $1EAA1E, читы $1EAA27/$1EAA2E (буквы + 1)"),
+    ("tables", 0x1FC75C, 0x1FD806, u"потоки демо $1FC75C/$1FC84C/$1FC9C0, слова паролей $1FCAEE, таблица паролей "
+                                   u"$1FCB26, указатели уровней $1FCB50, названия $1FCBAC, процедуры миров $1FCC08, "
+                                   u"описатели меню $1FD440/$1FD46E/$1FD4AA/$1FD5BC, раскладки $1FD7AC, демо $1FD7DC, "
+                                   u"сложность $1FD7EE"),
+]
+
+
+def tiles_sheet(data, path):
+    """Тайлы 8x8 по 32 в ряд, серая шкала 17 * индекс, индекс 0 прозрачен (как levelNN_tiles.png)."""
+    import sprites as S
+    cnt = len(data) // 32
+    cols = 32
+    w, h = cols * 8, (cnt + cols - 1) // cols * 8
+    buf = [(0, 0, 0, 0)] * (w * h)
+    for i in range(cnt):
+        ox, oy = (i % cols) * 8, (i // cols) * 8
+        for y in range(8):
+            for xb in range(4):
+                b = data[i * 32 + y * 4 + xb]
+                for half, c in ((0, b >> 4), (1, b & 15)):
+                    buf[(oy + y) * w + ox + xb * 2 + half] = (17 * c, 17 * c, 17 * c, 255 if c else 0)
+    S.png(path, w, h, buf)
+
+
+def vdp_layers(outdir):
+    """-> узел vdp для screens.json; тайлы пишет в outdir (screens/tiles_XXXXXX.png), окна — screens/<имя>.bin."""
+    import lzss
+    tiles = OrderedDict()
+    for a, what in SCREEN_TILES:
+        data, _ = lzss.unpack(a, ROM)
+        if len(data) % 32:
+            raise ValueError("тайлы $%06X: %d байт — не целое число тайлов" % (a, len(data)))
+        name = "tiles_%06X.png" % a
+        if outdir:
+            tiles_sheet(data, os.path.join(outdir, name))
+        tiles[hexa(a)] = OrderedDict([("what", what), ("count", len(data) // 32), ("png", "screens/" + name)])
+    maps = OrderedDict()
+    for a, what in SCREEN_MAPS:
+        data, _ = lzss.unpack(a, ROM)
+        w, h = struct.unpack_from(">HH", data, 0)
+        if len(data) != 4 + 2 * w * h:
+            raise ValueError("карта $%06X: %d байт при %d x %d" % (a, len(data), w, h))
+        maps[hexa(a)] = OrderedDict([("what", what), ("width", w), ("height", h),
+                                     ("names", list(struct.unpack_from(">%dH" % (w * h), data, 4)))])
+    palettes = OrderedDict()
+    for a, what in SCREEN_PALETTES:
+        palettes[hexa(a)] = OrderedDict([("what", what), ("cram", list(struct.unpack_from(">64H", ROM, a)))])
+    windows = OrderedDict()
+    for name, a, end, what in SCREEN_WINDOWS:
+        if outdir:
+            with open(os.path.join(outdir, name + ".bin"), "wb") as f:
+                f.write(ROM[a:end])
+        windows[name] = OrderedDict([("what", what), ("from", hexa(a)), ("to", hexa(end)),
+                                     ("file", "screens/%s.bin" % name)])
+    return OrderedDict([
+        ("about", u"слои экранов вне уровня для показа как у VDP: тайлы после LZSS $29766A — лист индексами, "
+                  u"карты — имена VDP без базы тайлов (её прибавляет $29672C), палитры — 64 слова CRAM"),
+        ("tiles", tiles), ("maps", maps), ("palettes", palettes), ("windows", windows)])
+
+
 def build():
     return OrderedDict([
         ("flow", flow()),
@@ -689,6 +789,10 @@ def main():
         ("waits", WAIT_NOTE)])
     doc = OrderedDict([("meta", meta)])
     doc.update(vals)
+    glyphs = os.path.join(out, "screens")
+    if not os.path.isdir(glyphs):
+        os.makedirs(glyphs)
+    doc["vdp"] = vdp_layers(glyphs)
     for name, data in (("screens.json", doc),
                        ("screens.sources.json", srcs)):
         p = os.path.join(out, name)
@@ -696,9 +800,6 @@ def main():
             f.write(json.dumps(data, ensure_ascii=False, indent=1))
             f.write(u"\n")
         print(p)
-    glyphs = os.path.join(out, "screens")
-    if not os.path.isdir(glyphs):
-        os.makedirs(glyphs)
     p = os.path.join(glyphs, "glyphs.bin")
     with open(p, "wb") as f:
         f.write(ROM[GLYPHS[0]:GLYPHS[1]])

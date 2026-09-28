@@ -38,7 +38,10 @@
   так что «лага» нет: следующий кадр — после `rte`. Прерывание, пришедшее
   под маской, теряется (на железе оно бы дождалось снятия маски); на кадры
   уровня это не влияет — там основной поток стоит в пустом цикле. HBlank
-  (`$296976`) не вызывается.
+  (`$296976`) не вызывается. Сценарии от включения (`boot_*`) идут с
+  `pending_vint`: прерывание, пришедшее под маской, ждёт её снятия, как у
+  VDP, — основной поток тогда идёт кусками по `PENDING_STEP` команд, и первый
+  кусок без маски берёт отложенное прерывание (в кадре их может быть два).
 
 Две особенности `unicorn` и что с ними сделано:
 
@@ -110,6 +113,20 @@
 уровень, кадр, камера, счётчик кадров, CRAM. Кадр в режиме тени и подсветки
 (уровень 1) не рисуется: в индексе остаётся причина.
 
+Сценарии от включения (`boot_*`, M8c, `run_boot`): с первого кадра приставки, пульт
+из записи с первого кадра, без подмены уровня; кадр — каждый вызов `frame`, и
+после него снимаются пульт, сколько прерываний кадра взято (`vints`), PC и d7
+основного потока (курсор меню `$297448` и пароля `$2909BA` живёт в d7), участки
+`SCREEN_LAYOUT` (счётчик кадров, ГСЧ, пульт, раскладка, значения меню, пароль,
+срок меню, сложность, заявки, вода и шаг титульного, DEBUG, демо, затемнение) и
+CRC-32 CRAM, таблиц имён плоскостей A и B, таблицы прокрутки и таблицы спрайтов
+в ОЗУ; `until: "setup"` — до кадра, где главный цикл вошёл в `LevelSetup`.
+Картинка кадра k такого сценария — память VDP после него (в `pictures.json` —
+`screen: true`). Сценарии: `boot_idle` (пульт не трогают: заставки, титульный
+и меню до срока, демо), `boot_skip` (Start на Disney, presents, въезде логотипа
+и START в меню), `boot_held` (Start держат с presents: титульный не пропущен,
+пока его не отпустят).
+
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
 клеток не заводятся. Сценарий со списком кодов (`objects: [22, 23, …]`) зовёт
@@ -162,6 +179,7 @@ DEMO = 0xFFFFFD90            # не ноль — идёт демо, пульт �
 PLAYER = 0xFFFFE1CA
 PLAYER_LENGTH = 0x54
 BUDGET = 12000             # команд основного потока между кадрами (~ такты / 10)
+PENDING_STEP = 64          # кусок основного потока, пока ждёт отложенное прерывание кадра (pending_vint)
 HANDLER_LIMIT = 3_000_000  # команд обработчику кадра, дальше — ошибка
 BOOT_LIMIT = 6000          # кадров до входа в уровень
 
@@ -198,6 +216,30 @@ LAYOUT = [
     (0xFF217C, 2, "землетрясение уровня 3: пауза запрещена"),
     (0xFF2180, 2, "DEBUG открыт, прокрутка в паузе $FF2181"),
     (0xFF21F6, 2, "лицо в паузе: счётчик, кадр ($298BEE)"),
+]
+
+# Сценарии от включения (boot, M8c: screens.md 0-4) снимают после каждого кадра приставки эти участки.
+SCREEN_LAYOUT = [
+    (0xFFFFE196, 2, "счётчик кадров"),
+    (0xFFFFE14E, 8, "ГСЧ $296B0C"),
+    (0xFFFFE1C6, 4, "пульт: сырой байт (активный ноль), держат, нажали ($295E48)"),
+    (0xFFFFFD74, 4, "набор раскладки пульта ($2984A4: $1FD7AC + 8 * $FFFFFD7B)"),
+    (0xFFFFFD78, 0x1A, "значения меню $FD78-$FD85 ($297602/$297508), точка возрождения, демо $FD90/$FD91"),
+    (0xFF0010, 0x0E, "ступень чита $FF0010, место надписи пароля $FF0012, буфер пароля $FF0016, буква $FF001C"),
+    (0xFF1310, 4, "меню: остаток срока $FF1310 (< 0 — демо), срок идёт $FF1312"),
+    (0xFF1344, 0x14, "жизни, запас здоровья, начальные, продолжения, $FF1356"),
+    (0xFF1394, 2, "заявка музыки уровня"),
+    (0xFF1A6C, 2, "сигнал выхода"),
+    (0xFF1B14, 2, "номер уровня"),
+    (0xFF213C, 2, "заявка заставки мира"),
+    (0xFF2148, 4, "вода титульного: шаг таблицы $FF2148, счётчик $FF214A (и блеск SEGA)"),
+    (0xFF2150, 2, "SOUND TEST был ($298462)"),
+    (0xFF215E, 4, "шаг титульного экрана $FF215E"),
+    (0xFF217E, 4, "PAL, DEBUG открыт $FF2180, $FF2181"),
+    (0xFF21EC, 10, "демо прервано Start $FF21EC, поток $FF21EE, $FF21F2, счётчик демо $FF21F4"),
+    (0xFFFFDCC0, 2, "затемнение идёт ($290C70)"),
+    (0xFFFFDEC2, 2, "затемнение: шагов осталось"),
+    (0xFFFFE1BC, 4, "камера; на титульном $FFFFE1BE — вертикаль логотипа"),
 ]
 
 # Пять кадров HUD в ОЗУ ($298F26: запись из шаблона $1E9260 и тайлы за ней) — после каждого кадра их
@@ -1105,6 +1147,28 @@ for _n, (_level, _at) in enumerate(DEMOS):
         "about": "демо %d: запись пульта из ROM ($%06X), кадры не снимаются — ремейк проигрывает её целиком" % (_n, _at),
     }
 
+SETUP_STOP = "setup"       # boot: until — остановиться на кадре, где главный цикл вошёл в LevelSetup
+
+# Сценарии от включения (M8c): экраны до входа в уровень, кадр — каждый кадр приставки (run_boot).
+BOOT_SCENARIOS = {
+    "boot_idle": {
+        "input": [], "record": 4000, "until": SETUP_STOP, "pictures": [600, 760, 800, 900, 1000, 1300, 1400, 1500],
+        "about": "с включения пульт не трогают: заставки, титульный экран до срока, меню до срока, демо 0 до LevelSetup",
+    },
+    "boot_skip": {
+        "input": [("", 400), ("S", 2), ("", 198), ("S", 2), ("", 198), ("S", 2), ("", 298), ("S", 2)],
+        "record": 2000, "until": SETUP_STOP, "pictures": [790],
+        "about": "Start на Disney, presents и на въезде логотипа титульного; в меню Start — START, новая игра до LevelSetup",
+    },
+    "boot_held": {
+        "input": [("", 590), ("S", 500), ("", 100), ("S", 1)],
+        "record": 2000, "until": SETUP_STOP,
+        "about": "Start держат с presents 500 кадров: presents пропущен, титульный — нет, пока Start не отпустят и не нажмут снова ($295E48: нажато — только новое)",
+    },
+}
+for _name, _sc in BOOT_SCENARIOS.items():
+    SCENARIOS[_name] = dict(_sc, boot=True)
+
 NO_OBJECTS = [
     (0x2914EA, "4E96", "4E71", "обход столбца клеток: jsr (a6) — конструктор объекта клетки"),
     (0x291800, "4E96", "4E71", "обход строки клеток: jsr (a6) — конструктор объекта клетки"),
@@ -1149,7 +1213,13 @@ class MegaDrive:
 
     SCRATCH = 0x00900000
 
-    def __init__(self, rom, patches=(), spawn_codes=()):
+    def __init__(self, rom, patches=(), spawn_codes=(), pending_vint=False):
+        # pending_vint: прерывание кадра, пришедшее под маской, ждёт её снятия, как на железе (VDP держит
+        # запрос до подтверждения): основной поток идёт кусками по PENDING_STEP команд, и первый же кусок
+        # без маски берёт отложенное прерывание. Без флага оно теряется — так сняты трассы уровней.
+        self.pending_vint = pending_vint
+        self.pending = False
+        self.vints = 0
         rom = bytearray(rom)
         for at, old, new, _ in patches:
             old_b, new_b = bytes.fromhex(old), bytes.fromhex(new)
@@ -1324,11 +1394,30 @@ class MegaDrive:
         return struct.unpack(">H", bytes(self.uc.mem_read(self.sr_cell, 2)))[0]
 
     def frame(self):
-        """Кусок основного потока и прерывание кадра, если маска его пускает."""
-        self._run(self.pc, 0xFFFFFFFF, BUDGET)
-        self.pc = self.uc.reg_read(M.UC_M68K_REG_PC)
+        """Кусок основного потока и прерывание кадра, если маска его пускает (vints — сколько прерываний
+        кадра взято за кадр: отложенное и своё)."""
+        self.vints = 0
+        left = BUDGET
+        while self.pending and left:
+            step = min(PENDING_STEP, left)
+            self._run(self.pc, 0xFFFFFFFF, step)
+            self.pc = self.uc.reg_read(M.UC_M68K_REG_PC)
+            left -= step
+            if (self._sr() >> 8) & 7 < 6:
+                self.pending = False
+                self._interrupt()
+        if left:
+            self._run(self.pc, 0xFFFFFFFF, left)
+            self.pc = self.uc.reg_read(M.UC_M68K_REG_PC)
         if (self._sr() >> 8) & 7 >= 6:
+            self.pending = self.pending_vint
             return False
+        self._interrupt()
+        return True
+
+    def _interrupt(self):
+        """Прерывание уровня 6 в точке self.pc основного потока: обработчик до своего rte."""
+        self.vints += 1
         sp = (self.uc.reg_read(M.UC_M68K_REG_A7) - 4) & 0xFFFFFFFF
         self.uc.mem_write(sp, struct.pack(">I", self.pc))
         self.uc.reg_write(M.UC_M68K_REG_A7, sp)
@@ -1336,7 +1425,6 @@ class MegaDrive:
         self._run(self.stub_irq, 0xFFFFFFFF, HANDLER_LIMIT)
         if self.frame_sp is not None or self.uc.reg_read(M.UC_M68K_REG_PC) != self.pc:
             raise RuntimeError("обработчик кадра не вернулся за %d команд" % HANDLER_LIMIT)
-        return True
 
 
 # Сценарии с проверкой objects снимают ещё то, что пишут касания подбираемого (levels.md 2.3, 2.7).
@@ -1613,6 +1701,96 @@ def run(name, sc, rom):
     }
 
 
+def run_boot(name, sc, rom):
+    """Сценарий от включения: кадр — каждый кадр приставки с первого, пульт из записи с первого кадра.
+
+    После кадра k (его куска основного потока и прерываний кадра): пульт, сколько прерываний кадра взято
+    (vints: 0 — весь кадр под маской, 2 — отложенное и своё), PC и d7 основного потока (курсор меню $297448
+    и пароля $2909BA живут в d7), участки SCREEN_LAYOUT, CRC-32 CRAM, двух слов VSRAM, таблиц имён плоскостей
+    A и B, таблицы горизонтальной прокрутки и таблицы спрайтов в ОЗУ ($FF050C, $FFFFE1BA записей), байты кольца
+    драйвера. Картинка кадра k — память VDP после него."""
+    md = MegaDrive(rom, pending_vint=True)
+    md.ring = []
+    pads = []
+    for buttons, n in sc["input"]:
+        pads += [pad_byte(buttons)] * n
+    wanted = set(sc.get("pictures", ()))
+    state = {"setup": None}
+
+    def on_setup(uc, address, size, user):
+        if state["setup"] is None:
+            state["setup"] = len(frames)
+
+    md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
+    frames, pictures = [], {}
+    for k in range(sc["record"]):
+        md.pad = pads[k] if k < len(pads) else 0
+        md.frame()
+        v = md.vdp
+        r = v.reg
+        names_a, names_b = (r[2] & 0x38) << 10, (r[4] & 7) << 13
+        hscroll = (r[13] & 0x3F) << 10
+        count = min(md.word(0xFFFFE1BA), 80)
+        frames.append({
+            "pad": md.pad,
+            "vints": md.vints,
+            "pc": "%06X" % md.pc,
+            "d7": "%04X" % (md.uc.reg_read(M.UC_M68K_REG_D7) & 0xFFFF),
+            "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in SCREEN_LAYOUT),
+            "cram": "%08X" % zlib.crc32(struct.pack(">64H", *v.cram)),
+            "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1]),
+            "names": "%08X" % zlib.crc32(bytes(v.vram[names_a:names_a + 0x1000]) + bytes(v.vram[names_b:names_b + 0x1000])),
+            "hscroll": "%08X" % zlib.crc32(bytes(v.vram[hscroll:hscroll + 224 * 4])),
+            "sat": "%08X" % zlib.crc32(md.read(0xFF050C, count * 8)),
+            "ring": bytes(md.ring).hex().upper(),
+        })
+        md.ring.clear()
+        if k in wanted:
+            why = v.check()
+            pic = {"t": md.word(0xFFFFE196), "cram": "".join("%04X" % c for c in v.cram),
+                   "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1])}
+            if why:
+                pic["skipped"] = why
+            else:
+                pic["full"] = v.picture()
+                pic["planes"] = v.picture(sprites=False)
+            pictures[k] = pic
+        if sc.get("until") == SETUP_STOP and state["setup"] is not None:
+            break
+    if sc.get("until") == SETUP_STOP and state["setup"] is None:
+        raise RuntimeError("%s: за %d кадров LevelSetup не было" % (name, sc["record"]))
+    missing = wanted - set(pictures)
+    if missing:
+        raise RuntimeError("%s: нет картинок кадров %s" % (name, sorted(missing)))
+    return {
+        "meta": {
+            "generator": "tools/romtrace.py",
+            "rom_sha1": hashlib.sha1(rom).hexdigest().upper(),
+            "core": "unicorn %s, M68000" % UC_VERSION,
+            "budget": BUDGET,
+            "pending_step": PENDING_STEP,
+            "odd_io": {"$%06X" % a: n for a, n in sorted(md.odd_io.items())},
+            "pad_bits": BUTTONS,
+            "frame": "frames[k] — после k-го кадра приставки с включения (кусок основного потока в BUDGET команд, "
+                     "прерывания кадра: vints — сколько взято, 0 — кадр под маской, 2 — отложенное и своё); "
+                     "pad — пульт кадра; pc, d7 — основной поток; ram — SCREEN_LAYOUT; cram, names (таблицы имён A "
+                     "и B по $1000 байт), hscroll (224 строки), sat (таблица спрайтов в ОЗУ $FF050C) — CRC-32; "
+                     "картинка кадра k — память VDP после него",
+        },
+        "scenario": {
+            "name": name,
+            "about": sc["about"],
+            "boot": True,
+            "until": sc.get("until"),
+            "setup_frame": state["setup"],
+            "input": [[b, n] for b, n in sc["input"]],
+        },
+        "layout": {"ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in SCREEN_LAYOUT]},
+        "frames": frames,
+        "_pictures": pictures,
+    }
+
+
 def write_pictures(name, level, pictures):
     import sprites as S
     out = OUT("export", "pictures")
@@ -1624,8 +1802,13 @@ def write_pictures(name, level, pictures):
             index = json.load(f)
     index = {k: v for k, v in index.items() if v["scenario"] != name}
     for k, pic in sorted(pictures.items()):
-        entry = {"scenario": name, "level": level, "frame": k, "camera": pic["camera"], "t": pic["t"],
-                 "cram": pic["cram"], "vsram": pic["vsram"]}
+        if level is None:
+            # Экран вне уровня (сценарий от включения): кадр k — после k-го кадра приставки.
+            entry = {"scenario": name, "screen": True, "frame": k, "t": pic["t"], "cram": pic["cram"],
+                     "vsram": pic["vsram"]}
+        else:
+            entry = {"scenario": name, "level": level, "frame": k, "camera": pic["camera"], "t": pic["t"],
+                     "cram": pic["cram"], "vsram": pic["vsram"]}
         if "bottom" in pic:
             entry["bottom"] = pic["bottom"]
         if "skipped" in pic:
@@ -1668,7 +1851,8 @@ def main():
     args = ap.parse_args()
     if args.list:
         for name, sc in SCENARIOS.items():
-            print("%-14s уровень %2d  %s" % (name, sc["level"], sc["about"]))
+            where = "от включения" if sc.get("boot") else "уровень %2d" % sc["level"]
+            print("%-14s %-12s  %s" % (name, where, sc["about"]))
         return
     names = args.names or list(SCENARIOS)
     for name in names:
@@ -1679,11 +1863,12 @@ def main():
     if not args.check:
         os.makedirs(out, exist_ok=True)
     for name in names:
-        trace = run(name, SCENARIOS[name], rom)
+        runner = run_boot if SCENARIOS[name].get("boot") else run
+        trace = runner(name, SCENARIOS[name], rom)
         pictures = trace.pop("_pictures")
         text = dump(trace)
         if args.check:
-            again = run(name, SCENARIOS[name], rom)
+            again = runner(name, SCENARIOS[name], rom)
             again.pop("_pictures")
             again = dump(again)
             print("%s: %s" % (name, "повтор совпал" if text == again else "ПОВТОР РАЗОШЁЛСЯ"))
@@ -1694,7 +1879,7 @@ def main():
         with io.open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         if pictures:
-            write_pictures(name, SCENARIOS[name]["level"], pictures)
+            write_pictures(name, SCENARIOS[name].get("level"), pictures)
         print("%s: %s" % (name, path))
 
 
