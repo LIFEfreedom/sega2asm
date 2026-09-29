@@ -164,7 +164,12 @@ GETHIM, YOHOHO, UNDEAD, GDLUCK: заставки миров 10-18). Сценар
 false`): `pass_2` (конец мира 0-2: LEVEL COMPLETE без пароля до срока, заставка
 мира 3, уровень 3), `pass_9` (мешков 12 подменой на входе: пароль ITSHOT, Start
 на итогах, заставка мира 10, уровень 10) и `pass_5` (сцена после уровня 5 до
-ухода Мауи, вход в уровень 6 — его процедура M7). `--loads` мерит загрузку входа в каждый уровень (`export/loads.json`:
+ухода Мауи, вход в уровень 6 — его процедура M7); M8d часть 3 — гибель: `hazard_death_16`
+(гибель настоящая, жизни остались: экран гибели, тот же уровень), `continue_yes_3` (последняя
+жизнь подменой на входе, сигнал −1 подменой, точка `at`: Start на экране гибели, CONTINUE —
+вправо, уровень с начала), `continue_no_7` (влево — GAME OVER до срока), `game_over_hard_1`
+(HARD, продолжений нет — сразу GAME OVER); у `past_exit` с `until: "restart"` следующего
+уровня нет: трасса кончается кадром, в куске которого главный цикл пришёл на `$297FE4`. `--loads` мерит загрузку входа в каждый уровень (`export/loads.json`:
 по кадру «0» — кусок кончился под маской, «1» — нет, «2» — под маской, но
 отложенное прерывание пришло посреди него).
 
@@ -227,6 +232,7 @@ POOL_RESET = 0x295E7E      # $295E7E: пул заново — в кадре эк
 LEVEL_END = 0x298B1A       # $298B1A bsr $2968D6: затемнение уровня кончилось, его задачи снимаются
 ENTRY_LOAD = 0x2986FC      # во входе $2986EA сразу после jsr $290C54: затемнение кончилось, дальше загрузка
 STRONGHOLD = 0x28EABE      # сцена оплота из слота $FF1364 (M8e ремейка): сценарий заставки мира 18 кончается здесь
+RESTART = 0x297FE4         # снова с заставок (после GAME OVER): past_exit с until "restart" кончается на этом кадре
 
 # Кнопки в порядке байта пульта (активная единица): U D L R B C A S.
 BUTTONS = "UDLRBCAS"
@@ -419,9 +425,10 @@ SCENARIOS = {
         "about": "уровень 10: вправо по опасным клеткам (код 7), урон, неуязвимость, выпрыгивание",
     },
     "hazard_death_16": {
-        "level": 16, "objects": False, "checks": ["camera", "player"], "pictures": [200],
-        "input": [("R", 900)],
-        "about": "уровень 16: вправо по опасным клеткам до гибели, запас 100 -> 0",
+        "level": 16, "objects": False, "checks": ["camera", "player", "objects"], "pictures": [200],
+        "input": [("R", 900)], "past_exit": {"input": [], "frames": 40, "pictures": [60]},
+        "about": "уровень 16: вправо по опасным клеткам до гибели, запас 100 -> 0; за сигналом (M8d) — экран гибели до "
+                 "срока, жизней 2, тот же уровень с начала и 40 его кадров",
     },
     "spikes_below_3": {
         "level": 3, "objects": False, "checks": ["camera", "player"], "at": (248, 190),
@@ -1441,6 +1448,36 @@ SCENARIOS["pass_9"] = {
     "about": "уровень 9 (последний мира 7-9) без объектов, мешков 12 подменой на входе: сигнал выхода +1 подменой после "
              "кадра 40; LEVEL COMPLETE с паролем ITSHOT, Start на итогах, заставка мира 10, уровень 10 и 40 его кадров",
 }
+# M8d, часть 3: гибель за сигналом выхода ($298120) — экран гибели $2903A8, $298394: жизни остались — тот же уровень
+# с точки возврата (hazard_death_16, гибель настоящая); последняя жизнь и продолжение есть — CONTINUE $29066A: вправо —
+# продолжение (точка возврата стёрта, уровень с начала), влево — GAME OVER $28ED64 и снова с заставок $297FE4; HARD
+# (продолжений нет) — сразу GAME OVER. Сигнал -1 подменой после кадра 40, как его ставит гибель игрока.
+SCENARIOS["continue_yes_3"] = {
+    "level": 3, "objects": False, "checks": ["camera", "player", "objects"], "at": (640, 150),
+    "poke": [(0xFF1344, struct.pack(">H", 1))],
+    "input": [("", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 0xFFFF))],
+    "past_exit": {"input": [("", 58), ("S", 2), ("", 158), ("R", 2), ("", 200), ("R", 3)], "frames": 40,
+                  "pictures": [20, 350, 412]},
+    "about": "уровень 3 с точки (640, 150), жизнь последняя (подмена на входе): сигнал выхода -1 подменой после кадра "
+             "40; экран гибели, CONTINUE — вправо: продолжений 0, жизней 3, точка возврата стёрта — уровень 3 с начала "
+             "и 40 его кадров",
+}
+SCENARIOS["continue_no_7"] = {
+    "level": 7, "objects": False, "checks": ["camera", "player", "objects"],
+    "poke": [(0xFF1344, struct.pack(">H", 1))],
+    "input": [("", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 0xFFFF))],
+    "past_exit": {"input": [("", 468), ("L", 3)], "until": "restart", "pictures": [760, 860, 1400]},
+    "about": "уровень 7, жизнь последняя (подмена на входе): сигнал выхода -1 подменой после кадра 40; экран гибели, "
+             "CONTINUE — влево: GAME OVER до срока, снова с заставок ($297FE4)",
+}
+SCENARIOS["game_over_hard_1"] = {
+    "level": 1, "objects": False, "checks": ["camera", "player", "objects"],
+    "poke": [(0xFF1344, struct.pack(">H", 1)), (0xFF1354, struct.pack(">H", 0)), (0xFFFFFD7C, b"\x01")],
+    "input": [("", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 0xFFFF))],
+    "past_exit": {"input": [], "until": "restart", "pictures": [910]},
+    "about": "уровень 1 на HARD, жизнь последняя, продолжений нет (подмена на входе): сигнал выхода -1 подменой после "
+             "кадра 40; экран гибели, сразу GAME OVER, снова с заставок ($297FE4)",
+}
 SCENARIOS["pass_5"] = {
     "level": 5, "objects": False, "checks": ["camera", "player", "objects"],
     "input": [("", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 1))],
@@ -1895,7 +1932,7 @@ def run(name, sc, rom):
     if attract is not None:
         pads += [0] * (sc["record"] - len(pads))
     state = {"setup": False, "entry": None, "frame": 0, "done": 0, "builder_bottom": None, "entry_bottom": None,
-             "phase": "level", "level_end": False, "next_entry": None, "reset": False}
+             "phase": "level", "level_end": False, "next_entry": None, "reset": False, "restart": False}
     layout = layout_of(sc)
     frames = []
     pictures = {}
@@ -1923,6 +1960,9 @@ def run(name, sc, rom):
 
     def on_reset(uc, address, size, user):
         state["reset"] = True
+
+    def on_restart(uc, address, size, user):
+        state["restart"] = True
 
     def on_player(uc, address, size, user):
         if state["phase"] == "screens":
@@ -1990,6 +2030,7 @@ def run(name, sc, rom):
     if past_exit is not None:
         md.uc.hook_add(UC_HOOK_CODE, on_level_end, None, LEVEL_END, LEVEL_END)
         md.uc.hook_add(UC_HOOK_CODE, on_reset, None, POOL_RESET, POOL_RESET)
+        md.uc.hook_add(UC_HOOK_CODE, on_restart, None, RESTART, RESTART)
     with_sounds = "sounds" in sc["checks"]
     sounds = {"start": [], "stop": []}
 
@@ -2104,6 +2145,7 @@ def run(name, sc, rom):
                if sc.get("poke_at") else {}),
             **({"past_exit": {"input": [[b, n] for b, n in past_exit.get("input", ())],
                               "frames": past_exit.get("frames", 1),
+                              **({"until": past_exit["until"]} if "until" in past_exit else {}),
                               "pictures": sorted(past_exit.get("pictures", ()))}}
                if past_exit is not None else {}),
         },
@@ -2136,7 +2178,9 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
     в следующий уровень. Прерывание кадра, пришедшее под маской, с сигнала ждёт её снятия (pending_vint), как в
     сценариях от включения: экраны и вход грузятся под маской. Кадры: post_exit — кадры уровня после сигнала
     (формат frames, плюс vints и CRC CRAM), screens — кадры главного цикла (формат сценариев от включения, SCREEN_LAYOUT),
-    next_entry — вход в следующий уровень, next_frames — его кадры; пульт — past_exit.input с кадра после сигнала."""
+    next_entry — вход в следующий уровень, next_frames — его кадры; пульт — past_exit.input с кадра после сигнала.
+    until: "restart" — следующего уровня нет (GAME OVER): screens кончаются кадром, в куске которого главный цикл
+    пришёл на $297FE4 (снова с заставок)."""
     past_exit = sc["past_exit"]
     if md.word(EXIT) == 0:
         raise RuntimeError("%s: уровень не кончился, а сценарий идёт за сигнал выхода" % name)
@@ -2144,13 +2188,16 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
     pads = pads_of(past_exit.get("input", ()))
     wanted = set(past_exit.get("pictures", ()))
     count = past_exit.get("frames", 1)
+    until = past_exit.get("until")
     post, screens, next_frames, pictures = [], [], [], {}
     state["phase"] = "post"
     state["reset"] = False
+    state["restart"] = False  # от включения главный цикл уже прошёл $297FE4
     j = 0
     while True:
         if j >= PAST_EXIT_LIMIT:
-            raise RuntimeError("%s: за %d кадров после сигнала следующий уровень не начался" % (name, PAST_EXIT_LIMIT))
+            raise RuntimeError("%s: за %d кадров после сигнала %s" % (
+                name, PAST_EXIT_LIMIT, "не дошли до $297FE4" if until == "restart" else "следующий уровень не начался"))
         md.pad = pads[j] if j < len(pads) else 0
         md.frame()
         j += 1
@@ -2170,7 +2217,11 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
             screens.append(frame)
             if k in wanted:
                 pictures[k] = screen_picture(md)
+            if until == "restart" and state["restart"]:
+                break
             continue
+        if until == "restart":
+            raise RuntimeError("%s: вошли в уровень, а не пришли на $297FE4" % name)
         if count == 0:
             # Без кадров следующего уровня: его вход снят (next_entry), дальше трасса не идёт.
             break
