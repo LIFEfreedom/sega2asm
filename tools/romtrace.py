@@ -130,7 +130,13 @@ CRC-32 CRAM, таблиц имён плоскостей A и B, таблицы �
 списке, START с HARD и раскладкой 3), `boot_password` (неверный пароль, ININJA —
 уровень 3), `boot_debug` (IMCARY и MAUIMM, меню DEBUG, START — уровень 5),
 `boot_cheat_broken` (IMCARY, неверный, MAUIMM — DEBUG закрыт; нажатия в меню
-до срока и демо).
+до срока и демо). Демо, в которое ROM входит само (`attract_N`, M8c часть 3,
+`run` с `attract`): пульт от включения не трогают, на кадре `ATTRACT_POKE`
+ставится номер демо `$FF21F4`, меню по сроку заводит его; кадры уровня — с
+объектами из `ATTRACT_OBJECTS` (без механизмов M9), пулом на входе и участком
+`DEMO_LAYOUT` (пара, флаг и счётчик потока), до сигнала выхода: `attract_0`,
+`attract_3`, `attract_7` (обрезано до пасти в земле) и `attract_start_3`
+(Start на кадре 400 — демо прервано).
 
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
@@ -1146,6 +1152,40 @@ def demo_input(rom, at):
     return out
 
 
+# Демо, в которое ROM входит сам (M8c часть 3, screens.md 4): пульт от включения не трогают, счётчик демо $FF21F4
+# ставится на кадре ATTRACT_POKE (до срока меню), и главное меню по сроку заводит демо этого номера ($2981B8): уровень
+# и поток из $1FD7DC, новая игра $298210, заставка мира, вход $2986EA (на $298846 — $2A5678: поток, ГСЧ с зерна).
+# Кадры уровня — с объектами, пульт уровня — сам пульт приставки (0 или Start); поток читает $2A5694. Запись идёт до
+# сигнала выхода: +1 — поток кончился ($2A56C2), -1 — Start на пульте ($2A56B0). Объекты — коды, конструкторы которых
+# в ремейке уже есть (предметы, враги, крюки): механизмы уровней 0, 3 и 7 (mechanisms.md 1, 2, 3.1) — M9, а без
+# них утка демо идёт уже не туда, куда вела её запись, и ROM, и ремейк одинаково.
+ATTRACT_OBJECTS = {
+    0: [7, 22, 23, 24, 25, 40, 41, 42, 44, 49, 52, 202, 206, 208, 210, 211],
+    3: [3, 4, 5, 6, 7, 32, 33, 44, 48, 52, 60, 148],
+    7: [3, 4, 7, 22, 23, 25, 33, 44, 52, 53, 60, 169, 170, 171, 188, 194],
+}
+# Демо 7 на кадре 1406 падает в пасть в земле (коды местности 33/34, $2949F0, mechanisms.md 3.1.4) — механизм M9:
+# до него запись обрезана.
+ATTRACT_RECORD = {7: 1406}
+ATTRACT_CUT = {7: " (обрезано до кадра 1405: дальше пасть в земле, M9)"}
+ATTRACT_POKE = 100
+DEMO_COUNTER = 0xFF21F4
+DEMO_LAYOUT = [
+    (0xFFFFFD8C, 6, "демо: указатель пары $FFFFFD8C, идёт $FFFFFD90, счётчик пары $FFFFFD91"),
+]
+for _n, (_level, _at) in enumerate(DEMOS):
+    SCENARIOS["attract_%d" % _level] = {
+        "level": _level, "objects": ATTRACT_OBJECTS[_level], "checks": ["camera", "player", "attract"], "attract": _n,
+        "input": [], "record": ATTRACT_RECORD.get(_level, 6000),
+        "about": "демо %d от включения: срок меню, уровень %d с объектами, поток $%06X до конца" % (_n, _level, _at)
+                 + ATTRACT_CUT.get(_level, ""),
+    }
+SCENARIOS["attract_start_3"] = {
+    "level": 3, "objects": ATTRACT_OBJECTS[3], "checks": ["camera", "player", "attract"], "attract": 1,
+    "input": [("", 400), ("S", 3)], "record": 1000,
+    "about": "демо 1 (уровень 3) от включения, Start на кадре 400: $FF1A6C = -1 ($2A56B0) — демо прервано",
+}
+
 for _n, (_level, _at) in enumerate(DEMOS):
     SCENARIOS["demo_%d" % _level] = {
         "level": _level, "objects": False, "checks": ["demo"], "demo": _at, "record": 1,
@@ -1560,7 +1600,8 @@ def layout_of(sc):
             + (OBJECT_LAYOUT if "objects" in sc["checks"] else [])
             + (THROW_LAYOUT if "throw" in sc["checks"] else [])
             + (CARRY_LAYOUT if "carry" in sc["checks"] else [])
-            + (BUNGEE_LAYOUT if "bungee" in sc["checks"] else []))
+            + (BUNGEE_LAYOUT if "bungee" in sc["checks"] else [])
+            + (DEMO_LAYOUT if "attract" in sc["checks"] else []))
 
 
 POOL_WINDOW = 0xFFFFE130       # окно порождения: столбец, ряд, их пределы
@@ -1603,6 +1644,9 @@ def run(name, sc, rom):
     pads = []
     for buttons, n in sc["input"]:
         pads += [pad_byte(buttons)] * n
+    attract = sc.get("attract")
+    if attract is not None:
+        pads += [0] * (sc["record"] - len(pads))
     state = {"setup": False, "entry": None, "frame": 0, "done": 0, "builder_bottom": None, "entry_bottom": None}
     layout = layout_of(sc)
     frames = []
@@ -1613,7 +1657,8 @@ def run(name, sc, rom):
         if not state["setup"]:
             state["setup"] = True
             state["setup_frame"] = boot_frame[0]
-            md.write(LEVEL_NUMBER, struct.pack(">H", sc["level"]))
+            if attract is None:
+                md.write(LEVEL_NUMBER, struct.pack(">H", sc["level"]))
             # Всё, что главный цикл положит в кольцо от LevelSetup до задачи игрока (остановить всё и музыка
             # уровня по заявке $FF1394, заставка мира), уходит во вход.
             state["ring_from"] = md.z80[RING_INDEX]
@@ -1641,8 +1686,9 @@ def run(name, sc, rom):
             sounds["start"].clear()
             sounds["stop"].clear()
             turns.clear()
-            if with_pool:
-                # Весь пул на входе: чего вход не пишет, то в записях осталось от прежних хозяев.
+            if with_pool or attract is not None:
+                # Весь пул на входе: чего вход не пишет, то в записях осталось от прежних хозяев (у демо — без
+                # покадрового пула: объекты уровня идут, а трасса остаётся в разумном размере).
                 state["entry"]["pool_ram"] = md.read(PLAYER, POOL_RECORDS * PLAYER_LENGTH).hex().upper()
             md.pad = pads[0]
         elif state["done"] - 1 in wanted and state["done"] - 1 not in pictures:
@@ -1709,12 +1755,20 @@ def run(name, sc, rom):
         boot_frame[0] = boot
         if boot >= BOOT_LIMIT:
             raise RuntimeError("%s: за %d кадров до уровня не дошли" % (name, BOOT_LIMIT))
-        md.pad = 0 if state["setup"] else (pad_byte("S") if boot % 90 < 4 else 0)
+        if attract is not None:
+            md.pad = 0
+            if boot == ATTRACT_POKE:
+                md.write(DEMO_COUNTER, struct.pack(">H", attract))
+        else:
+            md.pad = 0 if state["setup"] else (pad_byte("S") if boot % 90 < 4 else 0)
         md.frame()
         boot += 1
     if md.word(LEVEL_NUMBER) != sc["level"]:
         raise RuntimeError("%s: вошли в уровень %d" % (name, md.word(LEVEL_NUMBER)))
-    if md.read(DEMO, 1) != b"\0":
+    if attract is not None:
+        if md.read(DEMO, 1) == b"\0":
+            raise RuntimeError("%s: вошли в игру, а не в демо" % name)
+    elif md.read(DEMO, 1) != b"\0":
         raise RuntimeError("%s: вошли в демо, а не в игру" % name)
 
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
