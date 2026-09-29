@@ -138,6 +138,30 @@ CRC-32 CRAM, таблиц имён плоскостей A и B, таблицы �
 `attract_3`, `attract_7` (обрезано до пасти в земле) и `attract_start_3`
 (Start на кадре 400 — демо прервано).
 
+Между уровнями (M8d, mauimallard #35). Кадр от включения снимает ещё CRC-32 всего
+пула `$FFFFE1CA` (поле `pool`, в кадре, где пул заводят заново `$295E7E`, — и
+байты, `pool_ram`) и новые участки `SCREEN_LAYOUT` (заставка мира, форма и
+топливо, сцена после уровня и слот `$FF1364`, оружие, музыка уровня и конец
+мира, головы пула). `until: "entry"` — до входа в уровень: снимок `entry` на
+первом входе в задачу игрока, этот кадр — кадр 0 уровня, дальше `level_frames`
+кадров уровня в формате кадров уровня (участок `BOOT_LEVEL_LAYOUT`, пул, CRC
+CRAM, кольцо); `until: "stronghold"` — до кадра, где зовут сцену оплота
+`$28EABE`; `poke_at` — байты ОЗУ после кадра k (у сценариев уровня — после кадра
+k уровня). Сценарии: `boot_skip` и `boot_idle` до входа в уровень 0 (заставка
+мира 0 новой игры и демо 0), `boot_demo_3`/`boot_demo_7` (`$FF21F4` на кадре 100:
+демо 1 и 2 — заставки миров 3 и 7), `boot_card_break` (Start на заставке перед
+демо: демо прервано до уровня), `boot_card_10`-`boot_card_18` (пароли ITSHOT,
+GETHIM, YOHOHO, UNDEAD, GDLUCK: заставки миров 10-18). Сценарий уровня с
+`past_exit` идёт за сигнал выхода, как игра (`run_past_exit`, с `pending_vint`):
+`post_exit` — кадры уровня после сигнала (его затемнение, с `vints` и CRC CRAM),
+`screens` — кадры главного цикла в формате от включения (участок `screen_ram`),
+`next_entry` и `next_frames` — вход в следующий уровень и его кадры; картинки
+экранов — `<сценарий>_s<k>.png`. Сценарии: `exit_3` (уровень 4 того же мира без
+заставки), `pass_0` (сигнал +1 подменой после кадра 40 уровня 0 с объектами,
+уровень 1) и `pass_12` (то же на уровне 12: мерцание палитры встаёт, уровень 13). `--loads` мерит загрузку входа в каждый уровень (`export/loads.json`:
+по кадру «0» — кусок кончился под маской, «1» — нет, «2» — под маской, но
+отложенное прерывание пришло посреди него).
+
 Сценарий без объектов (`objects: false`) заменяет на `nop` вызов конструктора
 в обоих обходах клеток (`$2914EA` — столбец, `$291800` — строка): объекты из
 клеток не заводятся. Сценарий со списком кодов (`objects: [22, 23, …]`) зовёт
@@ -193,6 +217,10 @@ BUDGET = 12000             # команд основного потока меж
 PENDING_STEP = 64          # кусок основного потока, пока ждёт отложенное прерывание кадра (pending_vint)
 HANDLER_LIMIT = 3_000_000  # команд обработчику кадра, дальше — ошибка
 BOOT_LIMIT = 6000          # кадров до входа в уровень
+POOL_RESET = 0x295E7E      # $295E7E: пул заново — в кадре экрана снимается весь пул (pool_ram)
+LEVEL_END = 0x298B1A       # $298B1A bsr $2968D6: затемнение уровня кончилось, его задачи снимаются
+ENTRY_LOAD = 0x2986FC      # во входе $2986EA сразу после jsr $290C54: затемнение кончилось, дальше загрузка
+STRONGHOLD = 0x28EABE      # сцена оплота из слота $FF1364 (M8e ремейка): сценарий заставки мира 18 кончается здесь
 
 # Кнопки в порядке байта пульта (активная единица): U D L R B C A S.
 BUTTONS = "UDLRBCAS"
@@ -251,7 +279,19 @@ SCREEN_LAYOUT = [
     (0xFFFFDCC0, 2, "затемнение идёт ($290C70)"),
     (0xFFFFDEC2, 2, "затемнение: шагов осталось"),
     (0xFFFFE1BC, 4, "камера; на титульном $FFFFE1BE — вертикаль логотипа"),
+    # M8d (mauimallard #35): экраны между уровнями.
+    (0xFF000C, 4, "заставки: страницы сюжета кончились $FF000C, экран кончился $FF000E ($28E704 ждёт его)"),
+    (0xFF133A, 6, "форма, полуширина, топливо ($2983E2 гасит форму и топливо)"),
+    (0xFF1360, 8, "сцена после уровня $FF1360 ($2A5F5E), слот после заставки мира $FF1364 ($28E880)"),
+    (0xFF1A1E, 10, "набор оружия, ружьё, запасы 1-3"),
+    (0xFF1B46, 4, "музыка уровня $FF1B46, последний уровень мира $FF1B48 (LevelSetup)"),
+    (0xFFFFE1C0, 4, "пул: головы свободных $FFFFE1C0 и занятых $FFFFE1C2"),
 ]
+
+# Пул объектов целиком: запись игрока $FFFFE1CA и ещё 79 по $54 — актёры экранов берут те же записи, что объекты
+# уровня (кадр экрана снимает его CRC-32, pool, а в кадре, где его заводят заново $295E7E, — и байты, pool_ram).
+POOL_FROM = 0xFFFFE1CA
+POOL_BYTES = 80 * 0x54
 
 # Пять кадров HUD в ОЗУ ($298F26: запись из шаблона $1E9260 и тайлы за ней) — после каждого кадра их
 # контрольная сумма CRC-32 (поле hud), на входе — сами байты (hud_ram: чего вход не пишет, то осталось).
@@ -412,8 +452,9 @@ SCENARIOS = {
     },
     "exit_3": {
         "level": 3, "objects": False, "checks": ["camera", "player"], "at": (640, 150),
-        "input": [("R", 60)],
-        "about": "уровень 3: вправо в клетку выхода (код 5)",
+        "input": [("R", 60)], "past_exit": {"input": [], "frames": 40},
+        "about": "уровень 3: вправо в клетку выхода (код 5); за сигналом (M8d) — затемнение уровня, уровень 4 "
+                 "того же мира без заставки и без смены музыки, 40 его кадров",
     },
     "crouch_0": {
         "level": 0, "objects": False, "checks": ["camera", "player"],
@@ -1159,11 +1200,30 @@ def demo_input(rom, at):
 # сигнала выхода: +1 — поток кончился ($2A56C2), -1 — Start на пульте ($2A56B0). Объекты — коды, конструкторы которых
 # в ремейке уже есть (предметы, враги, крюки): механизмы уровней 0, 3 и 7 (mechanisms.md 1, 2, 3.1) — M9, а без
 # них утка демо идёт уже не туда, куда вела её запись, и ROM, и ремейк одинаково.
-ATTRACT_OBJECTS = {
+# PORTED_OBJECTS — те же списки для всех уровней (M8d, 2026-09-29): коды клеток, конструкторы которых в таблице
+# порождения уровня (levelNN.json objects[].ctor) ремейк уже написал; остальные коды в трассах не заводятся.
+PORTED_OBJECTS = {
     0: [7, 22, 23, 24, 25, 40, 41, 42, 44, 49, 52, 202, 206, 208, 210, 211],
+    1: [7, 22, 23, 24, 25, 32, 42, 44, 45, 49, 52, 53, 206, 208],
+    2: [7, 22, 23, 24, 25, 44, 176, 202, 206, 207, 221],
     3: [3, 4, 5, 6, 7, 32, 33, 44, 48, 52, 60, 148],
+    4: [3, 4, 5, 6, 7, 32, 33, 44, 48, 52, 53, 60, 142, 148],
+    5: [3, 4, 5, 6, 7, 32, 33, 44, 48, 49, 52, 60, 148],
+    6: [3],
     7: [3, 4, 7, 22, 23, 25, 33, 44, 52, 53, 60, 169, 170, 171, 188, 194],
+    8: [3, 5, 7, 22, 23, 24, 25, 32, 33, 44, 52, 60, 168, 169, 170, 171, 174, 188, 192],
+    9: [7, 22, 23, 24, 25, 44, 52],
+    10: [3, 4, 5, 6, 7, 22, 23, 24, 25, 32, 33, 44, 45, 46, 47, 48, 49, 52, 53, 180, 200],
+    11: [3, 5, 7, 23, 32, 33, 44, 200],
+    12: [7, 22, 23, 24, 25, 32, 44, 48, 49, 52, 53, 60, 124, 125, 169, 170, 171, 172, 188],
+    13: [7, 22, 23, 24, 25, 32, 44, 48, 49, 52, 169, 170, 171, 188],
+    14: [7, 22, 23, 24, 32, 44, 52, 60, 141, 142, 143],
+    15: [7, 22, 23, 24, 32, 44, 45, 46, 47, 48, 52, 53, 142, 143],
+    16: [3, 4, 5, 6, 7, 22, 23, 24, 25, 32, 33, 44, 45, 46, 47, 48, 49, 50, 52, 53, 60, 188, 189, 190, 200],
+    17: [3, 5, 6, 7, 22, 23, 25, 32, 33, 44, 47, 120, 160],
+    18: [33],
 }
+ATTRACT_OBJECTS = {level: PORTED_OBJECTS[level] for level in (0, 3, 7)}
 # Демо 7 на кадре 1406 падает в пасть в земле (коды местности 33/34, $2949F0, mechanisms.md 3.1.4) — механизм M9:
 # до него запись обрезана.
 ATTRACT_RECORD = {7: 1406}
@@ -1193,6 +1253,8 @@ for _n, (_level, _at) in enumerate(DEMOS):
     }
 
 SETUP_STOP = "setup"       # boot: until — остановиться на кадре, где главный цикл вошёл в LevelSetup
+ENTRY_STOP = "entry"            # boot: until — до входа в уровень (снимок entry), дальше level_frames его кадров
+STRONGHOLD_STOP = "stronghold"  # boot: until — до кадра, где главный цикл зовёт сцену оплота $28EABE (M8e ремейка)
 
 # Сценарии от включения (M8c): экраны до входа в уровень, кадр — каждый кадр приставки (run_boot).
 BOOT_SCENARIOS = {
@@ -1285,8 +1347,77 @@ BOOT_SCENARIOS.update({
                  "главном меню срока не продлевают: демо 0",
     },
 })
+# M8d (mauimallard #35, часть 1): от включения до входа в уровень — заставка мира перед новой игрой и перед демо,
+# вход $2986EA и 40 кадров уровня с объектами, конструкторы которых в ремейке есть (PORTED_OBJECTS); заставки миров
+# 10, 12, 14, 16 и 18 — новой игрой по паролю (18 — до сцены оплота $28EABE, M8e ремейка).
+# Картинки заставок: две страницы сюжета с актёрами (кадры 250 и 450 от начала проявления) и буквы названия на месте
+# (120 кадров после $FF000C: 32 кадра падения и 88 из 181 выдержки).
+BOOT_SCENARIOS["boot_idle"].update(
+    until=ENTRY_STOP, record=5000, objects=PORTED_OBJECTS[0], level_frames=40,
+    pictures=BOOT_SCENARIOS["boot_idle"]["pictures"] + [2343, 2543, 2857],
+    about="с включения пульт не трогают: заставки, титульный экран до срока, меню до срока, демо 0 — заставка мира, "
+          "вход в уровень 0 и 40 его кадров")
+BOOT_SCENARIOS["boot_skip"].update(
+    until=ENTRY_STOP, record=4000, objects=PORTED_OBJECTS[0], level_frames=40,
+    pictures=BOOT_SCENARIOS["boot_skip"]["pictures"] + [1394, 1594, 1908],
+    about="Start на Disney, presents и на въезде логотипа титульного; в меню Start — START, новая игра: заставка мира, "
+          "вход в уровень 0 и 40 его кадров")
+_DEMO_PICTURES = {3: [2343, 2543, 2977], 7: [2343, 2543, 3168]}
+for _n, (_level, _at) in enumerate(DEMOS):
+    if _n:
+        BOOT_SCENARIOS["boot_demo_%d" % _level] = {
+            "input": [], "record": 8000, "until": ENTRY_STOP, "objects": PORTED_OBJECTS[_level], "level_frames": 40,
+            "poke_at": [(ATTRACT_POKE, DEMO_COUNTER, struct.pack(">H", _n))], "pictures": _DEMO_PICTURES[_level],
+            "about": "с включения пульт не трогают, счётчик демо $FF21F4 = %d на кадре %d: меню по сроку — демо %d, "
+                     "заставка мира, вход в уровень %d и 40 его кадров" % (_n, ATTRACT_POKE, _n, _level),
+        }
+# Start на заставке мира перед демо ($28E704 -> $FF21EC): демо прервано до уровня ($298276: $FF1A6C = -1), главный
+# цикл — «остановить всё», музыка 0, титульный экран и меню ($298008).
+BOOT_SCENARIOS["boot_card_break"] = {
+    "input": [("", 2393), ("S", 2)], "record": 3600,
+    "about": "с включения пульт не трогают, демо 0: Start на заставке мира (кадр 2393) — демо прервано до уровня, "
+             "титульный экран и меню",
+}
+_CARD_PASSWORDS = (("ITSHOT", 10, [1610, 1810, 2435]), ("GETHIM", 12, [1580, 1780, 2596]),
+                   ("YOHOHO", 14, [1628, 1828, 2696]), ("UNDEAD", 16, [1490, 1690, 2124]),
+                   ("GDLUCK", 18, [1544, 1744, 2751]))
+for _word, _level, _pictures in _CARD_PASSWORDS:
+    _sc = {
+        "input": BOOT_TO_MENU + presses("U S _10") + password_keys("AAAAAA", _word) + presses("_10 S"),
+        "record": 6000, "pictures": _pictures,
+        "about": "пароль %s, новая игра на уровне %d: заставка мира" % (_word, _level),
+    }
+    if _level == 18:
+        _sc.update(until=STRONGHOLD_STOP)
+        _sc["about"] += " до конца (дальше сцена оплота $28EABE — M8e ремейка)"
+    else:
+        _sc.update(until=ENTRY_STOP, objects=PORTED_OBJECTS[_level], level_frames=40)
+        _sc["about"] += ", вход в уровень и 40 его кадров"
+    BOOT_SCENARIOS["boot_card_%d" % _level] = _sc
+
 for _name, _sc in BOOT_SCENARIOS.items():
     SCENARIOS[_name] = dict(_sc, boot=True)
+
+# M8d, часть 1: победа внутри мира за сигналом выхода — уровень 0 с объектами (коды уровней 0 и 1, PORTED_OBJECTS),
+# сигнал +1 подменой между кадрами 40 и 41 (как его ставит объект выхода — в конце задач кадра), затемнение уровня с
+# объектами (скрипты идут, обработчики — нет), уровень 1 без заставки и 40 его кадров.
+SCENARIOS["pass_0"] = {
+    "level": 0, "objects": sorted(set(PORTED_OBJECTS[0]) | set(PORTED_OBJECTS[1])),
+    "checks": ["camera", "player", "objects", "sounds"],
+    "input": [("R", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 1))],
+    "past_exit": {"input": [], "frames": 40},
+    "about": "уровень 0 с объектами: вправо, сигнал выхода +1 подменой после кадра 40; затемнение уровня (объекты — "
+             "только скрипты), уровень 1 того же мира без заставки, 40 его кадров",
+}
+# Затемнение уровня с анимацией палитры: мерцание уровня 12 ($FF1A61) встаёт на $298EDC, затемнение идёт от CRAM,
+# прочитанного в копию $FFFFDC40 ($298EBE), а не от палитры уровня.
+SCENARIOS["pass_12"] = {
+    "level": 12, "objects": False, "checks": ["camera", "player"],
+    "input": [("", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 1))],
+    "past_exit": {"input": [], "frames": 40},
+    "about": "уровень 12 без объектов, утка стоит: сигнал выхода +1 подменой после кадра 40; мерцание палитры встаёт, "
+             "затемнение от CRAM, уровень 13 того же мира без заставки, 40 его кадров",
+}
 
 NO_OBJECTS = [
     (0x2914EA, "4E96", "4E71", "обход столбца клеток: jsr (a6) — конструктор объекта клетки"),
@@ -1635,6 +1766,92 @@ def snapshot(md, layout=LAYOUT, objects=False):
     return shot
 
 
+def pads_of(inputs):
+    pads = []
+    for buttons, n in inputs:
+        pads += [pad_byte(buttons)] * n
+    return pads
+
+
+def poke_schedule(sc):
+    """poke_at: [(k, адрес, байты)] — запись в ОЗУ после кадра k (после его снимка), до кадра k + 1."""
+    out = {}
+    for k, address, data in sc.get("poke_at", ()):
+        out.setdefault(k, []).append((address, data))
+    return out
+
+
+def cram_crc(md):
+    return "%08X" % zlib.crc32(struct.pack(">64H", *md.vdp.cram))
+
+
+def screen_frame(md, reset):
+    """Кадр экрана — формат сценариев от включения: пульт, сколько прерываний кадра взято, PC и d7 основного потока,
+    участки SCREEN_LAYOUT, CRC-32 CRAM, таблиц имён A и B, таблицы прокрутки, таблицы спрайтов в ОЗУ и всего пула,
+    байты кольца драйвера; в кадре, где пул заводили заново ($295E7E, reset), — ещё его байты (pool_ram)."""
+    v = md.vdp
+    r = v.reg
+    names_a, names_b = (r[2] & 0x38) << 10, (r[4] & 7) << 13
+    hscroll = (r[13] & 0x3F) << 10
+    count = min(md.word(0xFFFFE1BA), 80)
+    pool_bytes = md.read(POOL_FROM, POOL_BYTES)
+    frame = {
+        "pad": md.pad,
+        "vints": md.vints,
+        "pc": "%06X" % md.pc,
+        "d7": "%04X" % (md.uc.reg_read(M.UC_M68K_REG_D7) & 0xFFFF),
+        "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in SCREEN_LAYOUT),
+        "cram": cram_crc(md),
+        "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1]),
+        "names": "%08X" % zlib.crc32(bytes(v.vram[names_a:names_a + 0x1000]) + bytes(v.vram[names_b:names_b + 0x1000])),
+        "hscroll": "%08X" % zlib.crc32(bytes(v.vram[hscroll:hscroll + 224 * 4])),
+        "sat": "%08X" % zlib.crc32(md.read(0xFF050C, count * 8)),
+        "pool": "%08X" % zlib.crc32(pool_bytes),
+        "ring": bytes(md.ring).hex().upper(),
+    }
+    if reset:
+        frame["pool_ram"] = pool_bytes.hex().upper()
+    md.ring.clear()
+    return frame
+
+
+def screen_picture(md):
+    """Картинка кадра экрана: память VDP после него."""
+    v = md.vdp
+    why = v.check()
+    pic = {"t": md.word(0xFFFFE196), "cram": "".join("%04X" % c for c in v.cram),
+           "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1])}
+    if why:
+        pic["skipped"] = why
+    else:
+        pic["full"] = v.picture()
+        pic["planes"] = v.picture(sprites=False)
+    return pic
+
+
+def entry_snapshot(md, layout, objects):
+    """Вход в уровень — первый вход в задачу игрока $298C44, до шага игрока: запись игрока и участки layout, пул по
+    цепочке, пять кадров HUD в ОЗУ и весь пул (чего вход не пишет, то осталось от прежних хозяев), байты кольца с
+    конца прошлого кадра и индекс записи кольца."""
+    shot = snapshot(md, layout, objects)
+    shot["hud_ram"] = md.read(HUD_RAM, HUD_RAM_LENGTH).hex().upper()
+    shot["pool_ram"] = md.read(POOL_FROM, POOL_BYTES).hex().upper()
+    shot["ring"] = bytes(md.ring).hex().upper()
+    shot["ring_index"] = md.z80[RING_INDEX]
+    md.ring.clear()
+    return shot
+
+
+def level_frame(md, layout, objects):
+    """Кадр уровня после его конца или от включения: как frames[k] сценария уровня, плюс сколько прерываний кадра
+    взято (vints), CRC-32 CRAM и байты кольца."""
+    frame = dict(pad=md.pad, vints=md.vints, **snapshot(md, layout, objects))
+    frame["cram"] = cram_crc(md)
+    frame["ring"] = bytes(md.ring).hex().upper()
+    md.ring.clear()
+    return frame
+
+
 def run(name, sc, rom):
     patches = spawn_patches(sc["objects"])
     md = MegaDrive(rom, patches, sc["objects"] if isinstance(sc["objects"], list) else ())
@@ -1647,11 +1864,14 @@ def run(name, sc, rom):
     attract = sc.get("attract")
     if attract is not None:
         pads += [0] * (sc["record"] - len(pads))
-    state = {"setup": False, "entry": None, "frame": 0, "done": 0, "builder_bottom": None, "entry_bottom": None}
+    state = {"setup": False, "entry": None, "frame": 0, "done": 0, "builder_bottom": None, "entry_bottom": None,
+             "phase": "level", "level_end": False, "next_entry": None, "reset": False}
     layout = layout_of(sc)
     frames = []
     pictures = {}
     wanted = set(sc.get("pictures", ()))
+    pokes = poke_schedule(sc)
+    past_exit = sc.get("past_exit")
 
     def on_setup(uc, address, size, user):
         if not state["setup"]:
@@ -1665,11 +1885,30 @@ def run(name, sc, rom):
             md.ring = []
 
     def on_position(uc, address, size, user):
-        if "at" in sc:
+        if "at" in sc and state["entry"] is None:
             md.write(RESPAWN, struct.pack(">hh", *sc["at"]))
 
+    def on_level_end(uc, address, size, user):
+        state["level_end"] = True
+
+    def on_reset(uc, address, size, user):
+        state["reset"] = True
+
     def on_player(uc, address, size, user):
-        if state["entry"] is None:
+        if state["phase"] == "screens":
+            if state["next_entry"] is None:
+                # Вход в следующий уровень после экранов: задача игрока в первый раз.
+                state["next_entry"] = entry_snapshot(md, layout, with_pool)
+                if with_sounds:
+                    state["next_entry"]["sounds"] = sounds["start"][:]
+                    state["next_entry"]["stopped"] = sounds["stop"][:]
+                sounds["start"].clear()
+                sounds["stop"].clear()
+                turns.clear()
+                state["phase"] = "next"
+        elif state["phase"] != "level":
+            pass
+        elif state["entry"] is None:
             for offset, value in sc.get("set", ()):
                 md.write(PLAYER + offset, struct.pack(">H", value & 0xFFFF))
             for address, data in sc.get("poke", ()):
@@ -1718,6 +1957,9 @@ def run(name, sc, rom):
     md.uc.hook_add(UC_HOOK_CODE, on_builder, None, BUILDER_CALL, BUILDER_CALL)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
     md.uc.hook_add(UC_HOOK_CODE, on_position, None, PLAYER_POSITION, PLAYER_POSITION)
+    if past_exit is not None:
+        md.uc.hook_add(UC_HOOK_CODE, on_level_end, None, LEVEL_END, LEVEL_END)
+        md.uc.hook_add(UC_HOOK_CODE, on_reset, None, POOL_RESET, POOL_RESET)
     with_sounds = "sounds" in sc["checks"]
     sounds = {"start": [], "stop": []}
 
@@ -1774,6 +2016,8 @@ def run(name, sc, rom):
     # Кадр входа уже прошёл: пульт на нём — pads[0] (задача игрока читает его после снимка).
     # Уровень кончается первым кадром с сигналом выхода (гибель, выход).
     frames.append(dict(pad=pads[0], **snapshot(md, layout, with_pool), **heard()))
+    for address, data in pokes.get(0, ()):
+        md.write(address, data)
     state["done"] = 1
     for k in range(1, min(len(pads), sc.get("record", len(pads)))):
         if md.word(EXIT) != 0:
@@ -1783,6 +2027,8 @@ def run(name, sc, rom):
             pass
         state["done"] += 1
         frames.append(dict(pad=pads[k], **snapshot(md, layout, with_pool), **heard()))
+        for address, data in pokes.get(k, ()):
+            md.write(address, data)
     # Картинки после записанных кадров: игра идёт дальше с отпущенным пультом (картинке кадра k
     # нужен кадр k + 1).
     md.pad = 0
@@ -1793,6 +2039,10 @@ def run(name, sc, rom):
     missing = wanted - set(pictures)
     if missing:
         raise RuntimeError("%s: нет картинок кадров %s" % (name, sorted(missing)))
+
+    extra = {}
+    if past_exit is not None:
+        extra = run_past_exit(name, sc, md, state, layout, with_pool, heard)
 
     return {
         "meta": {
@@ -1820,6 +2070,12 @@ def run(name, sc, rom):
             "input": [[b, n] for b, n in sc["input"]],
             "patches": [{"at": "$%06X" % at, "was": old, "now": new, "why": why}
                         for at, old, new, why in patches],
+            **({"poke_at": [[k, "$%06X" % (a & 0xFFFFFF), d.hex().upper()] for k, a, d in sc["poke_at"]]}
+               if sc.get("poke_at") else {}),
+            **({"past_exit": {"input": [[b, n] for b, n in past_exit.get("input", ())],
+                              "frames": past_exit.get("frames", 1),
+                              "pictures": sorted(past_exit.get("pictures", ()))}}
+               if past_exit is not None else {}),
         },
         "layout": {
             "player": {"at": "$%08X" % PLAYER, "length": PLAYER_LENGTH},
@@ -1827,11 +2083,78 @@ def run(name, sc, rom):
             **({"pool": {"window": "$%08X" % POOL_WINDOW, "window_length": 8, "heads": "$%08X" % POOL_HEADS,
                          "heads_length": 4, "record": "адрес (слово) и $%02X байт, по цепочке от $FFFFE1C2" % PLAYER_LENGTH}}
                if with_pool else {}),
+            **({"screen_ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in SCREEN_LAYOUT]}
+               if past_exit is not None else {}),
         },
         "entry": state["entry"],
         "frames": frames,
+        **{k: v for k, v in extra.items() if not k.startswith("_")},
         "_pictures": pictures,
+        "_screen_pictures": extra.get("_screen_pictures", {}),
     }
+
+
+# Сколько кадров приставки сценарий за концом уровня может идти до входа в следующий.
+PAST_EXIT_LIMIT = 20000
+
+
+def run_past_exit(name, sc, md, state, layout, with_pool, heard):
+    """За сигналом выхода (M8d, mauimallard #35): уровень кончается так, как в игре, — главный поток видит сигнал в
+    кольце занятий $298AB8, ждёт кадр ($2967B6), затемняет уровень ($298EDC: CRAM в $FFFFDC40, кадр, $290C54 —
+    16 шагов), и всё это время задачи уровня идут (задача игрока шаг пропускает, $298CF2, AnimStep не зовёт
+    обработчики объектов, $297034); на $298B1A они снимаются, и дальше главный цикл: экраны, LevelSetup, вход
+    в следующий уровень. Прерывание кадра, пришедшее под маской, с сигнала ждёт её снятия (pending_vint), как в
+    сценариях от включения: экраны и вход грузятся под маской. Кадры: post_exit — кадры уровня после сигнала
+    (формат frames, плюс vints и CRC CRAM), screens — кадры главного цикла (формат сценариев от включения, SCREEN_LAYOUT),
+    next_entry — вход в следующий уровень, next_frames — его кадры; пульт — past_exit.input с кадра после сигнала."""
+    past_exit = sc["past_exit"]
+    if md.word(EXIT) == 0:
+        raise RuntimeError("%s: уровень не кончился, а сценарий идёт за сигнал выхода" % name)
+    md.pending_vint = True
+    pads = pads_of(past_exit.get("input", ()))
+    wanted = set(past_exit.get("pictures", ()))
+    count = past_exit.get("frames", 1)
+    post, screens, next_frames, pictures = [], [], [], {}
+    state["phase"] = "post"
+    state["reset"] = False
+    j = 0
+    while True:
+        if j >= PAST_EXIT_LIMIT:
+            raise RuntimeError("%s: за %d кадров после сигнала следующий уровень не начался" % (name, PAST_EXIT_LIMIT))
+        md.pad = pads[j] if j < len(pads) else 0
+        md.frame()
+        j += 1
+        if state["phase"] == "post":
+            if not state["level_end"]:
+                frame = dict(pad=md.pad, vints=md.vints, **snapshot(md, layout, with_pool))
+                frame["cram"] = cram_crc(md)
+                frame.update(heard())
+                post.append(frame)
+                continue
+            state["phase"] = "screens"
+        if state["phase"] == "screens":
+            frame = screen_frame(md, state["reset"])
+            state["reset"] = False
+            frame.update({k: v for k, v in heard().items() if k != "ring"})
+            k = len(screens)
+            screens.append(frame)
+            if k in wanted:
+                pictures[k] = screen_picture(md)
+            continue
+        frame = dict(pad=md.pad, vints=md.vints, **snapshot(md, layout, with_pool))
+        frame["cram"] = cram_crc(md)
+        frame.update(heard())
+        next_frames.append(frame)
+        if len(next_frames) >= count:
+            break
+    missing = wanted - set(pictures)
+    if missing:
+        raise RuntimeError("%s: нет картинок кадров экранов %s" % (name, sorted(missing)))
+    return {"post_exit": post, "screens": screens, "next_entry": state["next_entry"], "next_frames": next_frames,
+            "_screen_pictures": pictures}
+
+
+BOOT_LEVEL_LAYOUT = LAYOUT + OBJECT_LAYOUT + DEMO_LAYOUT
 
 
 def run_boot(name, sc, rom):
@@ -1840,62 +2163,71 @@ def run_boot(name, sc, rom):
     После кадра k (его куска основного потока и прерываний кадра): пульт, сколько прерываний кадра взято
     (vints: 0 — весь кадр под маской, 2 — отложенное и своё), PC и d7 основного потока (курсор меню $297448
     и пароля $2909BA живут в d7), участки SCREEN_LAYOUT, CRC-32 CRAM, двух слов VSRAM, таблиц имён плоскостей
-    A и B, таблицы горизонтальной прокрутки и таблицы спрайтов в ОЗУ ($FF050C, $FFFFE1BA записей), байты кольца
-    драйвера. Картинка кадра k — память VDP после него."""
-    md = MegaDrive(rom, pending_vint=True)
+    A и B, таблицы горизонтальной прокрутки, таблицы спрайтов в ОЗУ ($FF050C, $FFFFE1BA записей) и всего пула
+    ($FFFFE1CA, 80 записей; в кадре, где его заводят заново, — и байты), байты кольца драйвера. Картинка кадра k —
+    память VDP после него. until: "setup" — до LevelSetup; "entry" (M8d) — до входа в уровень: снимок entry на
+    первом входе в задачу игрока, кадр, в прерывании которого он был, — кадр 0 уровня, и level_frames кадров уровня в
+    формате сценариев уровня (level_frames); "stronghold" — до кадра, где зовут сцену оплота. objects и poke_at —
+    как у сценариев уровня (poke_at: после кадра k приставки)."""
+    objects = sc.get("objects", True)
+    patches = spawn_patches(objects)
+    md = MegaDrive(rom, patches, objects if isinstance(objects, list) else (), pending_vint=True)
     md.ring = []
-    pads = []
-    for buttons, n in sc["input"]:
-        pads += [pad_byte(buttons)] * n
+    pads = pads_of(sc["input"])
+    pokes = poke_schedule(sc)
     wanted = set(sc.get("pictures", ()))
-    state = {"setup": None}
+    until = sc.get("until")
+    state = {"setup": None, "entry": None, "entry_frame": None, "stronghold": None, "reset": False}
 
     def on_setup(uc, address, size, user):
         if state["setup"] is None:
             state["setup"] = len(frames)
 
+    def on_reset(uc, address, size, user):
+        state["reset"] = True
+
+    def on_player(uc, address, size, user):
+        if until == ENTRY_STOP and state["entry"] is None:
+            state["entry"] = entry_snapshot(md, BOOT_LEVEL_LAYOUT, True)
+            state["entry_frame"] = len(frames)
+
+    def on_stronghold(uc, address, size, user):
+        if state["stronghold"] is None:
+            state["stronghold"] = len(frames)
+
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
-    frames, pictures = [], {}
+    md.uc.hook_add(UC_HOOK_CODE, on_reset, None, POOL_RESET, POOL_RESET)
+    md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
+    md.uc.hook_add(UC_HOOK_CODE, on_stronghold, None, STRONGHOLD, STRONGHOLD)
+    frames, level_frames, pictures = [], [], {}
     for k in range(sc["record"]):
         md.pad = pads[k] if k < len(pads) else 0
         md.frame()
-        v = md.vdp
-        r = v.reg
-        names_a, names_b = (r[2] & 0x38) << 10, (r[4] & 7) << 13
-        hscroll = (r[13] & 0x3F) << 10
-        count = min(md.word(0xFFFFE1BA), 80)
-        frames.append({
-            "pad": md.pad,
-            "vints": md.vints,
-            "pc": "%06X" % md.pc,
-            "d7": "%04X" % (md.uc.reg_read(M.UC_M68K_REG_D7) & 0xFFFF),
-            "ram": "".join(md.read(at, n).hex().upper() for at, n, _ in SCREEN_LAYOUT),
-            "cram": "%08X" % zlib.crc32(struct.pack(">64H", *v.cram)),
-            "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1]),
-            "names": "%08X" % zlib.crc32(bytes(v.vram[names_a:names_a + 0x1000]) + bytes(v.vram[names_b:names_b + 0x1000])),
-            "hscroll": "%08X" % zlib.crc32(bytes(v.vram[hscroll:hscroll + 224 * 4])),
-            "sat": "%08X" % zlib.crc32(md.read(0xFF050C, count * 8)),
-            "ring": bytes(md.ring).hex().upper(),
-        })
-        md.ring.clear()
-        if k in wanted:
-            why = v.check()
-            pic = {"t": md.word(0xFFFFE196), "cram": "".join("%04X" % c for c in v.cram),
-                   "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1])}
-            if why:
-                pic["skipped"] = why
-            else:
-                pic["full"] = v.picture()
-                pic["planes"] = v.picture(sprites=False)
-            pictures[k] = pic
-        if sc.get("until") == SETUP_STOP and state["setup"] is not None:
+        if state["entry"] is not None:
+            level_frames.append(level_frame(md, BOOT_LEVEL_LAYOUT, True))
+            if len(level_frames) >= sc.get("level_frames", 1):
+                break
+        elif until == STRONGHOLD_STOP and state["stronghold"] is not None:
             break
-    if sc.get("until") == SETUP_STOP and state["setup"] is None:
+        else:
+            frames.append(screen_frame(md, state["reset"]))
+            state["reset"] = False
+            if k in wanted:
+                pictures[k] = screen_picture(md)
+            if until == SETUP_STOP and state["setup"] is not None:
+                break
+        for address, data in pokes.get(k, ()):
+            md.write(address, data)
+    if until == SETUP_STOP and state["setup"] is None:
         raise RuntimeError("%s: за %d кадров LevelSetup не было" % (name, sc["record"]))
+    if until == ENTRY_STOP and len(level_frames) < sc.get("level_frames", 1):
+        raise RuntimeError("%s: за %d кадров вход в уровень не состоялся" % (name, sc["record"]))
+    if until == STRONGHOLD_STOP and state["stronghold"] is None:
+        raise RuntimeError("%s: за %d кадров сцены оплота не было" % (name, sc["record"]))
     missing = wanted - set(pictures)
     if missing:
         raise RuntimeError("%s: нет картинок кадров %s" % (name, sorted(missing)))
-    return {
+    out = {
         "meta": {
             "generator": "tools/romtrace.py",
             "rom_sha1": hashlib.sha1(rom).hexdigest().upper(),
@@ -1907,24 +2239,116 @@ def run_boot(name, sc, rom):
             "frame": "frames[k] — после k-го кадра приставки с включения (кусок основного потока в BUDGET команд, "
                      "прерывания кадра: vints — сколько взято, 0 — кадр под маской, 2 — отложенное и своё); "
                      "pad — пульт кадра; pc, d7 — основной поток; ram — SCREEN_LAYOUT; cram, names (таблицы имён A "
-                     "и B по $1000 байт), hscroll (224 строки), sat (таблица спрайтов в ОЗУ $FF050C) — CRC-32; "
-                     "картинка кадра k — память VDP после него",
+                     "и B по $1000 байт), hscroll (224 строки), sat (таблица спрайтов в ОЗУ $FF050C), pool (пул "
+                     "$FFFFE1CA, 80 записей по $54) — CRC-32, pool_ram — байты пула в кадре, где его завели заново; "
+                     "картинка кадра k — память VDP после него; entry — вход в уровень, level_frames[j] — кадр j "
+                     "уровня (кадр entry_frame + j приставки), как frames сценариев уровня",
         },
         "scenario": {
             "name": name,
             "about": sc["about"],
             "boot": True,
-            "until": sc.get("until"),
+            "until": until,
             "setup_frame": state["setup"],
             "input": [[b, n] for b, n in sc["input"]],
+            **({"objects": objects} if objects is not True else {}),
+            **({"poke_at": [[k, "$%06X" % (a & 0xFFFFFF), d.hex().upper()] for k, a, d in sc["poke_at"]]}
+               if sc.get("poke_at") else {}),
+            **({"entry_frame": state["entry_frame"]} if until == ENTRY_STOP else {}),
+            **({"stronghold_frame": state["stronghold"]} if until == STRONGHOLD_STOP else {}),
         },
-        "layout": {"ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in SCREEN_LAYOUT]},
+        "layout": {"ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in SCREEN_LAYOUT],
+                   **({"level": {
+                       "player": {"at": "$%08X" % PLAYER, "length": PLAYER_LENGTH},
+                       "ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in BOOT_LEVEL_LAYOUT],
+                       "pool": {"window": "$%08X" % POOL_WINDOW, "window_length": 8, "heads": "$%08X" % POOL_HEADS,
+                                "heads_length": 4,
+                                "record": "адрес (слово) и $%02X байт, по цепочке от $FFFFE1C2" % PLAYER_LENGTH}}}
+                      if until == ENTRY_STOP else {})},
         "frames": frames,
         "_pictures": pictures,
     }
+    if until == ENTRY_STOP:
+        out["entry"] = state["entry"]
+        out["level_frames"] = level_frames
+    return out
 
 
-def write_pictures(name, level, pictures):
+def measure_entry(level, rom):
+    """Загрузка входа в уровень (M8d, решение 2a mauimallard #35): с включения, как сценарии от включения
+    (pending_vint), Start раз в 90 кадров до входа (меню, START, заставка мира пропускается), номер уровня подменён в
+    LevelSetup, объекты клеток не заводятся (окно клеток заполняется уже после ожидания кадра $298836). Узор — с
+    кадра, в куске которого вход $2986EA дождался затемнения $290C54 ($2986FC) и начал грузить уровень, до кадра,
+    в прерывании которого задача игрока пошла в первый раз (его нет): на кадр «0» — кусок кончился под маской,
+    «1» — нет, «2» — кончился под маской, но отложенное прерывание кадра пришло посреди него."""
+    md = MegaDrive(rom, spawn_patches(False), (), pending_vint=True)
+    state = {"setup": False, "start": None, "end": None}
+    frame = [0]
+
+    def on_setup(uc, address, size, user):
+        if not state["setup"]:
+            state["setup"] = True
+            md.write(LEVEL_NUMBER, struct.pack(">H", level))
+
+    def on_load(uc, address, size, user):
+        if state["start"] is None:
+            state["start"] = frame[0]
+
+    def on_player(uc, address, size, user):
+        if state["end"] is None:
+            state["end"] = frame[0]
+
+    md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
+    md.uc.hook_add(UC_HOOK_CODE, on_load, None, ENTRY_LOAD, ENTRY_LOAD)
+    md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
+    pattern = []
+    for k in range(BOOT_LIMIT):
+        frame[0] = k
+        md.pad = pad_byte("S") if k % 90 < 4 else 0
+        unmasked = md.frame()
+        if state["end"] is not None:
+            if md.word(LEVEL_NUMBER) != level:
+                raise RuntimeError("загрузка уровня %d: вошли в уровень %d" % (level, md.word(LEVEL_NUMBER)))
+            return "".join(pattern)
+        if state["start"] is not None:
+            # «2»: отложенное прерывание кадра пришло посреди куска (маску на миг сняли), а кончился он снова под
+            # маской — своё прерывание кадра ждёт следующего.
+            pattern.append("1" if unmasked else ("2" if md.vints else "0"))
+    raise RuntimeError("загрузка уровня %d: за %d кадров вход не состоялся" % (level, BOOT_LIMIT))
+
+
+def write_loads(rom):
+    entry = {}
+    for level in range(23):
+        entry[str(level)] = measure_entry(level, rom)
+        print("вход в уровень %2d: %d кадров %s" % (level, len(entry[str(level)]), entry[str(level)]))
+    data = {
+        "meta": {
+            "generator": "tools/romtrace.py --loads",
+            "rom_sha1": hashlib.sha1(rom).hexdigest().upper(),
+            "core": "unicorn %s, M68000" % UC_VERSION,
+            "budget": BUDGET,
+            "pending_step": PENDING_STEP,
+            "about": "загрузки, которые держат основной поток по кадрам (модель romtrace: BUDGET команд основного "
+                     "потока на кадр, прерывание кадра под маской ждёт её снятия): на кадр «0» — его кусок кончился "
+                     "под маской (прерывания кадра нет), «1» — нет (отложенное и своё), «2» — кончился под маской, "
+                     "но отложенное пришло посреди него (маску на миг сняли); поток идёт дальше в кадре после "
+                     "последнего",
+            "entry": "вход в уровень $2986EA (новая игра на этом уровне, утка, старт уровня): с кадра, в куске "
+                     "которого затемнение $290C54 кончилось и пошла загрузка ($2986FC: $2968D6, $290D50, пул, "
+                     "LevelLoadGfx под маской, игрок, камера, HUD, ожидание кадра $298836), до кадра, в прерывании "
+                     "которого задача игрока идёт в первый раз, — его в узоре нет",
+        },
+        "entry": entry,
+    }
+    path = OUT("export", "loads.json")
+    with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(data, ensure_ascii=False, indent=1))
+        f.write("\n")
+    print("loads: %s" % path)
+
+
+def write_pictures(name, level, pictures, screen_pictures=None):
     import sprites as S
     out = OUT("export", "pictures")
     os.makedirs(out, exist_ok=True)
@@ -1934,12 +2358,21 @@ def write_pictures(name, level, pictures):
         with io.open(index_path, encoding="utf-8") as f:
             index = json.load(f)
     index = {k: v for k, v in index.items() if v["scenario"] != name}
-    for k, pic in sorted(pictures.items()):
-        if level is None:
+    items = [(k, pic, level) for k, pic in sorted(pictures.items())]
+    # Кадры экранов за концом уровня (past_exit): k — номер кадра в screens, файл <сценарий>_s<k>.png.
+    items += [(k, pic, "screens") for k, pic in sorted((screen_pictures or {}).items())]
+    for k, pic, where in items:
+        if where == "screens":
+            stem0 = "%s_s%d" % (name, k)
+            entry = {"scenario": name, "screen": True, "part": "screens", "frame": k, "t": pic["t"],
+                     "cram": pic["cram"], "vsram": pic["vsram"]}
+        elif where is None:
             # Экран вне уровня (сценарий от включения): кадр k — после k-го кадра приставки.
+            stem0 = "%s_%d" % (name, k)
             entry = {"scenario": name, "screen": True, "frame": k, "t": pic["t"], "cram": pic["cram"],
                      "vsram": pic["vsram"]}
         else:
+            stem0 = "%s_%d" % (name, k)
             entry = {"scenario": name, "level": level, "frame": k, "camera": pic["camera"], "t": pic["t"],
                      "cram": pic["cram"], "vsram": pic["vsram"]}
         if "bottom" in pic:
@@ -1948,9 +2381,9 @@ def write_pictures(name, level, pictures):
             entry["skipped"] = pic["skipped"]
         else:
             for kind in ("full", "planes"):
-                stem = "%s_%d%s" % (name, k, "" if kind == "full" else "_planes")
+                stem = stem0 + ("" if kind == "full" else "_planes")
                 S.png(os.path.join(out, stem + ".png"), 320, 224, [c + (255,) for c in pic[kind]])
-        index["%s_%d" % (name, k)] = entry
+        index[stem0] = entry
     with io.open(index_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(dict(sorted(index.items())), ensure_ascii=False, indent=1))
         f.write("\n")
@@ -1962,7 +2395,7 @@ def dump(trace):
     keys = list(trace)
     for i, key in enumerate(keys):
         s.write("  %s: " % json.dumps(key))
-        if key == "frames":
+        if key in ("frames", "post_exit", "screens", "next_frames", "level_frames"):
             s.write("[\n")
             rows = trace[key]
             for j, row in enumerate(rows):
@@ -1981,7 +2414,11 @@ def main():
     ap.add_argument("names", nargs="*", help="сценарии (по умолчанию все)")
     ap.add_argument("--check", action="store_true", help="каждый прогнать дважды и сверить, не писать")
     ap.add_argument("--list", action="store_true", help="перечислить сценарии")
+    ap.add_argument("--loads", action="store_true", help="узоры загрузки входа во все 23 уровня в export/loads.json")
     args = ap.parse_args()
+    if args.loads:
+        write_loads(rom_bytes())
+        return
     if args.list:
         for name, sc in SCENARIOS.items():
             where = "от включения" if sc.get("boot") else "уровень %2d" % sc["level"]
@@ -1999,10 +2436,12 @@ def main():
         runner = run_boot if SCENARIOS[name].get("boot") else run
         trace = runner(name, SCENARIOS[name], rom)
         pictures = trace.pop("_pictures")
+        screen_pictures = trace.pop("_screen_pictures", {})
         text = dump(trace)
         if args.check:
             again = runner(name, SCENARIOS[name], rom)
             again.pop("_pictures")
+            again.pop("_screen_pictures", None)
             again = dump(again)
             print("%s: %s" % (name, "повтор совпал" if text == again else "ПОВТОР РАЗОШЁЛСЯ"))
             if text != again:
@@ -2011,8 +2450,8 @@ def main():
         path = os.path.join(out, name + ".json")
         with io.open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        if pictures:
-            write_pictures(name, SCENARIOS[name].get("level"), pictures)
+        if pictures or screen_pictures:
+            write_pictures(name, SCENARIOS[name].get("level"), pictures, screen_pictures)
         print("%s: %s" % (name, path))
 
 

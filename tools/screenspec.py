@@ -661,6 +661,7 @@ SCREEN_TILES = [
     (0x1F0FB0, u"пальмы со звёздами, ночное небо с берегом (концовка)"),
     (0x1F6B10, u"силуэты острова (заставка мира, итоги)"),
     (0x1F58B8, u"свиток титров"),
+    (0x1FBBDC, u"экран гибели ($2903D4, $2903F2)"),
 ]
 SCREEN_MAPS = [
     (0x1F0D58, u"presents DONALD Starring In ($2900AE, плоскость B)"),
@@ -672,7 +673,10 @@ SCREEN_MAPS = [
     (0x1F6548, u"силуэт острова"),
     (0x1F6850, u"силуэт острова (заставка мира)"),
     (0x1F3B4A, u"свиток титров 40 x 404"),
+    (0x1FB1D8, u"экран гибели, обе плоскости ($2903E8, $290406 — $296774: карта в ROM не сжата)"),
 ]
+# Карты, которые ROM пишет без распаковки ($296774 -> $29672C читает w, h и имена прямо из ROM).
+RAW_MAPS = {0x1FB1D8}
 SCREEN_PALETTES = [
     (0x1F0F30, u"presents ($2900BA PaletteFadeTo)"),
     (0x1F0612, u"титульный ($28FB78 PaletteFadeTo)"),
@@ -680,12 +684,23 @@ SCREEN_PALETTES = [
     (0x1F3A4A, u"концовка"),
     (0x1F5BF8, u"титры"),
     (0x1F6ED8, u"заставка мира"),
+    (0x1F6FD8, u"сцена после уровня 5 ($28EA38 PaletteFadeTo)"),
+    (0x1F6F58, u"LEVEL COMPLETE, продолжение ($2905A8, $290750 PaletteLoad), GAME OVER ($28ED9A PaletteFadeTo)"),
+    (0x1FB158, u"экран гибели ($290454 PaletteLoad)"),
 ]
 # Окна ROM как есть: движок описателей меню, пароли, потоки демо, таблицы ширин шрифта и волны воды читают байты.
 SCREEN_WINDOWS = [
-    ("text", 0x1EA5FE, 0x1EAA35, u"ширины шрифта $1EA5FE и $1EA852, волна воды титульного $1EA892 (256 байт), "
-                                 u"надпись PASSWORD $1EAA1E, читы $1EAA27/$1EAA2E (буквы + 1)"),
-    ("tables", 0x1FC75C, 0x1FD806, u"потоки демо $1FC75C/$1FC84C/$1FC9C0, слова паролей $1FCAEE, таблица паролей "
+    ("text", 0x1E967A, 0x1EAA35, u"тексты страниц $1E967A-$1E9E0D (слово — сколько строк, строки с нулём после "
+                                 u"каждой), страницы сюжета миров $1EA218-$1EA330 и сцены после уровня 5 $1EA24C (слово — "
+                                 u"сколько страниц, на страницу слово кадров и адрес текста), списки актёров сцен "
+                                 u"$1EA35C-$1EA5D8 и экранов $1EA992-$1EA9FA (слово — сколько, по 12 байт: x, y, "
+                                 u"скрипт, обработчик), кадр буквы шрифта $1EA840, ширины шрифта $1EA5FE и $1EA852, "
+                                 u"волна воды титульного $1EA892 (256 байт), PASSWORD: $1EAA14, надпись PASSWORD "
+                                 u"$1EAA1E, читы $1EAA27/$1EAA2E (буквы + 1)"),
+    ("tables", 0x1FC23E, 0x1FD806, u"названия миров крупными буквами $1FC23E-$1FC5E2 ($28EE28), надписи LEVEL "
+                                   u"COMPLETE $1FC5E2, CONTINUE $1FC694, COWABUNGA $1FC6C6, NO BONUS $1FC6FE, GAME "
+                                   u"OVER $1FC72A (по 6 байт: буква, x, y, конец — "
+                                   u"$FFFF), потоки демо $1FC75C/$1FC84C/$1FC9C0, слова паролей $1FCAEE, таблица паролей "
                                    u"$1FCB26, указатели уровней $1FCB50, названия $1FCBAC, процедуры миров $1FCC08, "
                                    u"описатели меню $1FD440/$1FD46E/$1FD4AA/$1FD5BC, раскладки $1FD7AC, демо $1FD7DC, "
                                    u"сложность $1FD7EE"),
@@ -723,7 +738,11 @@ def vdp_layers(outdir):
         tiles[hexa(a)] = OrderedDict([("what", what), ("count", len(data) // 32), ("png", "screens/" + name)])
     maps = OrderedDict()
     for a, what in SCREEN_MAPS:
-        data, _ = lzss.unpack(a, ROM)
+        if a in RAW_MAPS:
+            w, h = struct.unpack_from(">HH", ROM, a)
+            data = ROM[a:a + 4 + 2 * w * h]
+        else:
+            data, _ = lzss.unpack(a, ROM)
         w, h = struct.unpack_from(">HH", data, 0)
         if len(data) != 4 + 2 * w * h:
             raise ValueError("карта $%06X: %d байт при %d x %d" % (a, len(data), w, h))

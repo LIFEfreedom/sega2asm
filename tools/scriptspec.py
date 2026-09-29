@@ -142,7 +142,29 @@ def entries():
             if SCRIPTS[0] <= v < SCRIPTS[1]:
                 out.setdefault(v, "spawn program at $%06X" % a)
         a += 2
+    # Актёры сцен (M8d, mauimallard #35): списки $28E73A/$28E76A/$29037E — слово, сколько, и по 12 байт: x, y,
+    # скрипт, обработчик.
+    for lst, what in SCENE_ACTORS:
+        for i in range(U16(lst)):
+            v = U32(lst + 2 + 12 * i + 4)
+            if SCRIPTS[0] <= v < SCRIPTS[1]:
+                out.setdefault(v, "actor %d of $%06X (%s)" % (i, lst, what))
+    # Крупные буквы надписей и названий миров: скрипт — слово кадра $1D6D80 + 2 * буква ($2900DE, $28EE02).
+    for g in range(BIG_LETTERS):
+        out.setdefault(BIG_LETTER_SCRIPTS + 2 * g, "big letter %d ($2900DE, $28EE02)" % g)
     return out
+
+
+SCENE_ACTORS = [
+    (0x1EA35C, "заставка мира 0-2"), (0x1EA376, "заставка мира 3-6"), (0x1EA390, "заставка мира 7-9"),
+    (0x1EA3E6, "заставка мира 10-11"), (0x1EA4AC, "заставка мира 12-13"), (0x1EA448, "заставка мира 14-15"),
+    (0x1EA46E, "заставка мира 16-17"), (0x1EA4EA, "заставка мира 18"), (0x1EA5CA, "заставка бонуса"),
+    (0x1EA57C, "сцена после уровня 5"), (0x1EA5A2, "сцена оплота"), (0x1EA5BC, "итог бонуса"),
+    (0x1EA5D8, "GAME OVER"), (0x1EA992, "экран гибели"), (0x1EA9AC, "мёртвый экран $29080E"),
+    (0x1EA9C6, "LEVEL COMPLETE"), (0x1EA9E0, "продолжение"), (0x1EA9FA, "продолжение: стрелки"),
+]
+BIG_LETTER_SCRIPTS = 0x1D6D80
+BIG_LETTERS = 29
 
 
 def listing(known, seen_order):
