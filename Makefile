@@ -78,7 +78,7 @@ export PYTHONIOENCODING := utf-8
 # файлов. Без этого сборка падает на «Source file could not be opened».
 export MSYS_NO_PATHCONV := 1
 
-.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex cutscene menus worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim exportanim exportmissions animdict pcm music sfx render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
+.PHONY: all analyze codegaps symbols split check codemap findcode aiscripts packmap terrain maps maptex cutscene menus worldmap nameprocs dumptext findtext packedtext unpack missions stages gfx unitgfx unitanim exportanim exportmissions animdict pcm music sfx soundsites render deps vectors xcheck chains whocalls z80dis z80seq z80render z80voice frames sprites levels anim unlz coverage tileprobe build verify rebuild tools clean cleantools distclean help
 
 # По умолчанию — то, что работает без ассемблера
 all: split check
@@ -383,8 +383,17 @@ music:
 	@$(PYTHON) $(TOOLS_DIR)/music.py
 
 # Звуковые эффекты: 50 записей драйвера, из них 33 без единого сэмпла
-sfx:
+sfx: $(MAIN_ASM)
 	@$(PYTHON) $(TOOLS_DIR)/sfx.py
+
+# Перепись мест звука и выгрузка для ремейка (dyna #231): каждое место
+# трапа звука описано в tools/soundevents.py, иначе ошибка и выгрузки нет.
+# Пишет export/sounds.json (+ .sources.json), export/sound/z80.bin и
+# banks.bin, docs/game-sound-events.md. SOUNDARGS=--check — только сверка,
+# --sites — список мест. Эталон по кадрам: make render RENDERARGS=--reference
+SOUNDARGS ?=
+soundsites: $(MAIN_ASM)
+	@$(PYTHON) $(TOOLS_DIR)/soundsites.py $(SOUNDARGS)
 
 # Чужие ядра для render: clownz80 и Nuked-OPN2, в репозиторий не входят
 deps:
@@ -392,6 +401,8 @@ deps:
 
 # Звук с эмулятора: драйвер исполняется, а не пересказывается.
 # Нужен компилятор C (CC) и `make deps`.  make render RENDERARGS=--music
+# Эталон для ремейка: RENDERARGS=--reference (после make soundsites), повтор
+# и сверка: RENDERARGS="--reference --check"
 CC        ?= gcc
 RENDER    := $(TOOLBIN_DIR)/render.exe
 RENDERARGS ?=

@@ -96,7 +96,7 @@ def body(code, a, limit=80):
 def digest(ins):
     d6 = d7 = None
     ticks, music, calls, arg7 = [], [], [], []
-    for t in ins:
+    for k, t in enumerate(ins):
         m = re.match(r"move\.w\s+#\$([0-9A-F]+),d6", t)
         if m:
             d6 = int(m.group(1), 16)
@@ -106,8 +106,11 @@ def digest(ins):
         m = re.match(r"cmpi\.l\s+#\$([0-9A-F]+),d0", t)
         if m:
             ticks.append(int(m.group(1), 16))
+        # Музыка — только `move.b #m,d0` прямо перед `jsr PlaySound`: тот же
+        # приём задаёт аргумент и другим процедурам (этап 37 —
+        # Species18StepGate), и без проверки вызова они читались музыкой.
         m = re.match(r"move\.b\s+#\$([0-9A-F]+),d0", t)
-        if m:
+        if m and k + 1 < len(ins) and re.match(r"jsr\s+\(PlaySound\)", ins[k + 1]):
             music.append(int(m.group(1), 16))
         # У тел-условий d7 значит не тик, а тип или число — и тогда его
         # кладут байтом, а не словом.

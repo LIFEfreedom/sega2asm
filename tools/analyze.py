@@ -502,7 +502,13 @@ def word_tables():
         if U16(a) not in (0x4EBB, 0x4EFB):         # JSR / JMP (d8,pc,Xn)
             continue
         ext = U16(a + 2)
-        if ext & 0x0800:                           # длинный индекс — не наш
+        # Длинный индекс — не наш, кроме случая, когда перед переходом
+        # индекс обнулён сверху `andi.l #$FFFF,Dn`: тогда это то же слово.
+        # Так устроен выбор меню команд $0075D6.
+        zext = ((ext & 0x8000) == 0
+                and U16(a - 6) == (0x0280 | ((ext >> 12) & 7))
+                and U32(a - 4) == 0xFFFF)
+        if ext & 0x0800 and not zext:
             continue
         d8 = ext & 0xFF
         t = a + 2 + (d8 - 256 if d8 > 127 else d8)
@@ -582,11 +588,54 @@ walk(fresh)
 print("проход 3 (+%d указателей из данных): %d инструкций, %d байт"
       % (len(fresh), len(starts), sum(covered)))
 
+def pc_refs():
+    """`lea (d16,pc),An`, за которым адрес сохраняют или по нему прыгают.
+
+    Меню ($007BE6-$009AAC) кладут следующий шаг в ячейку и уходят:
+    `lea $007E34(pc),a0 / move.l a0,$2500(a5)`, а зовёт его цикл меню
+    через `jsr (a0)`. Поток до такого кода не доходит, таблицы тоже нет.
+    Голый `lea` не годится: так же адресуют строки для печати
+    (`lea $007EA2(pc),a0 / bsr ...`), и текст до ближайшего `rts`
+    разбирается в «связный код». Поэтому следующая команда обязана быть
+    `move.l An,<память>` или `jsr/jmp (An)`, и цель ещё проходит
+    `code_start_ok`.
+    """
+    found = set()
+    for a in starts:
+        op = U16(a)
+        if (op & 0xF1FF) != 0x41FA:
+            continue
+        n = (op >> 9) & 7
+        nx = U16(a + 4)
+        # В память, но не на стек: `move.l aN,-(a7)` кладёт аргумент
+        # вызова — чаще всего строку для печати.
+        mode, reg = (nx >> 6) & 7, (nx >> 9) & 7
+        stored = (nx & 0xF03F) == (0x2008 | n) and mode >= 2 and \
+            not (mode == 4 and reg == 7)
+        called = nx in (0x4E90 | n, 0x4ED0 | n)
+        if not (stored or called):
+            continue
+        v = (a + 2 + S16(a + 2)) & 0xFFFFFF
+        if v not in starts and code_start_ok(v):
+            found.add(v)
+    return found
+
+
+# Входы, которые проход находит не сам. Таблица $008CEE (`jmp $02(pc,d1.w)`
+# в $008CEA, семь подпунктов меню команд) обрывается на нулевой записи:
+# одиночное длинное слово $014E42 (проход 3) выдаёт за начало кода $00902A —
+# середину `bne.w`, и настоящий вход $00902C после этого не годится в
+# указатель. Только у Dyna Brothers 2.
+KNOWN_ENTRIES = ({0x00902C, 0x00904A, 0x009102, 0x00921C, 0x0092E4,
+                  0x00942C, 0x0094B0}
+                 if SHA1 == "0D6C3D9EB0CB9A56AB91B7507B09473B078E773C" else set())
+
 for rnd in range(1, 9):
     tabs = {}
     tabs.update(word_tables())
     tabs.update(long_tables())
-    fresh = sorted({v for run in tabs.values() for v in run} - starts)
+    fresh = sorted(({v for run in tabs.values() for v in run} | pc_refs()
+                    | KNOWN_ENTRIES) - starts)
     if not fresh:
         break
     targets.update(fresh)

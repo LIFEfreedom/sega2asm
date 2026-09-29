@@ -51,6 +51,11 @@ u"""Миссии оригинала в формате ремейка (dyna #204)
 `+$4C` (dyna #205): ею, рядом CRAM 3, нарисована вся местность. У 95
 миссий из 123 она нулевая.
 
+`music` — байт `+$30`, номер `table_music` (dyna #231). Вход в миссию
+`$003B0C` отдаёт его трапу `$FF30` как есть и ставит `MusicId` на номер
++ 1: к этому треку вернутся после наведения. Банк и команду драйвера по
+номеру даёт `sounds.json` (`tools/soundsites.py`).
+
 Поле — клетки 1…38: `CanStepToCell` `$01E050` отказывает в шаге, если
 новая координата равна 0 или не меньше 39. Отсюда `playable_margin` 1.
 Край при этом бывает любой местностью, чаще всего водой.
@@ -574,6 +579,9 @@ def export_mission(c, m, r, recs, skipped):
         ("tileset", str(r[0x2A])),
         ("palette", r[0x4C]),
         ("unit_palette", r[0x29]),
+        # Номер table_music: вход в миссию $003B0C шлёт его трапом $FF30
+        # как есть, а потом ставит MusicId = номер + 1 (трек «потом»).
+        ("music", r[0x30]),
         ("starting_energy", players[0]["starting_energy"]),
         ("playable_margin", 1),
         ("tilemap", []),
@@ -621,6 +629,8 @@ def events_summary(ev):
                 out.append(k)
             elif k == "paint_cells":
                 out.append(u"%d клеток -> %d" % (len(o["cells"]), o["to"]))
+            elif k == "music":
+                out.append(u"музыка %d" % o["music"])
             else:
                 src = o.get("from") or [o["to"]]
                 dst = o.get("to", u"/".join(str(c[0]) for c in o.get("choice", [])))

@@ -20,10 +20,19 @@ u"""Покадровые сценарии этапов как данные ре�
 Проход по местности — одна из процедур `$0210CE…$0212A2` или
 `SpreadTypeMapWide` `$020EF0`, с маской типов из `d4` и типом из `d5`.
 
+Смена музыки — `jsr PlaySound` `$00DFEE` с номером `table_music` в `d0`
+(`move.b #m,d0`) внутри блока «на тике» — выгружается операцией
+`music` (dyna #231). `PlaySound` шлёт номер трапом `$FF30` и ставит
+`MusicId` на m + 1; при активном наведении (`GuideSavedMusic` не ноль) —
+только запоминает m + 1 и повторяет текущий трек.
+
 Не выгружается (у каждого своя задача ремейка): лава `TickLavaEruption`
 (#142), яд `StagePoisonTick` (#188), пожары под юнитами этапов 12, 17 и
 223, марш ﾒｶﾞｻﾞｳﾙｽ (#209), подсказки уроков (#68), прыжок часов
-этапа 38, а также звук, палитры, тряска, камера и текст.
+этапа 38, а также палитры, тряска, камера и текст. `StageSoundLoopTick`
+`$02F7BC` звука сам не заводит: по таймеру он зовёт `RefreshScreenKeepFlags`,
+то есть анимацию `EventAnimBig` со своими звуками (перепись —
+`tools/soundsites.py`).
 """
 import collections
 import os
@@ -48,14 +57,16 @@ PASS_OF = {SPREAD_RANDOM: "spread_random", CONVERT_INNER: "convert_inner",
            CONVERT_ALL: "convert_all", SEED_ONE: "seed_one",
            REPAINT_LAST: "repaint_last", SPREAD_NEIGHBOURS: "spread_neighbours"}
 
-# оформление: звук, палитра, камера, тряска, перерисовка
-COSMETIC = {0x00DFEE, 0x00DAB0, 0x00DAA0, 0x016192, 0x00E10C, 0x00E036,
+PLAY_SOUND = 0x00DFEE             # смена музыки, номер table_music в d0
+
+# оформление: палитра, камера, тряска, перерисовка
+COSMETIC = {0x00DAB0, 0x00DAA0, 0x016192, 0x00E10C, 0x00E036,
             0x00E0CC, 0x0218BE, 0x0158A0, 0x00E328, 0x00E356, 0x00D572}
 
 # тела, которые ремейк не исполняет, и где они будут сделаны
 LATER = {0x02F55E: u"извержение лавы (#142)",
          0x02F6EE: u"яд (#188)",
-         0x02F7BC: None,                          # звуковая петля
+         0x02F7BC: None,                          # EventAnimBig по таймеру
          0x02FA6E: u"пожар под юнитом (отдельная задача)",
          0x01F570: u"марш ﾒｶﾞｻﾞｳﾙｽ (#209)",
          0x02F12C: u"шаг ﾒｶﾞｻﾞｳﾙｽ по воротам (#209)",
@@ -351,6 +362,24 @@ def special_117_extra(ins):
     return conv
 
 
+def music_block(a):
+    u"""Блок «на тике N — музыка m» по адресу a, байты сверяются:
+    `move.l GameTick,d0 / cmpi.l #N,d0 / bne / move.b #m,d0 / jsr PlaySound`."""
+    assert u16(a) == 0x2039 and u32(a + 2) == GAME_TICK, hex(a)
+    tick = imm(a + 6, 0x0C80, 4)
+    assert u16(a + 12) == 0x6600, hex(a)
+    m = imm(a + 16, 0x103C, 2) & 0xFF
+    assert u16(a + 20) == 0x4EB9 and u32(a + 22) == PLAY_SOUND, hex(a)
+    return tick_event(tick, [op("music", music=m)])
+
+
+# Этап 17 — пожар под юнитом, его сценарий не разбирается (FIRE_STAGES),
+# но за пожаром `StageMusic43AtTick1068` меняет музыку. Этап 132 не
+# разбирается, потому что его не берёт ни одна миссия; смену музыки
+# выгружаем и ему, чтобы выгрузка сходилась с переписью мест звука.
+MUSIC_EXTRA = {17: [0x02D5EC], 132: [0x02E72C]}
+
+
 def stage_events(st, place):
     u"""(таймеры, события на тике, отложенное) этапа st.
 
@@ -358,14 +387,15 @@ def stage_events(st, place):
     exportmissions, потому что юниты выгружаются по его правилам."""
     if st in FIRE_STAGES:
         # весь сценарий — пожар под случайным стоящим юнитом игрока 1
-        return [], [], [LATER[0x02FA6E]]
+        return [], [music_block(a) for a in MUSIC_EXTRA.get(st, [])], \
+            [LATER[0x02FA6E]]
     if 51 <= st <= 58:
         # уроки: подсказки на экране (#68) и цель урока 1 — её пишет
         # exportmissions
         return [], [], []
     if st == 132:
         # как этап 6, но его не берёт ни одна миссия
-        return [], [], []
+        return [], [music_block(a) for a in MUSIC_EXTRA[st]], []
     if st == 20:
         # сценарий ﾒｶﾞｻﾞｳﾙｽ целиком: марш, распад, камера
         return [], [], [LATER[0x01F570]]
@@ -390,6 +420,13 @@ def stage_events(st, place):
             start, fire, rearm = bodies[t]
             timers.append(timer(d7, d6, start, fire, rearm))
             handled.add(x.a)
+        elif t == PLAY_SOUND:
+            # `move.b #m,d0` прямо перед вызовом, вызов — в блоке «на тике»
+            assert ins[i - 1].op == 0x103C, (st, hex(x.a))
+            blk = [b for b in blocks if b[1] <= x.a < b[2]]
+            assert len(blk) == 1, (st, hex(x.a))
+            ticks.append(tick_event(blk[0][0], [op("music", music=ins[i - 1].arg & 0xFF)]))
+            handled.add(x.a)
         elif t == LOAD_PLACEMENT:
             blk = [b for b in blocks if b[1] <= x.a < b[2]]
             if st == 6:
@@ -406,10 +443,15 @@ def stage_events(st, place):
             raise AssertionError(u"этап %d: проход $%06X вне тела" % (st, t))
         else:
             raise AssertionError(u"этап %d: зов $%06X по $%06X" % (st, t, x.a))
+    # Особые этапы собирают таймеры и тики заново; смену музыки из общего
+    # прохода сохраняем.
+    music = [k for k in ticks if k["ops"][0]["pass"] == "music"]
     if st == 6:
-        return special_6(place) + (later,)
+        timers, ticks = special_6(place)
+        return timers, ticks + music, later
     if st == 31:
         timers, ticks = special_31(place)
+        ticks += music
     elif st == 33:
         timers, ticks = special_33(place, (timers, ticks))
     elif st == 117:

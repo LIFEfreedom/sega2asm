@@ -3,6 +3,8 @@
 
     make render                 50 эффектов в out/<имя>/sound/render/
     make render RENDERARGS=--music   плюс 45 песен по 30 секунд
+    make render RENDERARGS=--reference        эталон для ремейка (dyna #231)
+    make render RENDERARGS="--reference --check"   прогнать ещё раз и сверить
 
 Разбор данных, сделанный раньше, описывал ЧТО драйвер сыграет. Здесь он
 играет: код Z80 исполняется как есть, а звук берётся из того, что этот
@@ -19,6 +21,8 @@ deps`.
 номер не доходил до предела. Множитель ОДИН на всю выгрузку — иначе
 тихие звуки стали бы громкими наравне с музыкой.
 """
+import io
+import json
 import os
 import subprocess
 import sys
@@ -192,7 +196,162 @@ def sample_check(job, img):
                    envelope(ref, job["rate"], 0, step))
 
 
+# ─────────────────────────── эталон для ремейка ──────────────────────────
+# Ремейк исполняет тот же образ драйвера на своей эмуляции (dyna #232) и
+# обязан совпасть с render.c кадр в кадр. Эталон — CRC по кадрам (`--log`)
+# для каждого звука в двух запусках, как у Maui (`z80render.py`).
+FPS = 59.9227                # кадр драйвера: 59 736 тактов Z80
+REF_SECONDS = 45             # песни; эффекты — до тишины
+SFX_MAX_FRAMES = 600
+
+
+def set_bank(n):
+    """Пара байт ящика для банка n: x = n*8 + $1C0, (x >> 4, x << 4)."""
+    x = n * 8 + 0x1C0
+    return (x >> 4) & 0xFF, (x << 4) & 0xFF
+
+
+def banks_script(main, music):
+    a, b = set_bank(main)
+    c, d = set_bank(music)
+    return "1C04=%02X,1C05=%02X,1C06=%02X,1C07=%02X" % (a, b, c, d)
+
+
+def reference_jobs():
+    """39 песен (пары банк/команда из table_music) и 50 эффектов.
+
+    Песня играет на своём банке прерывания при банке главного цикла 5 (как
+    после старта), эффект — на банке, который застаёт его в игре по
+    переписи мест (`soundsites.bank_by_command`), а где перепись банка не
+    знает — по `banks_for_sfx`; банк прерывания 2."""
+    import soundsites
+    songs = sorted({(rom[MUSIC_TABLE + 2 * i], rom[MUSIC_TABLE + 2 * i + 1])
+                    for i in range((SFX_TABLE - MUSIC_TABLE) // 2)
+                    if rom[MUSIC_TABLE + 2 * i] <= 0x7F})
+    banks = banks_for_sfx()
+    banks.update(soundsites.bank_by_command(rom))
+    if soundsites.ERRORS:
+        raise SystemExit("перепись звука с ошибками — сначала make soundsites")
+    jobs = [dict(kind="song", cmd=c, main=5, music=b,
+                 frames=int(REF_SECONDS * FPS), stop=False) for b, c in songs]
+    jobs += [dict(kind="sfx", cmd=c, main=banks.get(c, 5), music=2,
+                  frames=SFX_MAX_FRAMES, stop=True) for c in range(0x90, 0xC2)]
+    return jobs
+
+
+# Режимы: «номер» — банки на кадре 2, команда на кадре 3 (как позиционный
+# запуск render.c); «стоп + номер» — после банков трап $FF37: $1F в $1C14 и
+# команда $E1, ожидание нуля в $1C14, затем номер (так начинается миссия,
+# $003B0C: стоп, банк, трек).
+def mail_for(job, mode):
+    banks = banks_script(job["main"], job["music"])
+    if mode == "start":
+        return "%s/1C0A=%02X" % (banks, job["cmd"])
+    return "%s/1C14=1F,1C0A=E1/?1C14/1C0A=%02X" % (banks, job["cmd"])
+
+
+def _commit(path):
+    r = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def reference_run(img, job, mode, log):
+    args = [EXE, rom_path(), img, os.path.join(build_dir(), "_reference.wav"),
+            "00", str(job["frames"]), "0", "0", "1" if job["stop"] else "0",
+            "256", "--mail", mail_for(job, mode), "--log", log]
+    r = subprocess.run(args, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode:
+        raise SystemExit("render.exe: %s" % (r.stderr or r.stdout).strip())
+    with open(log, "rb") as f:
+        return f.read()
+
+
+def reference(check):
+    out = out_path("export", "sound")
+    img = os.path.join(out, "z80.bin")
+    if not os.path.exists(img):
+        raise SystemExit("нет %s — сначала make soundsites"
+                         % os.path.relpath(img, HERE))
+    if bytes(z80dis.load()) != open(img, "rb").read():
+        raise SystemExit("z80.bin расходится с z80dis.load()")
+    os.makedirs(build_dir(), exist_ok=True)
+    log = os.path.join(build_dir(), "_reference.log")
+    blob, runs = bytearray(), []
+    for job in reference_jobs():
+        for mode in ("start", "stop"):
+            data = reference_run(img, job, mode, log)
+            runs.append({"kind": job["kind"], "command": job["cmd"],
+                         "bank_main": job["main"], "bank_music": job["music"],
+                         "mode": mode, "mail": mail_for(job, mode),
+                         "until_silence": job["stop"],
+                         "offset": len(blob), "frames": len(data) // 8})
+            blob += data
+        print("  %-4s $%02X: кадров %d / %d" % (job["kind"], job["cmd"],
+                                               runs[-2]["frames"], runs[-1]["frames"]))
+    for p in (log, os.path.join(build_dir(), "_reference.wav")):
+        if os.path.exists(p):
+            os.remove(p)
+    ref_bin = os.path.join(out, "reference.bin")
+    if check:
+        old = open(ref_bin, "rb").read() if os.path.exists(ref_bin) else b""
+        if old != bytes(blob):
+            print("РАСХОЖДЕНИЕ: второй прогон дал другой reference.bin")
+            return 1
+        print("повтор совпал: %d прогонов, %d байт" % (len(runs), len(blob)))
+        return 0
+    with open(ref_bin, "wb") as f:
+        f.write(blob)
+    doc = {
+        "meta": {
+            "game": "Dyna Brothers 2",
+            "generator": "tools/render.py --reference "
+                         "(tools/render/render.c --mail --log)",
+            "spec": "docs/game-sound.md",
+            "cores": {
+                "clownz80": _commit(os.path.join(HERE, "third_party", "clownz80")),
+                "nuked_opn2": _commit(os.path.join(HERE, "third_party", "Nuked-OPN2")),
+                "nuked_mode": "ym3438_mode_ym2612",
+            },
+            "clock": {"master": 53693175, "z80": 15, "opn2_step": 42,
+                      "psg_tick": 240, "sample": 1008,
+                      "frame_z80_cycles": 3420 * 262 // 15},
+            "image": {"file": "sound/z80.bin", "ram": 0x2000},
+            "banks": {"file": "sound/banks.bin", "rom": 0x1C0000,
+                      "size": 0x8000},
+            "run": u"ОЗУ Z80: образ, остальное нули; регистры нули; сброс; "
+                   u"кадр: шаги сценария ящика (mail, с кадра 2), "
+                   u"прерывание, команды Z80 до frame_z80_cycles тактов, "
+                   u"после каждой — её такты в YM и PSG; эффекты — до "
+                   u"тишины (слоты $1E20 + i*$30 свободны, $1C3C = 0, "
+                   u"затем уровень покоя 3 кадра, не дольше 60), песни — "
+                   u"%d кадров" % int(REF_SECONDS * FPS),
+            "mail": u"шаги через запятую в начале кадра: АДР=ЗН — байт в "
+                    u"ОЗУ Z80, / — конец кадра, ?АДР — ждать кадр за "
+                    u"кадром, пока байт не станет нулём (hex)",
+            "frame": u"reference.bin: на кадр 8 байт — CRC-32 записей "
+                     u"(вид 0-3 порт YM a&3, 4 PSG $7F11, 5 банк $6000; "
+                     u"значение; такт Z80 команды от начала кадра, 16 бит "
+                     u"LE) и CRC-32 смеси (отсчёт: левый, правый int32 LE, "
+                     u"FM за 24 шага + средний PSG, до фильтра), оба LE",
+        },
+        "runs": runs,
+    }
+    with io.open(os.path.join(out, "reference.json"), "w", encoding="utf-8",
+                 newline="\n") as f:
+        f.write(json.dumps(doc, ensure_ascii=False, indent=1))
+        f.write(u"\n")
+    print("эталон: %d прогонов, %d байт" % (len(runs), len(blob)))
+    return 0
+
+
 def main():
+    if "--reference" in sys.argv:
+        if not os.path.exists(EXE):
+            raise SystemExit("нет %s — соберите: make deps && make render"
+                             % os.path.relpath(EXE, HERE))
+        return reference("--check" in sys.argv)
     want_music = "--music" in sys.argv
     if not os.path.exists(EXE):
         raise SystemExit("нет %s — соберите: make deps && make render"

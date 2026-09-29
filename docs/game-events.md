@@ -59,7 +59,7 @@
 | 34 | гл.1 м.17 | `$02D8E4` | параметр d7 = 50; зовёт LoseIfNeutralTypeGone |
 | 35 | гл.1 м.20 | `$02D87E` | старт на тике $2328; повтор каждые $012C; на тике 9000; на тике 9005; музыка 19 = банк 3 песня $87; зовёт PlaySound, StageSpreadRandom89Tick, LoadPlacement |
 | 36 | гл.1 м.23 | `$02D93C` | параметр d7 = 50; зовёт LoseIfNeutralTypeGone |
-| 37 | гл.1 м.44 | `$02D9CC` | старт на тике $AFC8; повтор каждые $003C; музыка 17 = банк 4 песня $83; музыка 21 = банк 3 песня $88; зовёт TickLavaEruption, Species18StepGate |
+| 37 | гл.1 м.44 | `$02D9CC` | старт на тике $AFC8; повтор каждые $003C; зовёт TickLavaEruption, Species18StepGate |
 | 38 | гл.1 м.40 | `$02D794` | на тике 12600; на тике 12600; музыка 101 = банк 4 песня $8D; зовёт PlaySound, LoadStagePalette |
 | 39 | гл.1 м.29 | `$02D806` | старт на тике $1518; повтор каждые $0003; зовёт StagePoisonTick |
 | 40 | гл.1 м.28 | `$02DD5E` | старт на тике $8CA0; повтор каждые $0A8C; на тике 36000; на тике 36000; музыка 21 = банк 3 песня $88; зовёт PlaySound, FadePaletteSlow, StageSpreadTerrainTick |

@@ -18,6 +18,11 @@
  *   --trace ФАЙЛ,КАДРЫ     разбор расхождений: после каждого шага clownz80
  *                          первых КАДРОВ кадров — адрес шага, такты и
  *                          регистры (см. trace_step)
+ *   --mail СЦЕНАРИЙ        ящик Dyna по кадрам вместо <команда>/<банк-гл>/
+ *                          <банк-муз>: шаги через запятую, исполняются в
+ *                          начале кадра с третьего (кадр 2): АДР=ЗН — байт в
+ *                          ОЗУ Z80, / — конец кадра, ?АДР — ждать кадр за
+ *                          кадром, пока байт не станет нулём (hex, см. mail_step)
  *
  * Здесь нет ни одной догадки о том, что играет: код Z80 исполняется как
  * есть, а звук берётся из того, что он сам пишет в YM2612 и PSG. Из
@@ -389,6 +394,33 @@ static int busy_slots(const unsigned char *ram, unsigned at, unsigned n,
 	return 0;
 }
 
+/* Сценарий ящика: шаги исполняются по порядку в начале кадра, пока не
+ * встретится конец кадра `/` или невыполненное ожидание `?АДР`. Так
+ * описываются и простой запуск (банки, кадр, команда), и стоп как у
+ * трапа $FF37: $1F в $1C14, команда $E1, ожидание нуля в $1C14. */
+static const char *mail_step(const char *s, unsigned char *ram)
+{
+	while (s && *s) {
+		unsigned at, v;
+		if (*s == ',') { s++; continue; }
+		if (*s == '/') return s + 1;
+		if (*s == '?') {
+			if (sscanf(s + 1, "%x", &at) != 1) {
+				fprintf(stderr, "--mail: после ? нет адреса\n");
+				exit(2);
+			}
+			if (ram[at & 0x1FFF])
+				return s;              /* ждём следующего кадра */
+			s = strpbrk(s, ",/");
+			continue;
+		}
+		if (sscanf(s, "%x=%x", &at, &v) == 2)
+			ram[at & 0x1FFF] = (unsigned char)v;
+		s = strpbrk(s, ",/");
+	}
+	return NULL;
+}
+
 static unsigned char *slurp(const char *path, long *len)
 {
 	FILE *f = fopen(path, "rb");
@@ -416,6 +448,8 @@ int main(int argc, char **argv)
 	const char *pos[16];
 	int npos = 0, i;
 	int use_ring = 0, ring_at = 0, ring_ix = 0;
+	const char *mail = NULL;
+	int use_mail = 0;
 	unsigned busy_at = 0, busy_n = 0, busy_stride = 0, busy_off = 0, busy_mask = 0;
 	unsigned dump_at = 0, dump_len = 0;
 	FILE *log = NULL;
@@ -440,6 +474,9 @@ int main(int argc, char **argv)
 			sscanf(argv[++i], "%x,%x", (unsigned *)&ring_at,
 			       (unsigned *)&ring_ix);
 			use_ring = 1;
+		} else if (!strcmp(argv[i], "--mail") && i + 1 < argc) {
+			mail = argv[++i];
+			use_mail = 1;
 		} else if (!strcmp(argv[i], "--init") && i + 1 < argc) {
 			init_len = unhex(argv[++i], init_bytes, sizeof init_bytes);
 		} else if (!strcmp(argv[i], "--play") && i + 1 < argc) {
@@ -525,7 +562,12 @@ int main(int argc, char **argv)
 
 		/* Кадр первый — драйвер только проснулся; на третьем 68000
 		 * выставляет банки и кладёт команду, как это делает VBlank. */
-		if (frame == 2) {
+		if (use_mail) {
+			if (mail && frame >= 2)
+				mail = mail_step(mail, bus.ram);
+			if (mail && !*mail)
+				mail = NULL;        /* сценарий кончился на `/` */
+		} else if (frame == 2) {
 			if (use_ring)
 				queue(bus.ram, ring_at, ring_ix, init_bytes, init_len);
 			else {
@@ -533,7 +575,7 @@ int main(int argc, char **argv)
 				if (music_bank >= 0) set_bank(bus.ram, 0x1C06, music_bank);
 			}
 		}
-		if (frame == 3 && !use_ring)
+		if (frame == 3 && !use_ring && !use_mail)
 			bus.ram[0x1C0A] = (unsigned char)cmd;
 		if (frame == 4 && use_ring)
 			queue(bus.ram, ring_at, ring_ix, play_bytes, play_len);
@@ -638,7 +680,8 @@ int main(int argc, char **argv)
 		 * не девается и порог никогда бы не сработал. */
 		if (frame < (use_ring ? 4 : 3) && frame_peak > floor_peak)
 			floor_peak = frame_peak;
-		if (stop_when_done && frame > 8 && (use_ring
+		/* Со сценарием — только когда он весь исполнен. */
+		if (stop_when_done && frame > 8 && !mail && (use_ring
 		    ? !busy_slots(bus.ram, busy_at, busy_n, busy_stride,
 		                  busy_off, busy_mask)
 		    : sfx_done(bus.ram))) {
