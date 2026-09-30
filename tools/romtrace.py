@@ -186,7 +186,12 @@ false`): `pass_2` (конец мира 0-2: LEVEL COMPLETE без пароля �
 жизнь подменой на входе, сигнал −1 подменой, точка `at`: Start на экране гибели, CONTINUE —
 вправо, уровень с начала), `continue_no_7` (влево — GAME OVER до срока), `game_over_hard_1`
 (HARD, продолжений нет — сразу GAME OVER); у `past_exit` с `until: "restart"` следующего
-уровня нет: трасса кончается кадром, в куске которого главный цикл пришёл на `$297FE4`. `--loads` мерит загрузку входа в каждый уровень (`export/loads.json`:
+уровня нет: трасса кончается кадром, в куске которого главный цикл пришёл на `$297FE4`. Концовка
+(M8e, mauimallard #36): `ending_2` — уровень 2 (последний мира 0-2), после кадра 40 подменой сигнал
++1 и уровень 18, так главный цикл идёт в концовку `$28DCEC`, свиток титров и `$297FE4`;
+`ending_start_speech_2` и `ending_start_scroll_2` — Start в речи и в свитке. `past_exit.unpack_ram`
+кладёт в последний кадр уровня буфер распаковки `$FF229C`+`$8000` (`unpack_ram`): последняя строка
+свитка читает за концом своей карты то, что там оставил уровень. `--loads` мерит загрузку входа в каждый уровень (`export/loads.json`:
 по кадру «0» — кусок кончился под маской, «1» — нет, «2» — под маской, но
 отложенное прерывание пришло посреди него).
 
@@ -250,6 +255,8 @@ LEVEL_END = 0x298B1A       # $298B1A bsr $2968D6: затемнение уров�
 ENTRY_LOAD = 0x2986FC      # во входе $2986EA сразу после jsr $290C54: затемнение кончилось, дальше загрузка
 STRONGHOLD = 0x28EABE      # сцена оплота из слота $FF1364: кадр её вызова — stronghold_frame сценария от включения
 RESTART = 0x297FE4         # снова с заставок (после GAME OVER): past_exit с until "restart" кончается на этом кадре
+UNPACK_BASE = 0xFFFFE1AC   # начало буфера распаковки LZSS ($FF229C): past_exit.unpack_ram снимает его $8000 байт
+UNPACK_BYTES = 0x8000
 
 # Строчное прерывание (уровень 4, вектор $70 -> $296976): обработчик — длинное слово $FFFFE198 ($2A5776 ставит его,
 # разрешает прерывание в регистре 0 и пишет счётчик строк $FFFFE19C в регистр 10; $2A57AC снимает). Зовётся только
@@ -1516,6 +1523,31 @@ SCENARIOS["game_over_hard_1"] = {
     "about": "уровень 1 на HARD, жизнь последняя, продолжений нет (подмена на входе): сигнал выхода -1 подменой после "
              "кадра 40; экран гибели, сразу GAME OVER, снова с заставок ($297FE4)",
 }
+# M8e (mauimallard #36): концовка после уровня 18 ($298162: последний уровень мира, $FF1B14 >= 18 -> $28DCEC, потом
+# $297FE4). Уровень 18 — бой M7 ремейка, поэтому трассы приходят в неё с уровня 2 (последний мира 0-2, $FF1B48 = 1): после
+# кадра 40 подменой сигнал выхода +1 и номер уровня 18 — дальше главный цикл идёт так же, как после уровня 18.
+_ENDING_POKES = [(40, EXIT, struct.pack(">H", 1)), (40, LEVEL_NUMBER, struct.pack(">H", 18))]
+SCENARIOS["ending_2"] = {
+    "level": 2, "objects": False, "checks": ["camera", "player", "objects"],
+    "input": [("", 41)], "poke_at": _ENDING_POKES,
+    "past_exit": {"input": [], "until": "restart", "unpack_ram": True,
+                  "pictures": [30, 700, 1500, 2500, 3500, 4400, 4700, 4775, 4800, 6000, 6600, 9000, 12600, 12780]},
+    "about": "уровень 2 (последний мира 0-2) без объектов: после кадра 40 подменой сигнал выхода +1 и уровень 18; "
+             "концовка до конца, свиток титров до срока, снова с заставок ($297FE4)",
+}
+# Start ($28E704 -> $FF21EC): в речи — $FF000E не поднят, свитка нет, сразу $297FE4; в свитке — его затемнение.
+SCENARIOS["ending_start_speech_2"] = {
+    "level": 2, "objects": False, "checks": ["camera", "player", "objects"],
+    "input": [("", 41)], "poke_at": _ENDING_POKES,
+    "past_exit": {"input": [("", 18 + 2000), ("S", 2)], "until": "restart", "pictures": [2008]},
+    "about": "как ending_2, Start на кадре 2000 концовки (речь): затемнение, свитка нет, снова с заставок",
+}
+SCENARIOS["ending_start_scroll_2"] = {
+    "level": 2, "objects": False, "checks": ["camera", "player", "objects"],
+    "input": [("", 41)], "poke_at": _ENDING_POKES,
+    "past_exit": {"input": [("", 18 + 9000), ("S", 2)], "until": "restart", "pictures": [9008]},
+    "about": "как ending_2, Start на кадре 9000 (свиток титров): затемнение, снова с заставок",
+}
 SCENARIOS["pass_5"] = {
     "level": 5, "objects": False, "checks": ["camera", "player", "objects"],
     "input": [("", 41)], "poke_at": [(40, EXIT, struct.pack(">H", 1))],
@@ -2298,6 +2330,7 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
     count = past_exit.get("frames", 1)
     until = past_exit.get("until")
     post, screens, next_frames, pictures, waiting = [], [], [], {}, []
+    unpack = past_exit.get("unpack_ram") and [None]
     state["phase"] = "post"
     state["reset"] = False
     state["restart"] = False  # от включения главный цикл уже прошёл $297FE4
@@ -2316,8 +2349,14 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
                 frame["cram"] = cram_crc(md)
                 frame.update(heard())
                 post.append(frame)
+                if unpack:
+                    unpack[0] = md.read(struct.unpack(">I", md.read(UNPACK_BASE, 4))[0], UNPACK_BYTES)
                 continue
             state["phase"] = "screens"
+            if unpack:
+                # Буфер распаковки, каким его оставил уровень: $28D492 пишет в плоскость 64 имени строки и у последней
+                # строки карты шириной 40 читает 24 слова за её концом (свиток титров — отсюда).
+                post[-1]["unpack_ram"] = unpack[0].hex().upper()
         if state["phase"] == "screens":
             frame = screen_frame(md, state["reset"])
             state["reset"] = False
