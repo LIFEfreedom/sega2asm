@@ -16,6 +16,11 @@ VRAM 64 КБ, CRAM (64 слова), VSRAM (40 слов), автоинкреме�
 точка выигрывает. Слой пикселя: B, A, спрайты; высокий приоритет над низким.
 Цвет CRAM — канал × 36, как у ремейка и `sprites.py`.
 
+Записи в VSRAM посреди показа (строчное прерывание, `romtrace.py`): пока `line` не None, каждая
+запись в VSRAM ложится ещё и в журнал `raster` — (строка, с которой она видна, слово VSRAM,
+значение); `picture(raster=...)` берёт для верхних строк VSRAM кадра, а с каждой строки журнала —
+его записи.
+
 Не смоделировано и отвергается: режим тени и подсветки (регистр 12 бит 3), чересстрочный
 режим, H32, маска спрайта с X = 0.
 """
@@ -39,6 +44,16 @@ class Vdp:
         self.pending = False
         self.fill = False
         self.writes = 0
+        self.line = None
+        self.raster = []
+
+    def copy(self):
+        """Регистры и память на этот миг: картинка кадра, которую дорисуют записи следующего показа."""
+        v = Vdp(self.read_word, self.reg)
+        v.vram[:] = self.vram
+        v.cram = list(self.cram)
+        v.vsram = list(self.vsram)
+        return v
 
     # --- порты ---
 
@@ -148,6 +163,8 @@ class Vdp:
         elif target == VSRAM:
             if (a >> 1) < 40:
                 self.vsram[a >> 1] = w & 0x07FF
+                if self.line is not None:
+                    self.raster.append((self.line, a >> 1, w & 0x07FF))
         self.writes += 1
         self.addr = (a + self.reg[15]) & 0xFFFF
 
@@ -178,9 +195,10 @@ class Vdp:
             return "недопустимый режим прокрутки (регистр 11 = $%02X)" % r[11]
         return None
 
-    def picture(self, sprites=True, skip_tiles=None):
+    def picture(self, sprites=True, skip_tiles=None, raster=()):
         """-> список (r, g, b) по строкам, 320 × 224. skip_tiles — range номеров тайлов:
-        спрайты с таким тайлом не рисуются и в пределах строки не считаются."""
+        спрайты с таким тайлом не рисуются и в пределах строки не считаются. raster — записи в VSRAM
+        посреди показа (строка, слово, значение) по порядку: каждая действует со своей строки."""
         why = self.check()
         if why:
             raise ValueError(why)
@@ -202,7 +220,12 @@ class Vdp:
 
         lines = self._sprite_lines(skip_tiles) if sprites else [[None] * WIDTH for _ in range(HEIGHT)]
         out = []
+        vsram = list(self.vsram)
+        writes = list(raster)
         for y in range(HEIGHT):
+            while writes and writes[0][0] <= y:
+                _, index, value = writes.pop(0)
+                vsram[index] = value
             line = y if hmode == 3 else (y & ~7 if hmode == 2 else 0)
             hs_a = self.word(base_h + line * 4) & 0x3FF
             hs_b = self.word(base_h + line * 4 + 2) & 0x3FF
@@ -211,7 +234,7 @@ class Vdp:
             for x in range(WIDTH):
                 col = (x >> 4) * 2 if vcol else 0
                 best, rank = None, -1
-                b = plane(base_b, x, y, hs_b, self.vsram[col + 1] & 0x3FF)
+                b = plane(base_b, x, y, hs_b, vsram[col + 1] & 0x3FF)
                 if b:
                     best, rank = b[1], b[0] * 3
                 in_cols = (x >= whp) if right else (x < whp)
@@ -220,7 +243,7 @@ class Vdp:
                     c = self._tile_pixel(name, x & 7, y & 7)
                     a = (name >> 15, (name >> 13 & 3) * 16 + c) if c else None
                 else:
-                    a = plane(base_a, x, y, hs_a, self.vsram[col] & 0x3FF)
+                    a = plane(base_a, x, y, hs_a, vsram[col] & 0x3FF)
                 if a and a[0] * 3 + 1 > rank:
                     best, rank = a[1], a[0] * 3 + 1
                 s = sprite_line[x]

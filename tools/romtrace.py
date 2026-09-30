@@ -37,11 +37,24 @@
   В нём и выполняется вся логика кадра (списки `$FFFFE166`, `$FFFFE176`),
   так что «лага» нет: следующий кадр — после `rte`. Прерывание, пришедшее
   под маской, теряется (на железе оно бы дождалось снятия маски); на кадры
-  уровня это не влияет — там основной поток стоит в пустом цикле. HBlank
-  (`$296976`) не вызывается. Сценарии от включения (`boot_*`) идут с
-  `pending_vint`: прерывание, пришедшее под маской, ждёт её снятия, как у
-  VDP, — основной поток тогда идёт кусками по `PENDING_STEP` команд, и первый
-  кусок без маски берёт отложенное прерывание (в кадре их может быть два).
+  уровня это не влияет — там основной поток стоит в пустом цикле. Сценарии
+  от включения (`boot_*`) идут с `pending_vint`: прерывание, пришедшее под
+  маской, ждёт её снятия, как у VDP, — основной поток тогда идёт кусками по
+  `PENDING_STEP` команд, и первый кусок без маски берёт отложенное прерывание
+  (в кадре их может быть два);
+* строчное прерывание (уровень 4, `$296976`, mauimallard #36): раз в кадр, в
+  конце куска основного потока, до прерывания кадра — это показ, что идёт за
+  прошлым прерыванием кадра, — если оно разрешено (регистр 0 бит 4), счётчик
+  строк (регистр 10 на конец прошлого кадра) меньше 224, маска его пускает и
+  обработчик `$FFFFE198` — из `LINE_HANDLERS` (отражение `$28FD04`; вода
+  уровней 0-1 `$295D18` — M9 ремейка, её не зовут). Тактов нет, строки
+  считает само обработчиково ожидание: прерывание приходит в гашении строки
+  после строки N, первое чтение статуса — уже в строке N + 1 (вступление
+  обработчика ~360 тактов длиннее гашения строки ~90), дальше бит 2 статуса
+  (гашение строки) при каждом чтении меняется: 0 — строка идёт, 4 — её
+  гашение; запись в VSRAM видна со строки после текущей, в журнал
+  `vdp.raster` она ложится с этой строкой. Отражению это даёт строки
+  N + 2 = 192-223 — модель, по тактам не проверенная.
 
 Две особенности `unicorn` и что с ними сделано:
 
@@ -111,7 +124,9 @@
 до неё их тайлы картинка пропускала),
 `<сценарий>_<k>_planes.png` — без спрайтов вовсе, и `pictures.json` —
 уровень, кадр, камера, счётчик кадров, CRAM. Кадр в режиме тени и подсветки
-(уровень 1) не рисуется: в индексе остаётся причина.
+(уровень 1) не рисуется: в индексе остаётся причина. Картинку кадра экрана, за
+которым пойдёт строчное прерывание, дорисовывает следующий кадр: память VDP после
+кадра k и записи в VSRAM его показа (`raster` в индексе: строка, слово, значение).
 
 Сценарии от включения (`boot_*`, M8c, `run_boot`): с первого кадра приставки, пульт
 из записи с первого кадра, без подмены уровня; кадр — каждый вызов `frame`, и
@@ -233,6 +248,16 @@ LEVEL_END = 0x298B1A       # $298B1A bsr $2968D6: затемнение уров�
 ENTRY_LOAD = 0x2986FC      # во входе $2986EA сразу после jsr $290C54: затемнение кончилось, дальше загрузка
 STRONGHOLD = 0x28EABE      # сцена оплота из слота $FF1364 (M8e ремейка): сценарий заставки мира 18 кончается здесь
 RESTART = 0x297FE4         # снова с заставок (после GAME OVER): past_exit с until "restart" кончается на этом кадре
+
+# Строчное прерывание (уровень 4, вектор $70 -> $296976): обработчик — длинное слово $FFFFE198 ($2A5776 ставит его,
+# разрешает прерывание в регистре 0 и пишет счётчик строк $FFFFE19C в регистр 10; $2A57AC снимает). Зовётся только
+# тот, что здесь: вода уровней 0-1 $295D18 ($295A70) пишет CRAM по строкам — это M9 ремейка, и её трассы меняться не
+# должны.
+HINT_VECTOR = 0x70
+LINE_HANDLER = 0xFFFFE198
+LINE_HANDLERS = {
+    0x28FD04: "отражение титульного экрана ($28FB96) и свитка титров ($28DECC): 32 строки вертикали плоскости A",
+}
 
 # Кнопки в порядке байта пульта (активная единица): U D L R B C A S.
 BUTTONS = "UDLRBCAS"
@@ -1571,15 +1596,24 @@ class MegaDrive:
         self.rom_writes = 0
         uc.hook_add(UC_HOOK_MEM_WRITE_PROT, self._rom_write, None, 0, 0x3FFFFF)
 
-        # Заглушки: прочитать SR процессором; войти в прерывание кадра.
+        # Заглушки: прочитать SR процессором; войти в прерывание кадра; войти в строчное.
         vint = struct.unpack_from(">I", self.rom, VINT_VECTOR)[0]
+        hint = struct.unpack_from(">I", self.rom, HINT_VECTOR)[0]
         uc.mem_map(self.SCRATCH, 0x1000, UC_PROT_ALL)
         self.stub_sr = self.SCRATCH
         self.stub_irq = self.SCRATCH + 0x20
+        self.stub_hint = self.SCRATCH + 0x40
         self.sr_cell = self.SCRATCH + 0x100
         uc.mem_write(self.stub_sr, bytes.fromhex("40F9") + struct.pack(">I", self.sr_cell) + bytes.fromhex("4E71"))
         uc.mem_write(self.stub_irq, bytes.fromhex("40E7" "46FC2600" "4EF9") + struct.pack(">I", vint))
+        uc.mem_write(self.stub_hint, bytes.fromhex("40E7" "46FC2400" "4EF9") + struct.pack(">I", hint))
         self.frame_sp = None
+        # Строчное: стек его rte, после какой строки оно пришло, сколько раз обработчик читал статус; счётчик строк —
+        # регистр 10 на конец прошлого кадра (VDP заряжает счётчик в гашении кадра, на каждой его строке).
+        self.hint_sp = None
+        self.hint_line = 0
+        self.hint_reads = 0
+        self.hint_counter = self.vdp.reg[10]
         for i, (_, _, reg, _) in enumerate(SPAWN_SITES):
             uc.mem_write(self.SCRATCH + SPAWN_STUB + 0x20 * i, spawn_stub(reg, self.SCRATCH + SPAWN_ALLOW))
         allow = bytearray(0x400)
@@ -1654,6 +1688,13 @@ class MegaDrive:
             # чтобы циклы ожидания кадра не висели.
             if self.frame_sp is not None:
                 return 0x3608 if size == 2 else 0x36
+            if self.hint_sp is not None:
+                # Строчное: бит 2 — гашение строки. Прерывание пришло после строки N, первое чтение — уже в
+                # строке N + 1, дальше гашение и строка по очереди; запись видна со строки после текущей.
+                hblank = self.hint_reads & 1
+                self.vdp.line = self.hint_line + 2 + (self.hint_reads >> 1)
+                self.hint_reads += 1
+                return (0x3604 if hblank else 0x3600) if size == 2 else 0x36
             self.status ^= 8
             return 0x3600 | self.status if size == 2 else 0x36
         if offset < 4:
@@ -1695,6 +1736,9 @@ class MegaDrive:
         if sp == self.frame_sp:
             self.frame_sp = None
             uc.emu_stop()
+        elif sp == self.hint_sp:
+            self.hint_sp = None
+            uc.emu_stop()
 
     # --- исполнение ---
 
@@ -1711,9 +1755,11 @@ class MegaDrive:
         return struct.unpack(">H", bytes(self.uc.mem_read(self.sr_cell, 2)))[0]
 
     def frame(self):
-        """Кусок основного потока и прерывание кадра, если маска его пускает (vints — сколько прерываний
-        кадра взято за кадр: отложенное и своё)."""
+        """Кусок основного потока, строчное прерывание его показа (line_interrupt_armed) и прерывание кадра, если
+        маска их пускает (vints — сколько прерываний кадра взято за кадр: отложенное и своё). Записи строчного в
+        VSRAM — в vdp.raster."""
         self.vints = 0
+        self.vdp.raster = []
         left = BUDGET
         while self.pending and left:
             step = min(PENDING_STEP, left)
@@ -1726,11 +1772,23 @@ class MegaDrive:
         if left:
             self._run(self.pc, 0xFFFFFFFF, left)
             self.pc = self.uc.reg_read(M.UC_M68K_REG_PC)
-        if (self._sr() >> 8) & 7 >= 6:
+        mask = (self._sr() >> 8) & 7
+        if mask < 4 and self.line_interrupt_armed():
+            self._line_interrupt()
+        # Счётчик строк VDP заряжает в гашении кадра из регистра 10, взято ли прерывание кадра или нет.
+        if mask >= 6:
             self.pending = self.pending_vint
+            self.hint_counter = self.vdp.reg[10]
             return False
         self._interrupt()
+        self.hint_counter = self.vdp.reg[10]
         return True
+
+    def line_interrupt_armed(self):
+        """Пойдёт ли строчное прерывание в показе после этого кадра: разрешено (регистр 0 бит 4), счётчик строк
+        кончается на экране, обработчик $FFFFE198 — из LINE_HANDLERS (маску смотрит frame)."""
+        return (self.vdp.reg[0] & 0x10 and self.hint_counter < 224
+                and struct.unpack(">I", self.read(LINE_HANDLER, 4))[0] in LINE_HANDLERS)
 
     def _interrupt(self):
         """Прерывание уровня 6 в точке self.pc основного потока: обработчик до своего rte."""
@@ -1742,6 +1800,23 @@ class MegaDrive:
         self._run(self.stub_irq, 0xFFFFFFFF, HANDLER_LIMIT)
         if self.frame_sp is not None or self.uc.reg_read(M.UC_M68K_REG_PC) != self.pc:
             raise RuntimeError("обработчик кадра не вернулся за %d команд" % HANDLER_LIMIT)
+
+    def _line_interrupt(self):
+        """Строчное прерывание (уровень 4) в точке self.pc основного потока: пришло после строки hint_counter,
+        обработчик $296976 до своего rte; его записи в VSRAM — в vdp.raster со строками, с которых они видны."""
+        sp = (self.uc.reg_read(M.UC_M68K_REG_A7) - 4) & 0xFFFFFFFF
+        self.uc.mem_write(sp, struct.pack(">I", self.pc))
+        self.uc.reg_write(M.UC_M68K_REG_A7, sp)
+        self.hint_sp = (sp - 2) & 0xFFFFFFFF
+        self.hint_line = self.hint_counter
+        self.hint_reads = 0
+        self.vdp.line = self.hint_line + 2
+        try:
+            self._run(self.stub_hint, 0xFFFFFFFF, HANDLER_LIMIT)
+        finally:
+            self.vdp.line = None
+        if self.hint_sp is not None or self.uc.reg_read(M.UC_M68K_REG_PC) != self.pc:
+            raise RuntimeError("строчное прерывание не вернулось за %d команд" % HANDLER_LIMIT)
 
 
 # Сценарии с проверкой objects снимают ещё то, что пишут касания подбираемого (levels.md 2.3, 2.7).
@@ -1883,17 +1958,37 @@ def screen_frame(md, reset):
 
 
 def screen_picture(md):
-    """Картинка кадра экрана: память VDP после него."""
+    """Картинка кадра экрана: память VDP после него. Если в показе, что идёт за ним, будет строчное прерывание
+    (md.line_interrupt_armed), картинка ждёт следующего кадра: finish_picture дорисует её записями этого показа."""
     v = md.vdp
     why = v.check()
     pic = {"t": md.word(0xFFFFE196), "cram": "".join("%04X" % c for c in v.cram),
            "vsram": "%04X%04X" % (v.vsram[0], v.vsram[1])}
     if why:
         pic["skipped"] = why
+    elif md.line_interrupt_armed():
+        pic["_vdp"] = v.copy()
     else:
         pic["full"] = v.picture()
         pic["planes"] = v.picture(sprites=False)
     return pic
+
+
+def finish_picture(pic, md):
+    """Картинка, ждавшая следующего кадра: память VDP после своего кадра и записи в VSRAM строчного прерывания
+    показа за ним (md.vdp.raster; пусто — обработчик ничего не писал)."""
+    v = pic.pop("_vdp")
+    raster = list(md.vdp.raster)
+    pic["raster"] = [[line, index, "%04X" % value] for line, index, value in raster]
+    pic["full"] = v.picture(raster=raster)
+    pic["planes"] = v.picture(sprites=False, raster=raster)
+
+
+def finish_pictures(waiting, md):
+    """После кадра: картинки прошлого кадра, ждавшие его показа."""
+    for pic in waiting:
+        finish_picture(pic, md)
+    waiting.clear()
 
 
 def entry_snapshot(md, layout, objects):
@@ -2189,7 +2284,7 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
     wanted = set(past_exit.get("pictures", ()))
     count = past_exit.get("frames", 1)
     until = past_exit.get("until")
-    post, screens, next_frames, pictures = [], [], [], {}
+    post, screens, next_frames, pictures, waiting = [], [], [], {}, []
     state["phase"] = "post"
     state["reset"] = False
     state["restart"] = False  # от включения главный цикл уже прошёл $297FE4
@@ -2200,6 +2295,7 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
                 name, PAST_EXIT_LIMIT, "не дошли до $297FE4" if until == "restart" else "следующий уровень не начался"))
         md.pad = pads[j] if j < len(pads) else 0
         md.frame()
+        finish_pictures(waiting, md)
         j += 1
         if state["phase"] == "post":
             if not state["level_end"]:
@@ -2217,6 +2313,8 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
             screens.append(frame)
             if k in wanted:
                 pictures[k] = screen_picture(md)
+                if "_vdp" in pictures[k]:
+                    waiting.append(pictures[k])
             if until == "restart" and state["restart"]:
                 break
             continue
@@ -2234,6 +2332,8 @@ def run_past_exit(name, sc, md, state, layout, with_pool, heard):
     missing = wanted - set(pictures)
     if missing:
         raise RuntimeError("%s: нет картинок кадров экранов %s" % (name, sorted(missing)))
+    if waiting:
+        raise RuntimeError("%s: картинке последнего кадра нужен показ следующего (строчное прерывание)" % name)
     return {"post_exit": post, "screens": screens, "next_entry": state["next_entry"], "next_frames": next_frames,
             "_screen_pictures": pictures}
 
@@ -2249,7 +2349,8 @@ def run_boot(name, sc, rom):
     и пароля $2909BA живут в d7), участки SCREEN_LAYOUT, CRC-32 CRAM, двух слов VSRAM, таблиц имён плоскостей
     A и B, таблицы горизонтальной прокрутки, таблицы спрайтов в ОЗУ ($FF050C, $FFFFE1BA записей) и всего пула
     ($FFFFE1CA, 80 записей; в кадре, где его заводят заново, — и байты), байты кольца драйвера. Картинка кадра k —
-    память VDP после него. until: "setup" — до LevelSetup; "entry" (M8d) — до входа в уровень: снимок entry на
+    память VDP после него (и записи строчного прерывания показа за ним, screen_picture). until: "setup" — до
+    LevelSetup; "entry" (M8d) — до входа в уровень: снимок entry на
     первом входе в задачу игрока, кадр, в прерывании которого он был, — кадр 0 уровня, и level_frames кадров уровня в
     формате сценариев уровня (level_frames); "stronghold" — до кадра, где зовут сцену оплота. objects и poke_at —
     как у сценариев уровня (poke_at: после кадра k приставки)."""
@@ -2283,10 +2384,11 @@ def run_boot(name, sc, rom):
     md.uc.hook_add(UC_HOOK_CODE, on_reset, None, POOL_RESET, POOL_RESET)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
     md.uc.hook_add(UC_HOOK_CODE, on_stronghold, None, STRONGHOLD, STRONGHOLD)
-    frames, level_frames, pictures = [], [], {}
+    frames, level_frames, pictures, waiting = [], [], {}, []
     for k in range(sc["record"]):
         md.pad = pads[k] if k < len(pads) else 0
         md.frame()
+        finish_pictures(waiting, md)
         if state["entry"] is not None:
             level_frames.append(level_frame(md, BOOT_LEVEL_LAYOUT, True))
             if len(level_frames) >= sc.get("level_frames", 1):
@@ -2298,6 +2400,8 @@ def run_boot(name, sc, rom):
             state["reset"] = False
             if k in wanted:
                 pictures[k] = screen_picture(md)
+                if "_vdp" in pictures[k]:
+                    waiting.append(pictures[k])
             if until == SETUP_STOP and state["setup"] is not None:
                 break
         for address, data in pokes.get(k, ()):
@@ -2311,6 +2415,8 @@ def run_boot(name, sc, rom):
     missing = wanted - set(pictures)
     if missing:
         raise RuntimeError("%s: нет картинок кадров %s" % (name, sorted(missing)))
+    if waiting:
+        raise RuntimeError("%s: картинке последнего кадра нужен показ следующего (строчное прерывание)" % name)
     out = {
         "meta": {
             "generator": "tools/romtrace.py",
@@ -2461,6 +2567,9 @@ def write_pictures(name, level, pictures, screen_pictures=None):
                      "cram": pic["cram"], "vsram": pic["vsram"]}
         if "bottom" in pic:
             entry["bottom"] = pic["bottom"]
+        if "raster" in pic:
+            # Записи строчного прерывания в VSRAM в показе этого кадра: строка, слово VSRAM, значение.
+            entry["raster"] = pic["raster"]
         if "skipped" in pic:
             entry["skipped"] = pic["skipped"]
         else:
