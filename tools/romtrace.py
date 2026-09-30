@@ -160,13 +160,15 @@ CRC-32 CRAM, таблиц имён плоскостей A и B, таблицы �
 мира, головы пула). `until: "entry"` — до входа в уровень: снимок `entry` на
 первом входе в задачу игрока, этот кадр — кадр 0 уровня, дальше `level_frames`
 кадров уровня в формате кадров уровня (участок `BOOT_LEVEL_LAYOUT`, пул, CRC
-CRAM, кольцо); `until: "stronghold"` — до кадра, где зовут сцену оплота
+CRAM, кольцо); `until: "load"` — до кадра, в куске которого вход начал грузить уровень (`$2986FC`)
 `$28EABE`; `poke_at` — байты ОЗУ после кадра k (у сценариев уровня — после кадра
 k уровня). Сценарии: `boot_skip` и `boot_idle` до входа в уровень 0 (заставка
 мира 0 новой игры и демо 0), `boot_demo_3`/`boot_demo_7` (`$FF21F4` на кадре 100:
 демо 1 и 2 — заставки миров 3 и 7), `boot_card_break` (Start на заставке перед
 демо: демо прервано до уровня), `boot_card_10`-`boot_card_18` (пароли ITSHOT,
-GETHIM, YOHOHO, UNDEAD, GDLUCK: заставки миров 10-18). Сценарий уровня с
+GETHIM, YOHOHO, UNDEAD, GDLUCK: заставки миров 10-18; 18 — дальше через сцену
+оплота `$28EABE` до загрузки входа в уровень 18, `until: "load"`: уровень 18 — бой),
+`boot_stronghold_start` (то же, Start в сцене оплота). Сценарий уровня с
 `past_exit` идёт за сигнал выхода, как игра (`run_past_exit`, с `pending_vint`):
 `post_exit` — кадры уровня после сигнала (его затемнение, с `vints` и CRC CRAM),
 `screens` — кадры главного цикла в формате от включения (участок `screen_ram`),
@@ -246,7 +248,7 @@ BOOT_LIMIT = 6000          # кадров до входа в уровень
 POOL_RESET = 0x295E7E      # $295E7E: пул заново — в кадре экрана снимается весь пул (pool_ram)
 LEVEL_END = 0x298B1A       # $298B1A bsr $2968D6: затемнение уровня кончилось, его задачи снимаются
 ENTRY_LOAD = 0x2986FC      # во входе $2986EA сразу после jsr $290C54: затемнение кончилось, дальше загрузка
-STRONGHOLD = 0x28EABE      # сцена оплота из слота $FF1364 (M8e ремейка): сценарий заставки мира 18 кончается здесь
+STRONGHOLD = 0x28EABE      # сцена оплота из слота $FF1364: кадр её вызова — stronghold_frame сценария от включения
 RESTART = 0x297FE4         # снова с заставок (после GAME OVER): past_exit с until "restart" кончается на этом кадре
 
 # Строчное прерывание (уровень 4, вектор $70 -> $296976): обработчик — длинное слово $FFFFE198 ($2A5776 ставит его,
@@ -1292,7 +1294,7 @@ for _n, (_level, _at) in enumerate(DEMOS):
 
 SETUP_STOP = "setup"       # boot: until — остановиться на кадре, где главный цикл вошёл в LevelSetup
 ENTRY_STOP = "entry"            # boot: until — до входа в уровень (снимок entry), дальше level_frames его кадров
-STRONGHOLD_STOP = "stronghold"  # boot: until — до кадра, где главный цикл зовёт сцену оплота $28EABE (M8e ремейка)
+LOAD_STOP = "load"              # boot: until — до кадра, в куске которого вход $2986EA начал грузить уровень ($2986FC)
 
 # Сценарии от включения (M8c): экраны до входа в уровень, кадр — каждый кадр приставки (run_boot).
 BOOT_SCENARIOS = {
@@ -1387,7 +1389,7 @@ BOOT_SCENARIOS.update({
 })
 # M8d (mauimallard #35, часть 1): от включения до входа в уровень — заставка мира перед новой игрой и перед демо,
 # вход $2986EA и 40 кадров уровня с объектами, конструкторы которых в ремейке есть (PORTED_OBJECTS); заставки миров
-# 10, 12, 14, 16 и 18 — новой игрой по паролю (18 — до сцены оплота $28EABE, M8e ремейка).
+# 10, 12, 14, 16 и 18 — новой игрой по паролю (18 — через сцену оплота $28EABE до загрузки входа в уровень, #36).
 # Картинки заставок: две страницы сюжета с актёрами (кадры 250 и 450 от начала проявления) и буквы названия на месте
 # (120 кадров после $FF000C: 32 кадра падения и 88 из 181 выдержки).
 BOOT_SCENARIOS["boot_idle"].update(
@@ -1426,12 +1428,23 @@ for _word, _level, _pictures in _CARD_PASSWORDS:
         "about": "пароль %s, новая игра на уровне %d: заставка мира" % (_word, _level),
     }
     if _level == 18:
-        _sc.update(until=STRONGHOLD_STOP)
-        _sc["about"] += " до конца (дальше сцена оплота $28EABE — M8e ремейка)"
+        # Уровень 18 — бой M7 ремейка: трасса идёт через сцену оплота $28EABE (слот $FF1364) до загрузки входа в уровень.
+        _sc.update(until=LOAD_STOP, pictures=_pictures + [2920, 3000, 3100, 3200, 3265, 3282])
+        _sc["about"] += ", сцена оплота $28EABE до конца, вход в уровень 18 до загрузки"
     else:
         _sc.update(until=ENTRY_STOP, objects=PORTED_OBJECTS[_level], level_frames=40)
         _sc["about"] += ", вход в уровень и 40 его кадров"
     BOOT_SCENARIOS["boot_card_%d" % _level] = _sc
+
+# Start в сцене оплота ($28E704 читает пульт после проявления): сцена кончается сразу, затемнение и вход в уровень 18.
+_STRONGHOLD_START = 3000
+BOOT_SCENARIOS["boot_stronghold_start"] = {
+    "input": BOOT_SCENARIOS["boot_card_18"]["input"]
+    + [("", _STRONGHOLD_START - sum(n for _, n in BOOT_SCENARIOS["boot_card_18"]["input"])), ("S", 2)],
+    "record": 6000, "until": LOAD_STOP, "pictures": [3008],
+    "about": "пароль GDLUCK, новая игра на уровне 18: заставка мира, в сцене оплота Start на кадре %d — сцена "
+             "кончается, вход в уровень 18 до загрузки" % _STRONGHOLD_START,
+}
 
 for _name, _sc in BOOT_SCENARIOS.items():
     SCENARIOS[_name] = dict(_sc, boot=True)
@@ -2352,7 +2365,8 @@ def run_boot(name, sc, rom):
     память VDP после него (и записи строчного прерывания показа за ним, screen_picture). until: "setup" — до
     LevelSetup; "entry" (M8d) — до входа в уровень: снимок entry на
     первом входе в задачу игрока, кадр, в прерывании которого он был, — кадр 0 уровня, и level_frames кадров уровня в
-    формате сценариев уровня (level_frames); "stronghold" — до кадра, где зовут сцену оплота. objects и poke_at —
+    формате сценариев уровня (level_frames); "load" — до кадра, в куске которого вход начал грузить уровень
+    ($2986FC), включительно (stronghold_frame — кадр, в куске которого позвали сцену оплота). objects и poke_at —
     как у сценариев уровня (poke_at: после кадра k приставки)."""
     objects = sc.get("objects", True)
     patches = spawn_patches(objects)
@@ -2362,7 +2376,7 @@ def run_boot(name, sc, rom):
     pokes = poke_schedule(sc)
     wanted = set(sc.get("pictures", ()))
     until = sc.get("until")
-    state = {"setup": None, "entry": None, "entry_frame": None, "stronghold": None, "reset": False}
+    state = {"setup": None, "entry": None, "entry_frame": None, "stronghold": None, "load": None, "reset": False}
 
     def on_setup(uc, address, size, user):
         if state["setup"] is None:
@@ -2380,10 +2394,15 @@ def run_boot(name, sc, rom):
         if state["stronghold"] is None:
             state["stronghold"] = len(frames)
 
+    def on_load(uc, address, size, user):
+        if state["load"] is None:
+            state["load"] = len(frames)
+
     md.uc.hook_add(UC_HOOK_CODE, on_setup, None, LEVEL_SETUP, LEVEL_SETUP)
     md.uc.hook_add(UC_HOOK_CODE, on_reset, None, POOL_RESET, POOL_RESET)
     md.uc.hook_add(UC_HOOK_CODE, on_player, None, PLAYER_TASK, PLAYER_TASK)
     md.uc.hook_add(UC_HOOK_CODE, on_stronghold, None, STRONGHOLD, STRONGHOLD)
+    md.uc.hook_add(UC_HOOK_CODE, on_load, None, ENTRY_LOAD, ENTRY_LOAD)
     frames, level_frames, pictures, waiting = [], [], {}, []
     for k in range(sc["record"]):
         md.pad = pads[k] if k < len(pads) else 0
@@ -2393,8 +2412,6 @@ def run_boot(name, sc, rom):
             level_frames.append(level_frame(md, BOOT_LEVEL_LAYOUT, True))
             if len(level_frames) >= sc.get("level_frames", 1):
                 break
-        elif until == STRONGHOLD_STOP and state["stronghold"] is not None:
-            break
         else:
             frames.append(screen_frame(md, state["reset"]))
             state["reset"] = False
@@ -2404,14 +2421,16 @@ def run_boot(name, sc, rom):
                     waiting.append(pictures[k])
             if until == SETUP_STOP and state["setup"] is not None:
                 break
+            if until == LOAD_STOP and state["load"] is not None:
+                break
         for address, data in pokes.get(k, ()):
             md.write(address, data)
     if until == SETUP_STOP and state["setup"] is None:
         raise RuntimeError("%s: за %d кадров LevelSetup не было" % (name, sc["record"]))
     if until == ENTRY_STOP and len(level_frames) < sc.get("level_frames", 1):
         raise RuntimeError("%s: за %d кадров вход в уровень не состоялся" % (name, sc["record"]))
-    if until == STRONGHOLD_STOP and state["stronghold"] is None:
-        raise RuntimeError("%s: за %d кадров сцены оплота не было" % (name, sc["record"]))
+    if until == LOAD_STOP and state["load"] is None:
+        raise RuntimeError("%s: за %d кадров загрузки входа в уровень не было" % (name, sc["record"]))
     missing = wanted - set(pictures)
     if missing:
         raise RuntimeError("%s: нет картинок кадров %s" % (name, sorted(missing)))
@@ -2445,7 +2464,8 @@ def run_boot(name, sc, rom):
             **({"poke_at": [[k, "$%06X" % (a & 0xFFFFFF), d.hex().upper()] for k, a, d in sc["poke_at"]]}
                if sc.get("poke_at") else {}),
             **({"entry_frame": state["entry_frame"]} if until == ENTRY_STOP else {}),
-            **({"stronghold_frame": state["stronghold"]} if until == STRONGHOLD_STOP else {}),
+            **({"stronghold_frame": state["stronghold"]} if state["stronghold"] is not None else {}),
+            **({"load_frame": state["load"]} if until == LOAD_STOP else {}),
         },
         "layout": {"ram": [{"at": "$%08X" % at, "length": n, "what": what} for at, n, what in SCREEN_LAYOUT],
                    **({"level": {
